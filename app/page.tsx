@@ -95,8 +95,12 @@ export default function HomePage() {
                 <div className="flex flex-col items-end leading-tight mr-1">
                   <span className="text-sm font-semibold text-gray-800">{userInfo.name} 님</span>
                   <span className="text-xs font-bold text-blue-500">
-                    {isSuperAdmin ? '👑 SuperAdmin' : isCompany ? '🏢 Company' : isPro ? '⭐ Pro' : '체험판'}
-                  </span>
+  {isSuperAdmin ? '👑 SuperAdmin' 
+    : isCompany && userInfo?.companyDisplayName 
+      ? `🏢 ${userInfo.companyDisplayName}${userInfo.team ? ` · ${userInfo.team}` : ''}` 
+      : isPro ? '⭐ Pro' 
+      : '체험판'}
+</span>
                 </div>
 
                 {/* 기술 Q&A */}
@@ -109,15 +113,15 @@ export default function HomePage() {
                   </button>
                 )}
 
-                {/* 점검 현황 — Company 또는 SuperAdmin */}
-                {(isCompany || isSuperAdmin) && (
-                  <button
-                    onClick={() => router.push('/inspection')}
-                    className="text-sm font-bold bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded-xl transition-colors"
-                  >
-                    🔍 점검 현황
-                  </button>
-                )}
+                {/* 점검 현황 — Company 관리자 또는 SuperAdmin */}
+{(isCompany && isAdmin || isSuperAdmin) && (
+  <button
+    onClick={() => router.push('/inspection')}
+    className="text-sm font-bold bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded-xl transition-colors"
+  >
+    🔍 점검 현황
+  </button>
+)}
 
                 {/* 팀 관리 — Company 관리자 또는 SuperAdmin만 표시 */}
                 {(isCompany && isAdmin || isSuperAdmin) && (
@@ -140,14 +144,14 @@ export default function HomePage() {
 )}
 
                 {/* 대시보드 */}
-                {(isCompany || isSuperAdmin) && (
-                  <button
-                    onClick={() => router.push('/dashboard')}
-                    className="text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl transition-colors"
-                  >
-                    대시보드
-                  </button>
-                )}
+{(isCompany && isAdmin || isSuperAdmin) && (
+  <button
+    onClick={() => router.push('/dashboard')}
+    className="text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl transition-colors"
+  >
+    대시보드
+  </button>
+)}
 
                 {/* 슈퍼어드민 전용 */}
 {isSuperAdmin && (
