@@ -173,6 +173,7 @@ function JoinContent() {
         companyDisplayName: inviteInfo.companyDisplayName,
         team: inviteInfo.teamName,
         role: 'member',
+        useNewStructure: true,
         joinedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         ...(isPro && {
