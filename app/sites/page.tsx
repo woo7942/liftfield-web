@@ -3,11 +3,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, query, where, onSnapshot,
+  collection, query, onSnapshot,
   addDoc, updateDoc, deleteDoc, doc,
-  serverTimestamp, orderBy
+  serverTimestamp, orderBy, getDocs
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
@@ -21,7 +21,6 @@ interface UserInfo {
   team: string;
   role: string;
   superAdmin?: boolean;
-  subscription?: { plan: string; status: string };
 }
 
 interface SiteItem {
@@ -44,7 +43,7 @@ interface SiteItem {
   createdAt?: unknown;
 }
 
-// ─── 날짜 유틸 ───
+// ─── 유틸 ───
 function getDday(dateStr?: string): number | null {
   if (!dateStr) return null;
   const today = new Date();
@@ -54,16 +53,16 @@ function getDday(dateStr?: string): number | null {
   return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function getExpiryBadge(dateStr?: string) {
+function getExpiryInfo(dateStr?: string) {
   const d = getDday(dateStr);
   if (d === null) return null;
-  if (d <= 0) return { label: '만료', color: 'bg-red-100 text-red-600' };
-  if (d <= 30) return { label: `D-${d} 임박`, color: 'bg-orange-100 text-orange-600' };
-  if (d <= 60) return { label: `D-${d}`, color: 'bg-yellow-100 text-yellow-600' };
-  return { label: `D-${d}`, color: 'bg-green-100 text-green-600' };
+  if (d <= 0) return { label: '만료', color: 'bg-red-100 text-red-600', rowColor: 'bg-red-50', dot: '🔴', priority: 0 };
+  if (d <= 30) return { label: `D-${d}`, color: 'bg-orange-100 text-orange-600', rowColor: 'bg-orange-50', dot: '🟠', priority: 1 };
+  if (d <= 60) return { label: `D-${d}`, color: 'bg-yellow-100 text-yellow-600', rowColor: 'bg-yellow-50', dot: '🟡', priority: 2 };
+  return { label: `D-${d}`, color: 'bg-green-100 text-green-600', rowColor: '', dot: '🟢', priority: 3 };
 }
 
-// ─── 엑셀 헤더 매핑 ───
+// ─── 헤더 매핑 ───
 const HEADER_MAP: Record<string, keyof SiteItem> = {
   '현장명': 'name',
   '원장번호': 'contractNumber',
@@ -73,8 +72,6 @@ const HEADER_MAP: Record<string, keyof SiteItem> = {
   '계약일자': 'contractStart',
   '만료일자': 'contractEnd',
   '생활유통': 'contractType',
-  'FM': 'contractType',
-  'POG': 'contractType',
   '전화번호': 'phone',
   '계약자': 'contractPerson',
   '제약자': 'contractPerson',
@@ -86,6 +83,8 @@ const HEADER_MAP: Record<string, keyof SiteItem> = {
   '이메일': 'email',
 };
 
+type SortKey = 'name' | 'contractEnd' | 'maintenanceFee' | 'elevatorCount' | 'companyName';
+
 export default function SitesPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -95,12 +94,16 @@ export default function SitesPage() {
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
 
-  // 탭: contract(계약현장) | team(팀현장)
+  // 필터/정렬
   const [activeTab, setActiveTab] = useState<'contract' | 'team'>('contract');
-  const [selectedTeam, setSelectedTeam] = useState<string>('전체');
+  const [selectedTeam, setSelectedTeam] = useState('전체');
+  const [selectedType, setSelectedType] = useState('전체');
   const [searchText, setSearchText] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('contractEnd');
+  const [sortAsc, setSortAsc] = useState(true);
+  const [showUrgentOnly, setShowUrgentOnly] = useState(false);
 
-  // 엑셀 파싱 상태
+  // 엑셀
   const [showExcelModal, setShowExcelModal] = useState(false);
   const [excelSheets, setExcelSheets] = useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = useState('');
@@ -110,12 +113,10 @@ export default function SitesPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState('');
 
-  // 현장 추가 모달
+  // 추가/수정 모달
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState<Partial<SiteItem>>({});
   const [addLoading, setAddLoading] = useState(false);
-
-  // 현장 상세 모달
   const [selectedSite, setSelectedSite] = useState<SiteItem | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<SiteItem>>({});
@@ -143,7 +144,6 @@ export default function SitesPage() {
           team: data.team || '',
           role: data.role || 'member',
           superAdmin: data.superAdmin || false,
-          subscription: data.subscription || {},
         });
       } catch (e) {
         console.error(e);
@@ -164,32 +164,70 @@ export default function SitesPage() {
     const unsub = onSnapshot(q, (snap) => {
       const list: SiteItem[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
       setSites(list);
-      // 팀 목록 추출
       const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
       setTeams(Array.from(teamSet));
     });
     return () => unsub();
   }, [userInfo?.companyId]);
 
-  // ─── 필터링 ───
-  const filteredSites = sites.filter(s => {
-    // 탭 필터
-    if (activeTab === 'contract' && s.source === 'member') return false;
-    if (activeTab === 'team' && s.source !== 'member') return false;
-    // 팀원은 본인 팀만
-    if (!canEdit && s.teamName !== userInfo?.team) return false;
-    // 팀 필터 (관리자)
-    if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
-    // 검색
-    if (searchText && !s.name?.includes(searchText) && !s.companyName?.includes(searchText)) return false;
-    return true;
-  });
+  // ─── 필터 + 정렬 ───
+  const filteredSites = sites
+    .filter(s => {
+      if (activeTab === 'contract' && s.source === 'member') return false;
+      if (activeTab === 'team' && s.source !== 'member') return false;
+      if (!canEdit && s.teamName !== userInfo?.team) return false;
+      if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
+      if (selectedType !== '전체' && s.contractType !== selectedType) return false;
+      if (showUrgentOnly) {
+        const d = getDday(s.contractEnd);
+        if (d === null || d > 60) return false;
+      }
+      if (searchText) {
+        const q = searchText.toLowerCase();
+        return s.name?.toLowerCase().includes(q) ||
+          s.companyName?.toLowerCase().includes(q) ||
+          s.region?.toLowerCase().includes(q);
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      let valA: string | number = '';
+      let valB: string | number = '';
+      if (sortKey === 'contractEnd') {
+        valA = a.contractEnd || '9999';
+        valB = b.contractEnd || '9999';
+      } else if (sortKey === 'maintenanceFee') {
+        valA = a.maintenanceFee || 0;
+        valB = b.maintenanceFee || 0;
+      } else if (sortKey === 'elevatorCount') {
+        valA = a.elevatorCount || 0;
+        valB = b.elevatorCount || 0;
+      } else if (sortKey === 'name') {
+        valA = a.name || '';
+        valB = b.name || '';
+      } else if (sortKey === 'companyName') {
+        valA = a.companyName || '';
+        valB = b.companyName || '';
+      }
+      if (valA < valB) return sortAsc ? -1 : 1;
+      if (valA > valB) return sortAsc ? 1 : -1;
+      return 0;
+    });
 
-  // 만료 임박 현장 (관리자용)
-  const urgentSites = sites.filter(s => {
-    const d = getDday(s.contractEnd);
-    return d !== null && d <= 60;
-  }).sort((a, b) => (getDday(a.contractEnd) ?? 999) - (getDday(b.contractEnd) ?? 999));
+  // 만료 통계
+  const expiredCount = sites.filter(s => (getDday(s.contractEnd) ?? 999) <= 0).length;
+  const urgentCount = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; }).length;
+  const warningCount = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; }).length;
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) setSortAsc(!sortAsc);
+    else { setSortKey(key); setSortAsc(true); }
+  }
+
+  function SortIcon({ k }: { k: SortKey }) {
+    if (sortKey !== k) return <span className="text-gray-300 ml-1">↕</span>;
+    return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
+  }
 
   // ─── 엑셀 업로드 ───
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -213,24 +251,17 @@ export default function SitesPage() {
     const ws = wb.Sheets[sheetName];
     const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     if (rows.length < 2) { setExcelPreview([]); return; }
-
     const headers = (rows[0] as string[]).map(h => String(h).trim());
     const preview: Partial<SiteItem>[] = [];
-
     for (let i = 1; i < Math.min(rows.length, 6); i++) {
       const row = rows[i] as unknown[];
       const item: Partial<SiteItem> = {};
       headers.forEach((h, idx) => {
         const field = HEADER_MAP[h];
         if (field && row[idx] !== '') {
-          // 날짜 처리
           if (field === 'contractStart' || field === 'contractEnd') {
             const val = row[idx];
-            if (val instanceof Date) {
-              (item as Record<string, unknown>)[field] = val.toISOString().split('T')[0];
-            } else {
-              (item as Record<string, unknown>)[field] = String(val);
-            }
+            (item as Record<string, unknown>)[field] = val instanceof Date ? val.toISOString().split('T')[0] : String(val);
           } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
             (item as Record<string, unknown>)[field] = Number(row[idx]) || 0;
           } else {
@@ -248,6 +279,7 @@ export default function SitesPage() {
     if (excelWorkbook) previewSheet(excelWorkbook, sheetName);
   }
 
+  // ─── 엑셀 가져오기 (덮어쓰기 포함) ───
   async function handleImport() {
     if (!excelWorkbook || !userInfo?.companyId) return;
     setImporting(true);
@@ -258,15 +290,26 @@ export default function SitesPage() {
       if (rows.length < 2) { setImportResult('데이터가 없어요.'); return; }
 
       const headers = (rows[0] as string[]).map(h => String(h).trim());
-      let count = 0;
+
+      // 기존 현장 조회 (이름 기준)
+      const existingSnap = await getDocs(
+        collection(db, 'companies', userInfo.companyId, 'sites')
+      );
+      const existingMap = new Map<string, string>();
+      existingSnap.docs.forEach(d => {
+        const name = d.data().name;
+        if (name) existingMap.set(name, d.id);
+      });
+
+      let addCount = 0;
+      let updateCount = 0;
 
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i] as unknown[];
-        const item: Partial<SiteItem> & { source: string; teamName: string; createdAt: unknown; createdBy: string } = {
+        const item: Record<string, unknown> = {
           source: 'admin',
           teamName: importTeam || '',
-          createdAt: serverTimestamp(),
-          createdBy: userInfo.uid,
+          updatedAt: serverTimestamp(),
         };
 
         headers.forEach((h, idx) => {
@@ -274,25 +317,35 @@ export default function SitesPage() {
           if (field && row[idx] !== '') {
             if (field === 'contractStart' || field === 'contractEnd') {
               const val = row[idx];
-              if (val instanceof Date) {
-                (item as Record<string, unknown>)[field] = val.toISOString().split('T')[0];
-              } else {
-                (item as Record<string, unknown>)[field] = String(val);
-              }
+              item[field] = val instanceof Date ? val.toISOString().split('T')[0] : String(val);
             } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
-              (item as Record<string, unknown>)[field] = Number(row[idx]) || 0;
+              item[field] = Number(row[idx]) || 0;
             } else {
-              (item as Record<string, unknown>)[field] = String(row[idx]);
+              item[field] = String(row[idx]);
             }
           }
         });
 
-        if (item.name) {
-          await addDoc(collection(db, 'companies', userInfo.companyId, 'sites'), item);
-          count++;
+        if (!item.name) continue;
+
+        const existingId = existingMap.get(item.name as string);
+        if (existingId) {
+          // ✅ 덮어쓰기
+          await updateDoc(
+            doc(db, 'companies', userInfo.companyId, 'sites', existingId),
+            item
+          );
+          updateCount++;
+        } else {
+          // ✅ 새로 추가
+          await addDoc(
+            collection(db, 'companies', userInfo.companyId, 'sites'),
+            { ...item, createdAt: serverTimestamp(), createdBy: userInfo.uid }
+          );
+          addCount++;
         }
       }
-      setImportResult(`✅ ${count}개 현장이 등록됐어요!`);
+      setImportResult(`✅ 신규 ${addCount}개 추가 · 기존 ${updateCount}개 업데이트 완료!`);
     } catch (e) {
       console.error(e);
       setImportResult('❌ 가져오기 중 오류가 발생했어요.');
@@ -355,210 +408,285 @@ export default function SitesPage() {
       {/* 헤더 */}
       <header className="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-2">
-          <button onClick={() => router.push('/')} className="text-gray-500 hover:text-gray-700">←</button>
+          <button onClick={() => router.push('/')} className="text-gray-500 hover:text-gray-700 text-lg">←</button>
           <h1 className="font-bold text-lg">🏢 현장 관리</h1>
+          <span className="text-sm text-gray-400">({filteredSites.length}개)</span>
         </div>
-        <div className="flex gap-2">
-          {canEdit && (
-            <>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="text-sm bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg"
-              >
-                📊 엑셀 가져오기
-              </button>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg"
-              >
-                + 현장 추가
-              </button>
-            </>
-          )}
-        </div>
+        {canEdit && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="text-sm bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg font-medium"
+            >
+              📊 엑셀
+            </button>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium"
+            >
+              + 추가
+            </button>
+          </div>
+        )}
         <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 py-4">
+      <div className="max-w-7xl mx-auto px-4 py-4">
 
-        {/* 만료 임박 알림 (관리자만) */}
-        {canEdit && urgentSites.length > 0 && (
-          <div className="mb-4 bg-orange-50 border border-orange-200 rounded-xl p-3">
-            <p className="text-sm font-bold text-orange-700 mb-2">🔔 계약 만료 임박 ({urgentSites.length}건)</p>
-            <div className="flex flex-wrap gap-2">
-              {urgentSites.slice(0, 5).map(s => {
-                const badge = getExpiryBadge(s.contractEnd);
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => { setSelectedSite(s); setEditForm(s); }}
-                    className={`text-xs px-2 py-1 rounded-full font-medium ${badge?.color}`}
-                  >
-                    {s.name} {badge?.label}
-                  </button>
-                );
-              })}
-            </div>
+        {/* 만료 현황 카드 */}
+        {canEdit && (expiredCount > 0 || urgentCount > 0 || warningCount > 0) && (
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <button
+              onClick={() => { setShowUrgentOnly(true); }}
+              className="bg-red-50 border border-red-200 rounded-xl p-3 text-center hover:bg-red-100 transition-colors"
+            >
+              <p className="text-2xl font-bold text-red-600">{expiredCount}</p>
+              <p className="text-xs text-red-500 mt-0.5">🔴 만료</p>
+            </button>
+            <button
+              onClick={() => { setShowUrgentOnly(true); }}
+              className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center hover:bg-orange-100 transition-colors"
+            >
+              <p className="text-2xl font-bold text-orange-600">{urgentCount}</p>
+              <p className="text-xs text-orange-500 mt-0.5">🟠 30일 이내</p>
+            </button>
+            <button
+              onClick={() => { setShowUrgentOnly(true); }}
+              className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-center hover:bg-yellow-100 transition-colors"
+            >
+              <p className="text-2xl font-bold text-yellow-600">{warningCount}</p>
+              <p className="text-xs text-yellow-500 mt-0.5">🟡 60일 이내</p>
+            </button>
           </div>
         )}
 
-        {/* 탭 (관리자만) */}
+        {/* 탭 */}
         {canEdit && (
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => setActiveTab('contract')}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === 'contract' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}
-            >
-              📋 계약 현장
-            </button>
-            <button
-              onClick={() => setActiveTab('team')}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeTab === 'team' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}
-            >
-              🏢 팀 현장
-            </button>
+          <div className="flex gap-2 mb-3">
+            {(['contract', 'team'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-colors ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}
+              >
+                {tab === 'contract' ? '📋 계약 현장' : '🏢 팀 현장'}
+              </button>
+            ))}
           </div>
         )}
 
-        {/* 검색 + 팀 필터 */}
-        <div className="flex gap-2 mb-4">
+        {/* 검색 + 필터 */}
+        <div className="flex flex-wrap gap-2 mb-3">
           <input
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
-            placeholder="현장명 또는 업체명 검색..."
-            className="flex-1 border rounded-xl px-3 py-2 text-sm"
+            placeholder="현장명, 업체명, 지역 검색..."
+            className="flex-1 min-w-48 border rounded-xl px-3 py-2 text-sm bg-white"
           />
           {canEdit && (
             <select
               value={selectedTeam}
               onChange={e => setSelectedTeam(e.target.value)}
-              className="border rounded-xl px-3 py-2 text-sm"
+              className="border rounded-xl px-3 py-2 text-sm bg-white"
             >
               <option value="전체">전체 팀</option>
               {teams.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           )}
+          <select
+            value={selectedType}
+            onChange={e => setSelectedType(e.target.value)}
+            className="border rounded-xl px-3 py-2 text-sm bg-white"
+          >
+            <option value="전체">FM/POG 전체</option>
+            <option value="FM">FM (종합)</option>
+            <option value="POG">POG (일반)</option>
+          </select>
+          {showUrgentOnly && (
+            <button
+              onClick={() => setShowUrgentOnly(false)}
+              className="px-3 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-medium"
+            >
+              🔔 임박만 보는 중 ✕
+            </button>
+          )}
         </div>
 
-        {/* 현장 목록 */}
-        <div className="grid gap-3">
-          {filteredSites.length === 0 ? (
-            <div className="text-center py-16 text-gray-400">
-              <p className="text-4xl mb-2">🏢</p>
-              <p>현장이 없어요</p>
-              {canEdit && <p className="text-sm mt-1">엑셀 가져오기 또는 현장 추가를 해보세요!</p>}
+        {/* 테이블 */}
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-blue-600">
+                      현장명 <SortIcon k="name" />
+                    </button>
+                  </th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                    <button onClick={() => handleSort('companyName')} className="flex items-center hover:text-blue-600">
+                      계약업체 <SortIcon k="companyName" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">유형</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                    <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
+                      대수 <SortIcon k="elevatorCount" />
+                    </button>
+                  </th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                    <button onClick={() => handleSort('maintenanceFee')} className="flex items-center justify-end hover:text-blue-600">
+                      보수료 <SortIcon k="maintenanceFee" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                    <button onClick={() => handleSort('contractEnd')} className="flex items-center justify-center hover:text-blue-600">
+                      계약만료 <SortIcon k="contractEnd" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">D-day</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">지역</th>
+                  {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">팀</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSites.length === 0 ? (
+                  <tr>
+                    <td colSpan={canEdit ? 9 : 8} className="text-center py-16 text-gray-400">
+                      <p className="text-3xl mb-2">🏢</p>
+                      <p>현장이 없어요</p>
+                      {canEdit && <p className="text-xs mt-1">엑셀 가져오기 또는 현장 추가를 해보세요!</p>}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSites.map((site, idx) => {
+                    const expiry = getExpiryInfo(site.contractEnd);
+                    return (
+                      <tr
+                        key={site.id}
+                        onClick={() => { setSelectedSite(site); setEditForm(site); setEditMode(false); }}
+                        className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${expiry?.rowColor || (idx % 2 === 0 ? '' : 'bg-gray-50/50')}`}
+                      >
+                        <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">
+                          {site.name}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
+                          {site.companyName || '-'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          {site.contractType ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${site.contractType === 'FM' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'}`}>
+                              {site.contractType === 'FM' ? 'FM' : 'POG'}
+                            </span>
+                          ) : '-'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
+                          {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-gray-600 whitespace-nowrap">
+                          {site.maintenanceFee ? `${site.maintenanceFee.toLocaleString()}` : '-'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
+                          {site.contractEnd || '-'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          {expiry ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${expiry.color}`}>
+                              {expiry.label}
+                            </span>
+                          ) : '-'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
+                          {site.region || '-'}
+                        </td>
+                        {canEdit && (
+                          <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
+                            {site.teamName ? (
+                              <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full">{site.teamName}</span>
+                            ) : '-'}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 하단 합계 */}
+          {filteredSites.length > 0 && (
+            <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
+              <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
+              <span>승강기 <strong className="text-gray-700">{filteredSites.reduce((s, i) => s + (i.elevatorCount || 0), 0)}</strong>대</span>
+              <span>보수료 합계 <strong className="text-gray-700">{filteredSites.reduce((s, i) => s + (i.maintenanceFee || 0), 0).toLocaleString()}</strong>원</span>
             </div>
-          ) : (
-            filteredSites.map(site => {
-              const badge = getExpiryBadge(site.contractEnd);
-              return (
-                <button
-                  key={site.id}
-                  onClick={() => { setSelectedSite(site); setEditForm(site); setEditMode(false); }}
-                  className="bg-white rounded-xl border p-4 text-left hover:shadow-md transition-shadow"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-bold text-gray-800">{site.name}</span>
-                        {site.contractType && (
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${site.contractType === 'FM' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'}`}>
-                            {site.contractType === 'FM' ? '종합' : '일반'}
-                          </span>
-                        )}
-                        {badge && (
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.color}`}>
-                            {badge.label}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-sm text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
-                        {site.companyName && <span>🏭 {site.companyName}</span>}
-                        {site.elevatorCount && <span>🛗 {site.elevatorCount}대</span>}
-                        {site.region && <span>📍 {site.region}</span>}
-                        {site.teamName && <span>👥 {site.teamName}</span>}
-                      </div>
-                    </div>
-                    <span className="text-gray-300 text-lg">›</span>
-                  </div>
-                  {site.contractEnd && (
-                    <p className="text-xs text-gray-400 mt-1">계약 만료: {site.contractEnd}</p>
-                  )}
-                </button>
-              );
-            })
           )}
         </div>
       </div>
 
-      {/* ─── 엑셀 가져오기 모달 ─── */}
+      {/* ─── 엑셀 모달 ─── */}
       {showExcelModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5">
             <h2 className="font-bold text-lg mb-4">📊 엑셀 가져오기</h2>
-
-            {/* 시트 선택 */}
             <div className="mb-3">
               <label className="text-sm font-medium text-gray-700 mb-1 block">시트 선택</label>
               <div className="flex flex-wrap gap-2">
                 {excelSheets.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => handleSheetChange(s)}
-                    className={`text-sm px-3 py-1.5 rounded-lg border ${selectedSheet === s ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-600'}`}
-                  >
+                  <button key={s} onClick={() => handleSheetChange(s)}
+                    className={`text-sm px-3 py-1.5 rounded-lg border ${selectedSheet === s ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-600'}`}>
                     {s}
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* 팀 배정 */}
             <div className="mb-3">
-              <label className="text-sm font-medium text-gray-700 mb-1 block">팀 배정 (선택)</label>
-              <select
-                value={importTeam}
-                onChange={e => setImportTeam(e.target.value)}
-                className="w-full border rounded-xl px-3 py-2 text-sm"
-              >
+              <label className="text-sm font-medium text-gray-700 mb-1 block">팀 배정</label>
+              <select value={importTeam} onChange={e => setImportTeam(e.target.value)}
+                className="w-full border rounded-xl px-3 py-2 text-sm">
                 <option value="">팀 미배정</option>
                 {teams.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-
-            {/* 미리보기 */}
             {excelPreview.length > 0 && (
               <div className="mb-4">
                 <p className="text-sm font-medium text-gray-700 mb-1">미리보기 (상위 5개)</p>
-                <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-                  {excelPreview.map((item, i) => (
-                    <div key={i} className="text-xs text-gray-600 border-b pb-1 last:border-0">
-                      <span className="font-medium">{item.name}</span>
-                      {item.companyName && ` · ${item.companyName}`}
-                      {item.contractEnd && ` · 만료: ${item.contractEnd}`}
-                      {item.elevatorCount && ` · ${item.elevatorCount}대`}
-                    </div>
-                  ))}
+                <div className="bg-gray-50 rounded-xl overflow-hidden border">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="text-left px-2 py-1.5 text-gray-600">현장명</th>
+                        <th className="text-left px-2 py-1.5 text-gray-600">업체</th>
+                        <th className="text-center px-2 py-1.5 text-gray-600">만료일</th>
+                        <th className="text-center px-2 py-1.5 text-gray-600">대수</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {excelPreview.map((item, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="px-2 py-1.5 font-medium">{item.name}</td>
+                          <td className="px-2 py-1.5 text-gray-500">{item.companyName || '-'}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500">{item.contractEnd || '-'}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500">{item.elevatorCount || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
-
+            <div className="bg-blue-50 rounded-xl p-3 mb-4 text-xs text-blue-700">
+              💡 현장명이 같으면 <strong>덮어쓰기</strong>, 없으면 <strong>새로 추가</strong>돼요
+            </div>
             {importResult && (
               <p className="text-sm text-center mb-3 font-medium text-green-600">{importResult}</p>
             )}
-
             <div className="flex gap-2">
-              <button
-                onClick={() => { setShowExcelModal(false); setImportResult(''); }}
-                className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
-              >
-                닫기
-              </button>
-              <button
-                onClick={handleImport}
-                disabled={importing}
-                className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50"
-              >
+              <button onClick={() => { setShowExcelModal(false); setImportResult(''); }}
+                className="flex-1 py-2 border rounded-xl text-sm text-gray-600">닫기</button>
+              <button onClick={handleImport} disabled={importing}
+                className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                 {importing ? '가져오는 중...' : '가져오기'}
               </button>
             </div>
@@ -587,21 +715,17 @@ export default function SitesPage() {
               ].map(({ label, field, type }) => (
                 <div key={field}>
                   <label className="text-sm text-gray-600 mb-0.5 block">{label}</label>
-                  <input
-                    type={type}
+                  <input type={type}
                     value={(addForm as Record<string, unknown>)[field] as string || ''}
                     onChange={e => setAddForm(prev => ({ ...prev, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))}
-                    className="w-full border rounded-xl px-3 py-2 text-sm"
-                  />
+                    className="w-full border rounded-xl px-3 py-2 text-sm" />
                 </div>
               ))}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">계약 유형</label>
-                <select
-                  value={addForm.contractType || ''}
+                <select value={addForm.contractType || ''}
                   onChange={e => setAddForm(prev => ({ ...prev, contractType: e.target.value }))}
-                  className="w-full border rounded-xl px-3 py-2 text-sm"
-                >
+                  className="w-full border rounded-xl px-3 py-2 text-sm">
                   <option value="">선택</option>
                   <option value="FM">FM (종합)</option>
                   <option value="POG">POG (일반)</option>
@@ -609,11 +733,9 @@ export default function SitesPage() {
               </div>
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                <select
-                  value={addForm.teamName || ''}
+                <select value={addForm.teamName || ''}
                   onChange={e => setAddForm(prev => ({ ...prev, teamName: e.target.value }))}
-                  className="w-full border rounded-xl px-3 py-2 text-sm"
-                >
+                  className="w-full border rounded-xl px-3 py-2 text-sm">
                   <option value="">팀 미배정</option>
                   {teams.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
@@ -621,7 +743,8 @@ export default function SitesPage() {
             </div>
             <div className="flex gap-2 mt-4">
               <button onClick={() => setShowAddModal(false)} className="flex-1 py-2 border rounded-xl text-sm text-gray-600">취소</button>
-              <button onClick={handleAddSite} disabled={addLoading} className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+              <button onClick={handleAddSite} disabled={addLoading}
+                className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                 {addLoading ? '저장 중...' : '저장'}
               </button>
             </div>
@@ -637,10 +760,17 @@ export default function SitesPage() {
               <h2 className="font-bold text-lg">{selectedSite.name}</h2>
               <button onClick={() => setSelectedSite(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
-
             {!editMode ? (
               <>
-                <div className="space-y-2 text-sm">
+                {selectedSite.contractEnd && (() => {
+                  const expiry = getExpiryInfo(selectedSite.contractEnd);
+                  return expiry ? (
+                    <div className={`mb-3 text-center py-2 rounded-xl text-sm font-medium ${expiry.color}`}>
+                      {expiry.dot} 계약 만료 {expiry.label}
+                    </div>
+                  ) : null;
+                })()}
+                <div className="space-y-1.5 text-sm">
                   {[
                     { label: '계약업체', value: selectedSite.companyName },
                     { label: '계약 유형', value: selectedSite.contractType === 'FM' ? 'FM (종합)' : selectedSite.contractType === 'POG' ? 'POG (일반)' : selectedSite.contractType },
@@ -654,26 +784,19 @@ export default function SitesPage() {
                     { label: '지역', value: selectedSite.region },
                     { label: '주소', value: selectedSite.address },
                     { label: '배정 팀', value: selectedSite.teamName },
-                  ].filter(item => item.value).map(({ label, value }) => (
-                    <div key={label} className="flex justify-between py-1 border-b last:border-0">
+                  ].filter(i => i.value).map(({ label, value }) => (
+                    <div key={label} className="flex justify-between py-1.5 border-b last:border-0">
                       <span className="text-gray-500">{label}</span>
                       <span className="font-medium text-gray-800">{value}</span>
                     </div>
                   ))}
                 </div>
-                {/* 만료 배지 */}
-                {selectedSite.contractEnd && (() => {
-                  const badge = getExpiryBadge(selectedSite.contractEnd);
-                  return badge ? (
-                    <div className={`mt-3 text-center py-2 rounded-xl text-sm font-medium ${badge.color}`}>
-                      계약 만료 {badge.label}
-                    </div>
-                  ) : null;
-                })()}
                 {canEdit && (
                   <div className="flex gap-2 mt-4">
-                    <button onClick={() => handleDeleteSite(selectedSite.id)} className="flex-1 py-2 border border-red-300 text-red-500 rounded-xl text-sm">삭제</button>
-                    <button onClick={() => setEditMode(true)} className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium">수정</button>
+                    <button onClick={() => handleDeleteSite(selectedSite.id)}
+                      className="flex-1 py-2 border border-red-300 text-red-500 rounded-xl text-sm">삭제</button>
+                    <button onClick={() => setEditMode(true)}
+                      className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium">수정</button>
                   </div>
                 )}
               </>
@@ -695,21 +818,17 @@ export default function SitesPage() {
                   ].map(({ label, field, type }) => (
                     <div key={field}>
                       <label className="text-sm text-gray-600 mb-0.5 block">{label}</label>
-                      <input
-                        type={type}
+                      <input type={type}
                         value={(editForm as Record<string, unknown>)[field] as string || ''}
                         onChange={e => setEditForm(prev => ({ ...prev, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))}
-                        className="w-full border rounded-xl px-3 py-2 text-sm"
-                      />
+                        className="w-full border rounded-xl px-3 py-2 text-sm" />
                     </div>
                   ))}
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">계약 유형</label>
-                    <select
-                      value={editForm.contractType || ''}
+                    <select value={editForm.contractType || ''}
                       onChange={e => setEditForm(prev => ({ ...prev, contractType: e.target.value }))}
-                      className="w-full border rounded-xl px-3 py-2 text-sm"
-                    >
+                      className="w-full border rounded-xl px-3 py-2 text-sm">
                       <option value="">선택</option>
                       <option value="FM">FM (종합)</option>
                       <option value="POG">POG (일반)</option>
@@ -717,11 +836,9 @@ export default function SitesPage() {
                   </div>
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                    <select
-                      value={editForm.teamName || ''}
+                    <select value={editForm.teamName || ''}
                       onChange={e => setEditForm(prev => ({ ...prev, teamName: e.target.value }))}
-                      className="w-full border rounded-xl px-3 py-2 text-sm"
-                    >
+                      className="w-full border rounded-xl px-3 py-2 text-sm">
                       <option value="">팀 미배정</option>
                       {teams.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
