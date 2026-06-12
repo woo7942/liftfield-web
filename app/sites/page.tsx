@@ -71,7 +71,8 @@ const HEADER_MAP: Record<string, keyof SiteItem> = {
   '대수': 'elevatorCount',
   '계약일자': 'contractStart',
   '만료일자': 'contractEnd',
-  '생활유통': 'contractType',
+  '계약종류': 'contractType',  // ✅ 추가
+'계약 종류': 'contractType',
   '전화번호': 'phone',
   '계약자': 'contractPerson',
   '제약자': 'contractPerson',
@@ -179,7 +180,7 @@ const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contractType !== selectedType) return false;
-      // ✅ 교체
+      
 if (expiryFilter === 'expired') {
   const d = getDday(s.contractEnd);
   if (d === null || d > 0) return false;
@@ -444,7 +445,7 @@ if (expiryFilter === 'warning') {
       <div className="max-w-7xl mx-auto px-4 py-4">
 
         {/* 만료 현황 카드 */}
-        // ✅ 교체
+        
 <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
   {[
     { key: 'all', label: '전체', count: sites.filter(s => {
