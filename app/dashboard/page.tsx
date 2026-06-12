@@ -27,14 +27,16 @@ export default function DashboardPage() {
       const data = snap.data();
 
       // ✅ company 또는 superAdmin만 접근 가능
-      const isCompany = data.subscription?.plan === 'company';
-      const isSuperAdmin = data.superAdmin;
+      // ✅ 변경
+const isCompany = data.subscription?.plan === 'company';
+const isAdmin = data.role === 'admin';
+const isSuperAdmin = data.superAdmin === true;
 
-      if (!isCompany && !isSuperAdmin) {
-        // pro 또는 trial → 메인으로 이동
-        router.push('/');
-        return;
-      }
+if (!isSuperAdmin && !(isCompany && isAdmin)) {
+  router.push('/');
+  return;
+}
+
 
       setUserInfo({ uid: user.uid, ...data });
       setLoading(false);
