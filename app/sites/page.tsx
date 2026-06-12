@@ -71,8 +71,9 @@ const HEADER_MAP: Record<string, keyof SiteItem> = {
   '대수': 'elevatorCount',
   '계약일자': 'contractStart',
   '만료일자': 'contractEnd',
-  '계약종류': 'contractType',  // ✅ 추가
-'계약 종류': 'contractType',
+  '생활유통': 'contractType',
+  '계약종류': 'contractType',
+  '계약 종류': 'contractType',
   '전화번호': 'phone',
   '계약자': 'contractPerson',
   '제약자': 'contractPerson',
@@ -85,6 +86,7 @@ const HEADER_MAP: Record<string, keyof SiteItem> = {
 };
 
 type SortKey = 'name' | 'contractEnd' | 'maintenanceFee' | 'elevatorCount' | 'companyName';
+type ExpiryFilter = 'all' | 'expired' | 'urgent' | 'warning';
 
 export default function SitesPage() {
   const router = useRouter();
@@ -102,8 +104,7 @@ export default function SitesPage() {
   const [searchText, setSearchText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('contractEnd');
   const [sortAsc, setSortAsc] = useState(true);
-  type ExpiryFilter = 'all' | 'expired' | 'urgent' | 'warning';
-const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
 
   // 엑셀
   const [showExcelModal, setShowExcelModal] = useState(false);
@@ -180,19 +181,18 @@ const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contractType !== selectedType) return false;
-      
-if (expiryFilter === 'expired') {
-  const d = getDday(s.contractEnd);
-  if (d === null || d > 0) return false;
-}
-if (expiryFilter === 'urgent') {
-  const d = getDday(s.contractEnd);
-  if (d === null || d <= 0 || d > 30) return false;
-}
-if (expiryFilter === 'warning') {
-  const d = getDday(s.contractEnd);
-  if (d === null || d <= 30 || d > 60) return false;
-}
+      if (expiryFilter === 'expired') {
+        const d = getDday(s.contractEnd);
+        if (d === null || d > 0) return false;
+      }
+      if (expiryFilter === 'urgent') {
+        const d = getDday(s.contractEnd);
+        if (d === null || d <= 0 || d > 30) return false;
+      }
+      if (expiryFilter === 'warning') {
+        const d = getDday(s.contractEnd);
+        if (d === null || d <= 30 || d > 60) return false;
+      }
       if (searchText) {
         const q = searchText.toLowerCase();
         return s.name?.toLowerCase().includes(q) ||
@@ -226,9 +226,13 @@ if (expiryFilter === 'warning') {
     });
 
   // 만료 통계
-  const expiredCount = sites.filter(s => (getDday(s.contractEnd) ?? 999) <= 0).length;
-  const urgentCount = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; }).length;
-  const warningCount = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; }).length;
+  const tabSites = sites.filter(s => {
+    if (activeTab === 'contract') return s.source !== 'member';
+    return s.source === 'member';
+  });
+  const expiredCount = tabSites.filter(s => (getDday(s.contractEnd) ?? 999) <= 0).length;
+  const urgentCount = tabSites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; }).length;
+  const warningCount = tabSites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; }).length;
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -299,22 +303,15 @@ if (expiryFilter === 'warning') {
       const ws = excelWorkbook.Sheets[selectedSheet];
       const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
       if (rows.length < 2) { setImportResult('데이터가 없어요.'); return; }
-
       const headers = (rows[0] as string[]).map(h => String(h).trim());
-
-      // 기존 현장 조회 (이름 기준)
-      const existingSnap = await getDocs(
-        collection(db, 'companies', userInfo.companyId, 'sites')
-      );
+      const existingSnap = await getDocs(collection(db, 'companies', userInfo.companyId, 'sites'));
       const existingMap = new Map<string, string>();
       existingSnap.docs.forEach(d => {
         const name = d.data().name;
         if (name) existingMap.set(name, d.id);
       });
-
       let addCount = 0;
       let updateCount = 0;
-
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i] as unknown[];
         const item: Record<string, unknown> = {
@@ -322,7 +319,6 @@ if (expiryFilter === 'warning') {
           teamName: importTeam || '',
           updatedAt: serverTimestamp(),
         };
-
         headers.forEach((h, idx) => {
           const field = HEADER_MAP[h];
           if (field && row[idx] !== '') {
@@ -336,23 +332,14 @@ if (expiryFilter === 'warning') {
             }
           }
         });
-
         if (!item.name) continue;
-
         const existingId = existingMap.get(item.name as string);
         if (existingId) {
-          // ✅ 덮어쓰기
-          await updateDoc(
-            doc(db, 'companies', userInfo.companyId, 'sites', existingId),
-            item
-          );
+          await updateDoc(doc(db, 'companies', userInfo.companyId, 'sites', existingId), item);
           updateCount++;
         } else {
-          // ✅ 새로 추가
-          await addDoc(
-            collection(db, 'companies', userInfo.companyId, 'sites'),
-            { ...item, createdAt: serverTimestamp(), createdBy: userInfo.uid }
-          );
+          await addDoc(collection(db, 'companies', userInfo.companyId, 'sites'),
+            { ...item, createdAt: serverTimestamp(), createdBy: userInfo.uid });
           addCount++;
         }
       }
@@ -408,6 +395,31 @@ if (expiryFilter === 'warning') {
     setSelectedSite(null);
   }
 
+  // ─── 전체 삭제 ───
+  async function handleDeleteAll() {
+    if (!userInfo?.companyId) return;
+    const confirm1 = confirm('⚠️ 현재 탭의 현장을 전부 삭제할까요?\n이 작업은 되돌릴 수 없어요!');
+    if (!confirm1) return;
+    const input = prompt('확인을 위해 "전체삭제" 를 입력해주세요:');
+    if (input !== '전체삭제') {
+      alert('취소됐어요.');
+      return;
+    }
+    try {
+      const targetSites = sites.filter(s => {
+        if (activeTab === 'contract') return s.source !== 'member';
+        return s.source === 'member';
+      });
+      for (const site of targetSites) {
+        await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', site.id));
+      }
+      alert(`✅ ${targetSites.length}개 현장이 삭제됐어요.`);
+    } catch (e) {
+      console.error(e);
+      alert('❌ 삭제 중 오류가 발생했어요.');
+    }
+  }
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <p className="text-gray-500">로딩 중...</p>
@@ -437,6 +449,12 @@ if (expiryFilter === 'warning') {
             >
               + 추가
             </button>
+            <button
+              onClick={handleDeleteAll}
+              className="text-sm bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg font-medium"
+            >
+              🗑️ 전체삭제
+            </button>
           </div>
         )}
         <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
@@ -444,41 +462,13 @@ if (expiryFilter === 'warning') {
 
       <div className="max-w-7xl mx-auto px-4 py-4">
 
-        {/* 만료 현황 카드 */}
-        
-<div className="flex gap-2 mb-3 overflow-x-auto pb-1">
-  {[
-    { key: 'all', label: '전체', count: sites.filter(s => {
-        if (activeTab === 'contract' && s.source === 'member') return false;
-        if (activeTab === 'team' && s.source !== 'member') return false;
-        return true;
-      }).length, color: 'bg-gray-100 text-gray-700', activeColor: 'bg-gray-700 text-white' },
-    { key: 'expired', label: '🔴 만료', count: expiredCount, color: 'bg-red-50 text-red-500', activeColor: 'bg-red-500 text-white' },
-    { key: 'urgent', label: '🟠 30일', count: urgentCount, color: 'bg-orange-50 text-orange-500', activeColor: 'bg-orange-500 text-white' },
-    { key: 'warning', label: '🟡 60일', count: warningCount, color: 'bg-yellow-50 text-yellow-500', activeColor: 'bg-yellow-400 text-white' },
-  ].map(({ key, label, count, color, activeColor }) => (
-    <button
-      key={key}
-      onClick={() => setExpiryFilter(key as ExpiryFilter)}
-      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors border
-        ${expiryFilter === key ? activeColor + ' border-transparent' : color + ' border-transparent'}`}
-    >
-      {label}
-      <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold
-        ${expiryFilter === key ? 'bg-white/30' : 'bg-white'}`}>
-        {count}
-      </span>
-    </button>
-  ))}
-</div>
-
         {/* 탭 */}
         {canEdit && (
           <div className="flex gap-2 mb-3">
             {(['contract', 'team'] as const).map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => { setActiveTab(tab); setExpiryFilter('all'); }}
                 className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-colors ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}
               >
                 {tab === 'contract' ? '📋 계약 현장' : '🏢 팀 현장'}
@@ -486,6 +476,28 @@ if (expiryFilter === 'warning') {
             ))}
           </div>
         )}
+
+        {/* 만료 필터 탭 */}
+        <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+          {[
+            { key: 'all', label: '전체', count: tabSites.length, color: 'bg-gray-100 text-gray-700', activeColor: 'bg-gray-700 text-white' },
+            { key: 'expired', label: '🔴 만료', count: expiredCount, color: 'bg-red-50 text-red-500', activeColor: 'bg-red-500 text-white' },
+            { key: 'urgent', label: '🟠 30일', count: urgentCount, color: 'bg-orange-50 text-orange-500', activeColor: 'bg-orange-500 text-white' },
+            { key: 'warning', label: '🟡 60일', count: warningCount, color: 'bg-yellow-50 text-yellow-500', activeColor: 'bg-yellow-400 text-white' },
+          ].map(({ key, label, count, color, activeColor }) => (
+            <button
+              key={key}
+              onClick={() => setExpiryFilter(key as ExpiryFilter)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors border border-transparent
+                ${expiryFilter === key ? activeColor : color}`}
+            >
+              {label}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${expiryFilter === key ? 'bg-white/30' : 'bg-white'}`}>
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
 
         {/* 검색 + 필터 */}
         <div className="flex flex-wrap gap-2 mb-3">
@@ -514,7 +526,6 @@ if (expiryFilter === 'warning') {
             <option value="FM">FM (종합)</option>
             <option value="POG">POG (일반)</option>
           </select>
-          
         </div>
 
         {/* 테이블 */}
@@ -572,12 +583,8 @@ if (expiryFilter === 'warning') {
                         onClick={() => { setSelectedSite(site); setEditForm(site); setEditMode(false); }}
                         className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${expiry?.rowColor || (idx % 2 === 0 ? '' : 'bg-gray-50/50')}`}
                       >
-                        <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">
-                          {site.name}
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
-                          {site.companyName || '-'}
-                        </td>
+                        <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{site.name}</td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{site.companyName || '-'}</td>
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           {site.contractType ? (
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${site.contractType === 'FM' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'}`}>
