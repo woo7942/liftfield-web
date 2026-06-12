@@ -61,48 +61,41 @@ function JoinContent() {
   }, [searchParams]);
 
   // ─── 인증 확인 ───
-useEffect(() => {
-  const unsub = onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-      // ✅ 코드 파라미터 포함해서 로그인 후 돌아오도록
-      const code = searchParams.get('code') || '';
-      router.push(`/login?redirect=${encodeURIComponent(`/join?code=${code}`)}`);
-      return;
-    }
-
-    try {
-      const { getDoc } = await import('firebase/firestore');
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) {
-        router.push('/login'); // ✅ 문서 없으면 그냥 로그인으로
-        return;
-      }
-      const data = snap.data();
-
-      if (data.companyId && data.companyId.trim() !== '') {
-        alert('이미 회사에 소속되어 있어요. 팀 변경은 관리자에게 문의하세요.');
-        router.push('/');
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        const code = searchParams.get('code') || '';
+        router.push(`/login?redirect=${encodeURIComponent(`/join?code=${code}`)}`);
         return;
       }
 
-      setUserInfo({
-        uid: user.uid,
-        name: data.name || data.displayName || '',
-        email: user.email || '',
-        companyId: data.companyId || '',
-        team: data.team || '',
-        role: data.role || 'member',
-        subscription: data.subscription || { plan: 'trial', status: 'active' },
-      });
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  });
-  return () => unsub();
-}, [router]);
+      try {
+        const { getDoc } = await import('firebase/firestore');
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (!snap.exists()) {
+          router.push('/login');
+          return;
+        }
+        const data = snap.data();
 
+        // ✅ 차단 로직 제거 — 덮어쓰기 허용
+        setUserInfo({
+          uid: user.uid,
+          name: data.name || data.displayName || '',
+          email: user.email || '',
+          companyId: data.companyId || '',
+          team: data.team || '',
+          role: data.role || 'member',
+          subscription: data.subscription || { plan: 'trial', status: 'active' },
+        });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, [router]);
 
   // ─── 초대코드 검증 ───
   const handleVerify = async () => {
@@ -172,6 +165,9 @@ useEffect(() => {
     setError('');
 
     try {
+      // ✅ Pro 구독자면 company 플랜으로 자동 전환
+      const isPro = userInfo.subscription?.plan === 'pro';
+
       await updateDoc(doc(db, 'users', userInfo.uid), {
         companyId: inviteInfo.companyId,
         companyDisplayName: inviteInfo.companyDisplayName,
@@ -179,6 +175,13 @@ useEffect(() => {
         role: 'member',
         joinedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        ...(isPro && {
+          subscription: {
+            plan: 'company',
+            status: 'active',
+            movedFromPro: true,
+          },
+        }),
       });
 
       await updateDoc(doc(db, 'invitations', inviteInfo.docId), {
@@ -327,11 +330,19 @@ useEffect(() => {
               )}
             </div>
 
+            {/* ✅ 안내 문구 */}
             <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3 mb-5">
               <p className="text-xs text-yellow-700">
                 ⚠️ 합류 후에는 현재 계정이 위 회사 / 팀으로 자동 연결됩니다.
-                기존 개인 데이터는 유지되지만 팀 기반으로 전환됩니다.
+                기존 소속 정보는 새 회사/팀으로 덮어써집니다.
               </p>
+              {/* ✅ Pro 구독자 안내 */}
+              {userInfo?.subscription?.plan === 'pro' && (
+                <p className="text-xs text-orange-600 mt-2 font-semibold">
+                  📱 Pro 구독 중이시네요! 팀 합류 후 앱(App Store / Google Play)에서
+                  Pro 구독을 직접 취소해주세요. 취소하지 않으면 중복 결제될 수 있어요.
+                </p>
+              )}
             </div>
 
             {error && (
