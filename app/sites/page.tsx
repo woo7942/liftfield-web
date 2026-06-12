@@ -101,7 +101,8 @@ export default function SitesPage() {
   const [searchText, setSearchText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('contractEnd');
   const [sortAsc, setSortAsc] = useState(true);
-  const [showUrgentOnly, setShowUrgentOnly] = useState(false);
+  type ExpiryFilter = 'all' | 'expired' | 'urgent' | 'warning';
+const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
 
   // 엑셀
   const [showExcelModal, setShowExcelModal] = useState(false);
@@ -178,10 +179,19 @@ export default function SitesPage() {
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contractType !== selectedType) return false;
-      if (showUrgentOnly) {
-        const d = getDday(s.contractEnd);
-        if (d === null || d > 60) return false;
-      }
+      // ✅ 교체
+if (expiryFilter === 'expired') {
+  const d = getDday(s.contractEnd);
+  if (d === null || d > 0) return false;
+}
+if (expiryFilter === 'urgent') {
+  const d = getDday(s.contractEnd);
+  if (d === null || d <= 0 || d > 30) return false;
+}
+if (expiryFilter === 'warning') {
+  const d = getDday(s.contractEnd);
+  if (d === null || d <= 30 || d > 60) return false;
+}
       if (searchText) {
         const q = searchText.toLowerCase();
         return s.name?.toLowerCase().includes(q) ||
@@ -434,31 +444,32 @@ export default function SitesPage() {
       <div className="max-w-7xl mx-auto px-4 py-4">
 
         {/* 만료 현황 카드 */}
-        {canEdit && (expiredCount > 0 || urgentCount > 0 || warningCount > 0) && (
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <button
-              onClick={() => { setShowUrgentOnly(true); }}
-              className="bg-red-50 border border-red-200 rounded-xl p-3 text-center hover:bg-red-100 transition-colors"
-            >
-              <p className="text-2xl font-bold text-red-600">{expiredCount}</p>
-              <p className="text-xs text-red-500 mt-0.5">🔴 만료</p>
-            </button>
-            <button
-              onClick={() => { setShowUrgentOnly(true); }}
-              className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center hover:bg-orange-100 transition-colors"
-            >
-              <p className="text-2xl font-bold text-orange-600">{urgentCount}</p>
-              <p className="text-xs text-orange-500 mt-0.5">🟠 30일 이내</p>
-            </button>
-            <button
-              onClick={() => { setShowUrgentOnly(true); }}
-              className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-center hover:bg-yellow-100 transition-colors"
-            >
-              <p className="text-2xl font-bold text-yellow-600">{warningCount}</p>
-              <p className="text-xs text-yellow-500 mt-0.5">🟡 60일 이내</p>
-            </button>
-          </div>
-        )}
+        // ✅ 교체
+<div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+  {[
+    { key: 'all', label: '전체', count: sites.filter(s => {
+        if (activeTab === 'contract' && s.source === 'member') return false;
+        if (activeTab === 'team' && s.source !== 'member') return false;
+        return true;
+      }).length, color: 'bg-gray-100 text-gray-700', activeColor: 'bg-gray-700 text-white' },
+    { key: 'expired', label: '🔴 만료', count: expiredCount, color: 'bg-red-50 text-red-500', activeColor: 'bg-red-500 text-white' },
+    { key: 'urgent', label: '🟠 30일', count: urgentCount, color: 'bg-orange-50 text-orange-500', activeColor: 'bg-orange-500 text-white' },
+    { key: 'warning', label: '🟡 60일', count: warningCount, color: 'bg-yellow-50 text-yellow-500', activeColor: 'bg-yellow-400 text-white' },
+  ].map(({ key, label, count, color, activeColor }) => (
+    <button
+      key={key}
+      onClick={() => setExpiryFilter(key as ExpiryFilter)}
+      className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors border
+        ${expiryFilter === key ? activeColor + ' border-transparent' : color + ' border-transparent'}`}
+    >
+      {label}
+      <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold
+        ${expiryFilter === key ? 'bg-white/30' : 'bg-white'}`}>
+        {count}
+      </span>
+    </button>
+  ))}
+</div>
 
         {/* 탭 */}
         {canEdit && (
@@ -502,14 +513,7 @@ export default function SitesPage() {
             <option value="FM">FM (종합)</option>
             <option value="POG">POG (일반)</option>
           </select>
-          {showUrgentOnly && (
-            <button
-              onClick={() => setShowUrgentOnly(false)}
-              className="px-3 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-medium"
-            >
-              🔔 임박만 보는 중 ✕
-            </button>
-          )}
+          
         </div>
 
         {/* 테이블 */}
