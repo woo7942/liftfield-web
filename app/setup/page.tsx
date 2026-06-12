@@ -3,18 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
-
-function generateCompanyId(name: string): string {
-  const base = name
-    .replace(/\s/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9가-힣]/g, '')
-    .substring(0, 6);
-  const rand = Math.random().toString(36).substring(2, 6);
-  return `${base}${rand}`;
-}
 
 export default function SetupPage() {
   const router = useRouter();
@@ -66,11 +56,21 @@ export default function SetupPage() {
     setError('');
 
     try {
-      const companyId = generateCompanyId(companyName);
+      // ✅ companies 컬렉션에 문서 생성 후 실제 문서 ID 사용
+      const companyRef = await addDoc(collection(db, 'companies'), {
+        companyName: companyName.trim(),
+        ownerUid: uid,
+        ownerName: userName,
+        plan,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
 
+      // ✅ 실제 companies 문서 ID를 companyId로 저장
       await updateDoc(doc(db, 'users', uid), {
-        companyId,
+        companyId: companyRef.id,
         companyDisplayName: companyName.trim(),
+        useNewStructure: true,
         updatedAt: serverTimestamp(),
       });
 
@@ -169,26 +169,15 @@ export default function SetupPage() {
           </button>
 
           {/* 초대코드로 합류 옵션 */}
-<div className="text-center pt-1">
-  <p className="text-xs text-gray-400 mb-1.5">이미 회사에 초대받으셨나요?</p>
-  <button
-    onClick={() => router.push('/join')}
-    className="text-sm font-bold text-orange-500 hover:text-orange-600 transition-colors"
-  >
-    🏢 초대코드로 팀 합류하기
-  </button>
-</div>
-
-<p className="text-center text-xs text-gray-400">
-  나중에 설정하려면{' '}
-  <button
-    onClick={() => router.push('/')}
-    className="text-blue-500 hover:underline"
-  >
-    건너뛰기
-  </button>
-</p>
-
+          <div className="text-center pt-1">
+            <p className="text-xs text-gray-400 mb-1.5">이미 회사에 초대받으셨나요?</p>
+            <button
+              onClick={() => router.push('/join')}
+              className="text-sm font-bold text-orange-500 hover:text-orange-600 transition-colors"
+            >
+              🏢 초대코드로 팀 합류하기
+            </button>
+          </div>
 
           <p className="text-center text-xs text-gray-400">
             나중에 설정하려면{' '}
