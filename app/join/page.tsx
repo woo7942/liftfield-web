@@ -13,6 +13,7 @@ import {
   updateDoc,
   serverTimestamp,
   increment,
+  getDoc,
 } from 'firebase/firestore';
 
 interface UserInfo {
@@ -36,7 +37,6 @@ interface InviteInfo {
   expireAt: Date | null;
 }
 
-// ─── useSearchParams는 Suspense 안에서만 사용 가능 ───
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -64,13 +64,12 @@ function JoinContent() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        const code = searchParams.get('code') || '';
-        router.push(`/login?redirect=${encodeURIComponent(`/join?code=${code}`)}`);
+        const codeParam = searchParams.get('code') || '';
+        router.push(`/login?redirect=${encodeURIComponent(`/join?code=${codeParam}`)}`);
         return;
       }
 
       try {
-        const { getDoc } = await import('firebase/firestore');
         const snap = await getDoc(doc(db, 'users', user.uid));
         if (!snap.exists()) {
           router.push('/login');
@@ -78,7 +77,6 @@ function JoinContent() {
         }
         const data = snap.data();
 
-        // ✅ 차단 로직 제거 — 덮어쓰기 허용
         setUserInfo({
           uid: user.uid,
           name: data.name || data.displayName || '',
@@ -165,8 +163,9 @@ function JoinContent() {
     setError('');
 
     try {
-      // ✅ Pro 구독자면 company 플랜으로 자동 전환
-      const isPro = userInfo.subscription?.plan === 'pro';
+      // ✅ 모든 합류자 company 플랜으로 전환
+      // Pro였던 경우 movedFromPro: true 기록
+      const wasPro = userInfo.subscription?.plan === 'pro';
 
       await updateDoc(doc(db, 'users', userInfo.uid), {
         companyId: inviteInfo.companyId,
@@ -176,13 +175,11 @@ function JoinContent() {
         useNewStructure: true,
         joinedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        ...(isPro && {
-          subscription: {
-            plan: 'company',
-            status: 'active',
-            movedFromPro: true,
-          },
-        }),
+        subscription: {
+          plan: 'company',
+          status: 'active',
+          movedFromPro: wasPro,
+        },
       });
 
       await updateDoc(doc(db, 'invitations', inviteInfo.docId), {
@@ -198,7 +195,6 @@ function JoinContent() {
     }
   };
 
-  // ─── 로딩 ───
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -242,7 +238,6 @@ function JoinContent() {
               </div>
             )}
 
-            {/* URL로 코드 자동 입력됐을 때 안내 */}
             {searchParams.get('code') && (
               <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-4">
                 <p className="text-xs text-green-700 text-center">
@@ -331,13 +326,11 @@ function JoinContent() {
               )}
             </div>
 
-            {/* ✅ 안내 문구 */}
             <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3 mb-5">
               <p className="text-xs text-yellow-700">
                 ⚠️ 합류 후에는 현재 계정이 위 회사 / 팀으로 자동 연결됩니다.
                 기존 소속 정보는 새 회사/팀으로 덮어써집니다.
               </p>
-              {/* ✅ Pro 구독자 안내 */}
               {userInfo?.subscription?.plan === 'pro' && (
                 <p className="text-xs text-orange-600 mt-2 font-semibold">
                   📱 Pro 구독 중이시네요! 팀 합류 후 앱(App Store / Google Play)에서
@@ -404,7 +397,6 @@ function JoinContent() {
           </div>
         )}
 
-        {/* 뒤로가기 */}
         {step === 'input' && (
           <p className="text-center mt-4">
             <button
@@ -421,7 +413,6 @@ function JoinContent() {
   );
 }
 
-// ─── Suspense 래핑 필수 (useSearchParams 때문) ───
 export default function JoinPage() {
   return (
     <Suspense fallback={
