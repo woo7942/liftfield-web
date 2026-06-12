@@ -95,7 +95,7 @@ function JoinContent() {
       }
     });
     return () => unsub();
-  }, [router]);
+  }, [router, searchParams]);
 
   // ─── 초대코드 검증 ───
   const handleVerify = async () => {
