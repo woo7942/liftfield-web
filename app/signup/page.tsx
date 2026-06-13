@@ -14,6 +14,7 @@ import {
   where,
   getDocs,
   serverTimestamp,
+  addDoc,
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 
@@ -55,16 +56,6 @@ function calcCompanyPrice(members: number) {
   else if (members >= 20) discount = 0.1;
   else if (members >= 10) discount = 0.05;
   return Math.round((base * (1 - discount) + webFee) / 100) * 100;
-}
-
-function generateCompanyId(name: string): string {
-  const base = name
-    .replace(/\s/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9가-힣]/g, '')
-    .substring(0, 6);
-  const rand = Math.random().toString(36).substring(2, 6);
-  return `${base}${rand}`;
 }
 
 function defaultPermissions(plan: string) {
@@ -112,7 +103,6 @@ export default function SignupPage() {
   // Step 2
   const [selectedPlan, setSelectedPlan] = useState<'trial' | 'pro' | 'company'>('trial');
   const [companyName, setCompanyName] = useState('');
-  const [firstTeamName, setFirstTeamName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState(5);
 
   // Step 3
@@ -169,7 +159,7 @@ export default function SignupPage() {
     }
   };
 
-  // ── Step 1 유효성 검사 (Firestore 조회 없음) ──
+  // ── Step 1 유효성 검사 ──
   const validateStep1 = () => {
     if (!name.trim()) return '이름을 입력해주세요.';
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
@@ -185,7 +175,6 @@ export default function SignupPage() {
   const validateStep2 = () => {
     if (selectedPlan === 'company') {
       if (!companyName.trim()) return '회사명을 입력해주세요.';
-      if (!firstTeamName.trim()) return '첫 번째 팀 이름을 입력해주세요.';
     }
     return null;
   };
@@ -200,7 +189,6 @@ export default function SignupPage() {
     setError('');
 
     try {
-      // Firebase Auth 생성 — 이메일 중복 시 여기서 에러 발생
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -242,7 +230,6 @@ export default function SignupPage() {
           createdFrom: 'web',
         });
 
-        // usedCount 증가
         const { doc: fsDoc, updateDoc, increment } = await import('firebase/firestore');
         await updateDoc(fsDoc(db, 'invitations', inviteInfo.docId), {
           usedCount: increment(1),
@@ -282,7 +269,6 @@ export default function SignupPage() {
       } else if (selectedPlan === 'company') {
         const endDate = new Date(now);
         endDate.setMonth(endDate.getMonth() + 1);
-        companyId = generateCompanyId(companyName);
         maxMembers = selectedMembers;
         subscriptionData = {
           plan: 'company',
@@ -293,6 +279,18 @@ export default function SignupPage() {
           endDate,
           maxMembers,
         };
+
+        // ✅ companies 컬렉션에 문서 생성 후 실제 ID 사용
+        const companyRef = await addDoc(collection(db, 'companies'), {
+          companyName: companyName.trim(),
+          ownerUid: uid,
+          ownerName: name.trim(),
+          plan: 'company',
+          maxMembers,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        companyId = companyRef.id; // ✅ 실제 Firestore 문서 ID
       }
 
       await setDoc(doc(db, 'users', uid), {
@@ -301,11 +299,10 @@ export default function SignupPage() {
         name: name.trim(),
         phone: phone.trim(),
         role: 'admin',
-        team: selectedPlan === 'company' ? firstTeamName.trim() : '',
+        team: '',
         status: 'approved',
         companyId: selectedPlan === 'company' ? companyId : '',
-        companyDisplayName:
-          selectedPlan === 'company' ? companyName.trim() : '',
+        companyDisplayName: selectedPlan === 'company' ? companyName.trim() : '',
         superAdmin: false,
         useNewStructure: true,
         subscription: subscriptionData,
@@ -393,7 +390,6 @@ export default function SignupPage() {
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6 text-white">
           <h1 className="text-2xl font-bold">🏗️ LiftField 회원가입</h1>
           <p className="text-blue-100 text-sm mt-1">승강기 현장 관리 플랫폼</p>
-          {/* 스텝 인디케이터 */}
           <div className="flex items-center gap-2 mt-4">
             {[1, 2, 3].map((s) => (
               <div key={s} className="flex items-center gap-2">
@@ -607,22 +603,6 @@ export default function SignupPage() {
 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
-                      첫 번째 팀 이름 *
-                    </label>
-                    <input
-                      type="text"
-                      value={firstTeamName}
-                      onChange={(e) => setFirstTeamName(e.target.value)}
-                      placeholder="예: 서울팀, 본사팀, 1팀"
-                      className="w-full border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      로그인 후 팀 관리에서 팀을 추가하고 초대코드를 발급할 수 있어요.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
                       최대 인원
                     </label>
                     <div className="grid grid-cols-3 gap-2">
@@ -709,10 +689,6 @@ export default function SignupPage() {
                         <p>
                           <span className="text-gray-500">회사명:</span>{' '}
                           <span className="font-medium">{companyName}</span>
-                        </p>
-                        <p>
-                          <span className="text-gray-500">첫 팀:</span>{' '}
-                          <span className="font-medium">{firstTeamName}</span>
                         </p>
                         <p>
                           <span className="text-gray-500">최대 인원:</span>{' '}
