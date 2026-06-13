@@ -165,7 +165,15 @@ export default function SitesPage() {
       orderBy('createdAt', 'desc')
     );
     const unsub = onSnapshot(q, (snap) => {
-      const list: SiteItem[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
+      const list: SiteItem[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          name: data.name || data.siteName || '',
+          teamName: data.teamName || data.team || '',
+        } as SiteItem;
+      });
       setSites(list);
       const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
       setTeams(Array.from(teamSet));
@@ -176,8 +184,10 @@ export default function SitesPage() {
   // ─── 필터 + 정렬 ───
   const filteredSites = sites
     .filter(s => {
-      if (activeTab === 'contract' && s.source === 'member') return false;
-if (activeTab === 'team' && s.source !== 'member') return false;
+      // ✅ 이 두 줄로 교체
+if (activeTab === 'contract' && s.source === 'member') return false;
+if (activeTab === 'team' && s.source === 'admin') return false;
+
 
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
