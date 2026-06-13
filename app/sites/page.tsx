@@ -148,6 +148,7 @@ export default function SitesPage() {
           role: data.role || 'member',
           superAdmin: data.superAdmin || false,
         });
+        console.log('✅ userInfo 설정:', user.uid, data.companyId, data.role);
       } catch (e) {
         console.error(e);
       } finally {
