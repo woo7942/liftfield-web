@@ -177,10 +177,8 @@ export default function SitesPage() {
   const filteredSites = sites
     .filter(s => {
       if (activeTab === 'contract' && s.source === 'member') return false;
-      
-if (activeTab === 'team' && s.source === 'admin') return false;
+if (activeTab === 'team' && s.source !== 'member') return false;
 
-if (activeTab === 'contract' && (s.source === 'member' || !s.source)) return false;
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contractType !== selectedType) return false;
