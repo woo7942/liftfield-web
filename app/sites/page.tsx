@@ -109,6 +109,7 @@ export default function SitesPage() {
   // 호기
   const [siteElevators, setSiteElevators] = useState<ElevatorItem[]>([]);
   const [elevatorsLoading, setElevatorsLoading] = useState(false);
+  const [totalElevatorCount, setTotalElevatorCount] = useState(0);
 
   // 필터/정렬
   const [activeTab, setActiveTab] = useState<'contract' | 'team'>('contract');
@@ -177,7 +178,7 @@ export default function SitesPage() {
       collection(db, 'companies', userInfo.companyId, 'sites'),
       orderBy('createdAt', 'desc')
     );
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, async (snap) => {
       const list: SiteItem[] = snap.docs.map(d => {
         const data = d.data();
         return {
@@ -190,9 +191,20 @@ export default function SitesPage() {
       setSites(list);
       const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
       setTeams(Array.from(teamSet));
+
+      // 전체 호기 수 합산
+      let total = 0;
+      for (const siteDoc of snap.docs) {
+        const elevsSnap = await getDocs(
+          collection(db, 'companies', userInfo.companyId, 'sites', siteDoc.id, 'elevators')
+        );
+        total += elevsSnap.size;
+      }
+      setTotalElevatorCount(total);
     });
     return () => unsub();
   }, [userInfo?.companyId]);
+
 
   // ─── 현장 클릭 시 호기 로드 ───
   async function handleSiteClick(site: SiteItem) {
@@ -680,7 +692,8 @@ export default function SitesPage() {
           {filteredSites.length > 0 && (
             <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
               <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
-              <span>승강기 <strong className="text-gray-700">{filteredSites.reduce((s, i) => s + (i.elevatorCount || 0), 0)}</strong>대</span>
+              <span>승강기 <strong className="text-gray-700">{totalElevatorCount}</strong>대</span>
+
               <span>보수료 합계 <strong className="text-gray-700">{filteredSites.reduce((s, i) => s + (i.maintenanceFee || 0), 0).toLocaleString()}</strong>원</span>
             </div>
           )}
