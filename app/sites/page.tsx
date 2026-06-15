@@ -562,9 +562,14 @@ export default function SitesPage() {
             onChange={e => setSelectedType(e.target.value)}
             className="border rounded-xl px-3 py-2 text-sm bg-white"
           >
-            <option value="전체">FM/POG 전체</option>
-            <option value="FM">FM (종합)</option>
-            <option value="POG">POG (일반)</option>
+            <option value="전체">계약 유형 전체</option>
+<option value="일반계약">일반계약</option>
+<option value="종합계약">종합계약</option>
+<option value="분담일반계약">분담일반계약</option>
+<option value="분담종합계약">분담종합계약</option>
+<option value="일반SMART계약">일반SMART계약</option>
+<option value="종합SMART계약">종합SMART계약</option>
+
           </select>
         </div>
 
@@ -627,10 +632,15 @@ export default function SitesPage() {
                         <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{site.companyName || '-'}</td>
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           {site.contractType ? (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${site.contractType === 'FM' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'}`}>
-                              {site.contractType === 'FM' ? 'FM' : 'POG'}
-                            </span>
-                          ) : '-'}
+  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+    site.contractType.includes('종합') ? 'bg-blue-100 text-blue-600' :
+    site.contractType.includes('일반') ? 'bg-purple-100 text-purple-600' :
+    'bg-gray-100 text-gray-600'
+  }`}>
+    {site.contractType}
+  </span>
+) : '-'}
+
                         </td>
                         <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
                           {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
