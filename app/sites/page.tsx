@@ -43,6 +43,15 @@ interface SiteItem {
   createdAt?: unknown;
 }
 
+interface ElevatorItem {
+  id: string;
+  hogiNo?: string;
+  type?: string;
+  status?: string;
+  installDate?: string;
+  inspectionDate?: string;
+}
+
 // ─── 유틸 ───
 function getDday(dateStr?: string): number | null {
   if (!dateStr) return null;
@@ -97,6 +106,10 @@ export default function SitesPage() {
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
 
+  // 호기
+  const [siteElevators, setSiteElevators] = useState<ElevatorItem[]>([]);
+  const [elevatorsLoading, setElevatorsLoading] = useState(false);
+
   // 필터/정렬
   const [activeTab, setActiveTab] = useState<'contract' | 'team'>('contract');
   const [selectedTeam, setSelectedTeam] = useState('전체');
@@ -148,7 +161,6 @@ export default function SitesPage() {
           role: data.role || 'member',
           superAdmin: data.superAdmin || false,
         });
-        console.log('✅ userInfo 설정:', user.uid, data.companyId, data.role);
       } catch (e) {
         console.error(e);
       } finally {
@@ -182,14 +194,30 @@ export default function SitesPage() {
     return () => unsub();
   }, [userInfo?.companyId]);
 
+  // ─── 현장 클릭 시 호기 로드 ───
+  async function handleSiteClick(site: SiteItem) {
+    setSelectedSite(site);
+    setEditForm(site);
+    setEditMode(false);
+    setSiteElevators([]);
+    setElevatorsLoading(true);
+    try {
+      const snap = await getDocs(
+        collection(db, 'companies', userInfo!.companyId, 'sites', site.id, 'elevators')
+      );
+      setSiteElevators(snap.docs.map(d => ({ id: d.id, ...d.data() } as ElevatorItem)));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setElevatorsLoading(false);
+    }
+  }
+
   // ─── 필터 + 정렬 ───
   const filteredSites = sites
     .filter(s => {
-      // ✅ 이 두 줄로 교체
-if (activeTab === 'contract' && s.source === 'member') return false;
-if (activeTab === 'team' && s.source === 'admin') return false;
-
-
+      if (activeTab === 'contract' && s.source === 'member') return false;
+      if (activeTab === 'team' && s.source === 'admin') return false;
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contractType !== selectedType) return false;
@@ -306,7 +334,7 @@ if (activeTab === 'team' && s.source === 'admin') return false;
     if (excelWorkbook) previewSheet(excelWorkbook, sheetName);
   }
 
-  // ─── 엑셀 가져오기 (덮어쓰기 포함) ───
+  // ─── 엑셀 가져오기 ───
   async function handleImport() {
     if (!excelWorkbook || !userInfo?.companyId) return;
     setImporting(true);
@@ -592,7 +620,7 @@ if (activeTab === 'team' && s.source === 'admin') return false;
                     return (
                       <tr
                         key={site.id}
-                        onClick={() => { setSelectedSite(site); setEditForm(site); setEditMode(false); }}
+                        onClick={() => handleSiteClick(site)}
                         className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${expiry?.rowColor || (idx % 2 === 0 ? '' : 'bg-gray-50/50')}`}
                       >
                         <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{site.name}</td>
@@ -815,6 +843,33 @@ if (activeTab === 'team' && s.source === 'admin') return false;
                     </div>
                   ))}
                 </div>
+
+                {/* ─── 호기 목록 ─── */}
+                <div className="mt-4">
+                  <h3 className="font-semibold text-sm text-gray-700 mb-2">
+                    🔧 호기 목록 ({siteElevators.length}대)
+                  </h3>
+                  {elevatorsLoading ? (
+                    <p className="text-sm text-gray-400 text-center py-3">로딩 중...</p>
+                  ) : siteElevators.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-3">등록된 호기가 없어요</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {siteElevators.map(elev => (
+                        <div key={elev.id} className="bg-gray-50 rounded-xl px-3 py-2 text-sm flex justify-between items-center">
+                          <span className="font-medium">{elev.hogiNo || elev.id}</span>
+                          <span className="text-gray-500">{elev.type || '-'}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                          }`}>
+                            {elev.status || '-'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {canEdit && (
                   <div className="flex gap-2 mt-4">
                     <button onClick={() => handleDeleteSite(selectedSite.id)}
