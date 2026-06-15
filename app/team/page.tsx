@@ -104,10 +104,11 @@ export default function TeamPage() {
       const now = new Date();
       const isSuperAdmin = data.superAdmin === true;
       const isCompanyAdmin =
-        data.role === 'admin' &&
-        sub.plan === 'company' &&
-        sub.status === 'active' &&
-        endDate && endDate > now;
+  data.role === 'admin' &&
+  sub.plan === 'company' &&
+  sub.status === 'active';
+  // endDate 체크 제거 - 관리자는 항상 접근 가능
+
 
       if (!isSuperAdmin && !isCompanyAdmin) {
         router.push('/');
