@@ -14,6 +14,8 @@ import {
   serverTimestamp,
   increment,
   getDoc,
+  addDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 
 interface UserInfo {
@@ -51,6 +53,7 @@ function JoinContent() {
   const [verifying, setVerifying] = useState(false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
+  const [migrateStatus, setMigrateStatus] = useState('');
 
   // ─── URL 파라미터 자동 입력 ───
   useEffect(() => {
@@ -122,7 +125,6 @@ function JoinContent() {
       const invDoc = snap.docs[0];
       const data = invDoc.data();
 
-      // 만료일 확인
       const expireAt = data.expireAt?.toDate ? data.expireAt.toDate() : null;
       if (expireAt && expireAt < new Date()) {
         setError('만료된 초대코드예요. 관리자에게 새 코드를 요청해주세요.');
@@ -130,7 +132,6 @@ function JoinContent() {
         return;
       }
 
-      // 인원 초과 확인
       if (data.usedCount >= data.maxMembers) {
         setError('초대 가능 인원이 초과됐어요. 관리자에게 문의해주세요.');
         setVerifying(false);
@@ -156,6 +157,75 @@ function JoinContent() {
     }
   };
 
+  // ─── 현장 데이터 자동 이전 ───
+  const migrateSites = async (
+    oldCompanyId: string,
+    newCompanyId: string,
+    teamName: string
+  ) => {
+    if (!oldCompanyId || oldCompanyId === newCompanyId) return;
+
+    try {
+      // 기존 companyId의 sites에서 해당 팀 현장만 가져오기
+      setMigrateStatus('현장 데이터 이전 중...');
+
+      const sitesSnap = await getDocs(
+        query(
+          collection(db, 'companies', oldCompanyId, 'sites'),
+          where('team', '==', teamName)
+        )
+      );
+
+      if (sitesSnap.empty) {
+        setMigrateStatus('');
+        return;
+      }
+
+      let migratedCount = 0;
+
+      for (const siteDoc of sitesSnap.docs) {
+        const siteData = siteDoc.data();
+
+        // 새 경로에 현장 복사
+        const newSiteRef = await addDoc(
+          collection(db, 'companies', newCompanyId, 'sites'),
+          {
+            ...siteData,
+            companyId: newCompanyId,
+            migratedFrom: oldCompanyId,
+            migratedAt: serverTimestamp(),
+          }
+        );
+
+        // 호기(elevators) 서브컬렉션도 이전
+        const elevatorsSnap = await getDocs(
+          collection(db, 'companies', oldCompanyId, 'sites', siteDoc.id, 'elevators')
+        );
+
+        for (const elevDoc of elevatorsSnap.docs) {
+          await addDoc(
+            collection(db, 'companies', newCompanyId, 'sites', newSiteRef.id, 'elevators'),
+            {
+              ...elevDoc.data(),
+              companyId: newCompanyId,
+            }
+          );
+        }
+
+        // 기존 현장 삭제
+        await deleteDoc(doc(db, 'companies', oldCompanyId, 'sites', siteDoc.id));
+
+        migratedCount++;
+        setMigrateStatus(`현장 이전 중... (${migratedCount}/${sitesSnap.docs.length})`);
+      }
+
+      setMigrateStatus('');
+    } catch (e) {
+      console.error('현장 이전 오류:', e);
+      setMigrateStatus('');
+    }
+  };
+
   // ─── 합류 확정 ───
   const handleJoin = async () => {
     if (!userInfo || !inviteInfo) return;
@@ -163,10 +233,15 @@ function JoinContent() {
     setError('');
 
     try {
-      // ✅ 모든 합류자 company 플랜으로 전환
-      // Pro였던 경우 movedFromPro: true 기록
       const wasPro = userInfo.subscription?.plan === 'pro';
+      const oldCompanyId = userInfo.companyId;
 
+      // ✅ Pro 사용자였으면 팀별 현장 자동 이전
+      if (wasPro && oldCompanyId && oldCompanyId !== inviteInfo.companyId) {
+        await migrateSites(oldCompanyId, inviteInfo.companyId, inviteInfo.teamName);
+      }
+
+      // ✅ 유저 정보 업데이트
       await updateDoc(doc(db, 'users', userInfo.uid), {
         companyId: inviteInfo.companyId,
         companyDisplayName: inviteInfo.companyDisplayName,
@@ -335,9 +410,20 @@ function JoinContent() {
                 <p className="text-xs text-orange-600 mt-2 font-semibold">
                   📱 Pro 구독 중이시네요! 팀 합류 후 앱(App Store / Google Play)에서
                   Pro 구독을 직접 취소해주세요. 취소하지 않으면 중복 결제될 수 있어요.
+                  <br />✅ 기존 등록하신 <span className="text-blue-600">{inviteInfo.teamName}</span> 팀 현장은 자동으로 이전돼요!
                 </p>
               )}
             </div>
+
+            {/* 현장 이전 상태 표시 */}
+            {migrateStatus && (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                <p className="text-sm text-blue-600 flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  {migrateStatus}
+                </p>
+              </div>
+            )}
 
             {error && (
               <div className="mb-3 p-3 bg-red-50 border border-red-100 rounded-xl">
@@ -360,7 +446,7 @@ function JoinContent() {
                 {joining ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    처리 중...
+                    {migrateStatus || '처리 중...'}
                   </span>
                 ) : '팀 합류하기'}
               </button>
