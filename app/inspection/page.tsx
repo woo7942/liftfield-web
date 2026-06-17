@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  doc, getDoc, collection, query, where,
+  doc, getDoc, collection, query,
   getDocs, setDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
@@ -16,7 +16,6 @@ interface UserInfo {
   companyDisplayName: string;
   role: string;
   superAdmin: boolean;
-  subscription?: { plan: string; status: string; endDate?: Date };
 }
 
 interface Site {
@@ -144,7 +143,6 @@ function generateSingleHtml(
   companyName: string
 ): string {
   const latest = history[0];
-
   const historyRows = history.map((h) => `
     <tr>
       <td>${h.inspectionDate}</td>
@@ -200,19 +198,16 @@ function generateSingleHtml(
     ${latest ? `<div class="info-item">최근검사일: <span>${latest.inspectionDate}</span></div>` : ''}
   </div>
   ${latest ? `<div class="badge badge-${getResultColor(latest.result)}">${latest.result || '정보없음'}</div>` : ''}
-
   <h2>📋 검사 이력</h2>
   <table>
     <thead><tr><th>검사일</th><th>결과</th><th>검사기관</th><th>검사자</th><th>차기검사일</th></tr></thead>
     <tbody>${historyRows || '<tr><td colspan="5" style="text-align:center;color:#888">검사 이력 없음</td></tr>'}</tbody>
   </table>
-
   <h2>⚠️ 부적합 항목</h2>
   <table>
     <thead><tr><th>코드</th><th>항목명</th><th>내용</th></tr></thead>
     <tbody>${failRows}</tbody>
   </table>
-
   <div class="footer">LiftField · 출력일: ${new Date().toLocaleString('ko-KR')}</div>
 </body>
 </html>`;
@@ -303,14 +298,9 @@ export default function InspectionPage() {
 
       const data = snap.data();
       const isSuperAdmin = data.superAdmin === true;
-      const sub = data.subscription || {};
-      const endDate = toDate(sub.endDate);
-      const isCompany =
-        sub.plan === 'company' &&
-        sub.status === 'active' &&
-        endDate && endDate > new Date();
+      const isAdmin = data.role === 'admin';
 
-      if (!isSuperAdmin && !isCompany) {
+      if (!isSuperAdmin && !isAdmin) {
         router.push('/');
         return;
       }
@@ -322,7 +312,6 @@ export default function InspectionPage() {
         companyDisplayName: data.companyDisplayName || '',
         role: data.role || 'member',
         superAdmin: isSuperAdmin,
-        subscription: { plan: sub.plan, status: sub.status, endDate },
       });
     });
     return () => unsub();
@@ -333,31 +322,39 @@ export default function InspectionPage() {
     if (!userInfo) return;
     const load = async () => {
       try {
+        // ✅ 신규 구조
         const siteSnap = await getDocs(
-          query(collection(db, 'sites'), where('companyId', '==', userInfo.companyId))
+          collection(db, 'companies', userInfo.companyId, 'sites')
         );
         const siteList: Site[] = siteSnap.docs.map((d) => ({
           id: d.id,
-          name: d.data().name || '',
+          name: d.data().name || d.data().siteName || '',
           address: d.data().address || '',
-          companyId: d.data().companyId || '',
+          companyId: userInfo.companyId,
         }));
         setSites(siteList);
 
-        const elevSnap = await getDocs(
-          query(collection(db, 'elevators'), where('companyId', '==', userInfo.companyId))
-        );
-        const elevList: Elevator[] = elevSnap.docs.map((d) => ({
-          id: d.id,
-          siteId: d.data().siteId || '',
-          siteName: d.data().siteName || '',
-          elevatorNo: d.data().elevatorNo || '',
-          dong: d.data().dong || '',
-          hoNo: d.data().hoNo || '',
-          companyId: d.data().companyId || '',
-        }));
+        // ✅ 현장별 호기 로드
+        const elevList: Elevator[] = [];
+        for (const siteDoc of siteSnap.docs) {
+          const elevSnap = await getDocs(
+            collection(db, 'companies', userInfo.companyId, 'sites', siteDoc.id, 'elevators')
+          );
+          elevSnap.docs.forEach((d) => {
+            elevList.push({
+              id: d.id,
+              siteId: siteDoc.id,
+              siteName: siteDoc.data().name || siteDoc.data().siteName || '',
+              elevatorNo: d.data().elevatorNo || '',
+              dong: d.data().dong || '',
+              hoNo: d.data().hoNo || '',
+              companyId: userInfo.companyId,
+            });
+          });
+        }
         setElevators(elevList);
 
+        // ✅ 캐시 로드
         const cacheSnap = await getDocs(
           collection(db, 'companies', userInfo.companyId, 'elevatorInspectionCache')
         );
@@ -385,8 +382,6 @@ export default function InspectionPage() {
   const fetchAndCache = useCallback(async (elevator: Elevator, force = false) => {
     if (!userInfo) return;
     const cached = cacheMap[elevator.elevatorNo];
-
-    // ✅ 캐시 있으면 기한 없이 사용, force=true 일 때만 새로 호출
     if (cached && !force) return;
 
     setFetchingMap((prev) => ({ ...prev, [elevator.elevatorNo]: true }));
@@ -401,7 +396,6 @@ export default function InspectionPage() {
         { history, failList, cachedAt: serverTimestamp(), elevatorNo: elevator.elevatorNo }
       );
 
-      // ✅ now 변수 여기서 선언
       const now = new Date();
       setCacheMap((prev) => ({
         ...prev,
@@ -502,7 +496,6 @@ export default function InspectionPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-
       {/* 헤더 */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -525,7 +518,6 @@ export default function InspectionPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6">
-
         {/* 요약 카드 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {[
@@ -710,7 +702,6 @@ export default function InspectionPage() {
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
-
               <div className="p-5 border-b border-gray-100 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
@@ -836,7 +827,6 @@ export default function InspectionPage() {
           </div>
         );
       })()}
-
     </div>
   );
 }
