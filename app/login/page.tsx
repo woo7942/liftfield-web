@@ -32,13 +32,20 @@ function LoginContent() {
 
       const userData = userSnap.data();
 
-      // ✅ 슈퍼어드민, 관리자, 멤버 모두 접근 가능 (trial 제외)
+            // ✅ 슈퍼어드민, 관리자, 멤버 모두 접근 가능 (trial 제외)
       const plan = userData.subscription?.plan || 'trial';
       const isSuperAdmin = userData.superAdmin === true;
       const isAdmin = userData.role === 'admin';
       const isMember = userData.role === 'member';
       const isPro = plan === 'pro' && userData.subscription?.status === 'active';
       const isCompany = plan === 'company' && userData.subscription?.status === 'active';
+
+      // ✅ /join 으로 리다이렉트되는 경우 권한 체크 없이 통과
+      const redirectUrl = searchParams.get('redirect') || '/';
+      if (redirectUrl.startsWith('/join')) {
+        router.push(redirectUrl);
+        return;
+      }
 
       if (!isSuperAdmin && !isAdmin && !isMember && !isPro && !isCompany) {
         setError('접근 권한이 없습니다.');
@@ -47,9 +54,8 @@ function LoginContent() {
         return;
       }
 
-      // ✅ redirect 파라미터 있으면 해당 페이지로 이동
-      const redirectUrl = searchParams.get('redirect') || '/';
       router.push(redirectUrl);
+
 
     } catch (e: any) {
       if (
