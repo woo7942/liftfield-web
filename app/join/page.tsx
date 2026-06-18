@@ -226,13 +226,30 @@ function JoinContent() {
     }
   };
 
-  // ─── 합류 확정 ───
+    // ─── 합류 확정 ───
   const handleJoin = async () => {
     if (!userInfo || !inviteInfo) return;
+    if (joining) return; // ← 중복 클릭 방지
     setJoining(true);
     setError('');
 
     try {
+      // ✅ 이미 같은 회사 소속인지 확인
+      const freshSnap = await getDoc(doc(db, 'users', userInfo.uid));
+      const freshData = freshSnap.data();
+      if (freshData?.companyId === inviteInfo.companyId) {
+        setStep('done');
+        return;
+      }
+
+      // ✅ 초대코드 최신 상태 재확인 (중복 방지)
+      const invSnap = await getDoc(doc(db, 'invitations', inviteInfo.docId));
+      const invData = invSnap.data();
+      if (!invData || invData.usedCount >= invData.maxMembers) {
+        setError('초대 가능 인원이 초과됐어요. 관리자에게 문의해주세요.');
+        return;
+      }
+
       const wasPro = userInfo.subscription?.plan === 'pro';
       const oldCompanyId = userInfo.companyId;
 
@@ -254,6 +271,7 @@ function JoinContent() {
           plan: 'company',
           status: 'active',
           movedFromPro: wasPro,
+          startDate: serverTimestamp(),
         },
       });
 
@@ -269,6 +287,7 @@ function JoinContent() {
       setJoining(false);
     }
   };
+
 
   if (loading) {
     return (
