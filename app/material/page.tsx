@@ -75,6 +75,17 @@ const formatTs = (ts: any): string => {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   } catch { return '-'; }
 };
+const formatTsTwo = (ts: any): { date: string; time: string } => {
+  if (!ts) return { date: '-', time: '' };
+  try {
+    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    if (isNaN(d.getTime())) return { date: '-', time: '' };
+    return {
+      date: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
+      time: `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,
+    };
+  } catch { return { date: '-', time: '' }; }
+};
 
 const tsToDateStr = (ts: any): string => {
   if (!ts) return '';
@@ -376,8 +387,8 @@ export default function MaterialPage() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 {['상태','신청일시','현장','호기','계약종류','자재명','파트번호','수량','신청자','접수일시','분출일시','교체완료일시','처리'].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">{h}</th>
-                ))}
+  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
+))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -389,46 +400,72 @@ export default function MaterialPage() {
               ) : filtered.map((r) => {
                 const st = STATUS_STYLE[r.status] || STATUS_STYLE['신청중'];
                 return (
-                  <tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => { setSelected(r); setDetailModal(true); }}>
-                    <td className="px-4 py-3">
-                      <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
-                        className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
-                        {st.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.requestedAt)}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap">{r.siteName}</td>
-                    <td className="px-4 py-3 text-gray-700 text-xs font-semibold whitespace-nowrap">{r.hogiNo}</td>
-                    <td className="px-4 py-3 text-blue-700 text-xs font-semibold whitespace-nowrap">{r.contractType || '-'}</td>
-                    <td className="px-4 py-3 text-gray-900">{r.materialName}{r.spec ? ` (${r.spec})` : ''}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{r.partNumber || '-'}</td>
-                    <td className="px-4 py-3 font-semibold text-yellow-700 whitespace-nowrap">{r.quantity}{r.unit}</td>
-                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.requesterName || '-'}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.receivedAt)}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.dispatchedAt)}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.replacedAt)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      {r.status === '신청중' && (
-                        <button onClick={() => handleReceive(r)}
-                          className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold hover:bg-purple-200">
-                          📬 접수
-                        </button>
-                      )}
-                      {r.status === '접수' && (
-                        <button onClick={() => handleDispatch(r)}
-                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
-                          📦 자재분출
-                        </button>
-                      )}
-                      {r.status === '자재분출' && (
-  <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
-)}
-                      {r.status === '자재교체' && (
-                        <span className="text-xs text-gray-400">완료</span>
-                      )}
-                    </td>
-                  </tr>
+                  // ✅ 기존 tr 안쪽 전체를 아래로 교체
+<tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
+  onClick={() => { setSelected(r); setDetailModal(true); }}>
+  <td className="px-3 py-3">
+    <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
+      className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
+      {st.label}
+    </span>
+  </td>
+  {/* 신청일시 - 2줄 */}
+  <td className="px-3 py-3 text-xs">
+    {(() => { const t = formatTsTwo(r.requestedAt); return (
+      <><p className="text-gray-600 font-medium">{t.date}</p>
+        <p className="text-gray-400">{t.time}</p></>
+    ); })()}
+  </td>
+  <td className="px-3 py-3 font-semibold text-gray-900">{r.siteName}</td>
+  <td className="px-3 py-3 text-gray-700 text-xs font-semibold">{r.hogiNo}</td>
+  <td className="px-3 py-3 text-blue-700 text-xs font-semibold">{r.contractType || '-'}</td>
+  <td className="px-3 py-3 text-gray-900 text-sm">{r.materialName}{r.spec ? ` (${r.spec})` : ''}</td>
+  <td className="px-3 py-3 text-gray-500 text-xs font-mono">{r.partNumber || '-'}</td>
+  <td className="px-3 py-3 font-semibold text-yellow-700">{r.quantity}{r.unit}</td>
+  <td className="px-3 py-3 text-gray-600">{r.requesterName || '-'}</td>
+  {/* 접수일시 - 2줄 */}
+  <td className="px-3 py-3 text-xs">
+    {(() => { const t = formatTsTwo(r.receivedAt); return (
+      <><p className="text-gray-600 font-medium">{t.date}</p>
+        <p className="text-gray-400">{t.time}</p></>
+    ); })()}
+  </td>
+  {/* 분출일시 - 2줄 */}
+  <td className="px-3 py-3 text-xs">
+    {(() => { const t = formatTsTwo(r.dispatchedAt); return (
+      <><p className="text-gray-600 font-medium">{t.date}</p>
+        <p className="text-gray-400">{t.time}</p></>
+    ); })()}
+  </td>
+  {/* 교체완료일시 - 2줄 */}
+  <td className="px-3 py-3 text-xs">
+    {(() => { const t = formatTsTwo(r.replacedAt); return (
+      <><p className="text-gray-600 font-medium">{t.date}</p>
+        <p className="text-gray-400">{t.time}</p></>
+    ); })()}
+  </td>
+  <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+    {r.status === '신청중' && (
+      <button onClick={() => handleReceive(r)}
+        className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold hover:bg-purple-200">
+        📬 접수
+      </button>
+    )}
+    {r.status === '접수' && (
+      <button onClick={() => handleDispatch(r)}
+        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
+        📦 자재분출
+      </button>
+    )}
+    {r.status === '자재분출' && (
+      <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
+    )}
+    {r.status === '자재교체' && (
+      <span className="text-xs text-gray-400">완료</span>
+    )}
+  </td>
+</tr>
+
                 );
               })}
             </tbody>
