@@ -422,11 +422,8 @@ export default function MaterialPage() {
                         </button>
                       )}
                       {r.status === '자재분출' && (
-                        <button onClick={() => handleReplace(r)}
-                          className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-semibold hover:bg-green-200">
-                          ✅ 교체완료
-                        </button>
-                      )}
+  <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
+)}
                       {r.status === '자재교체' && (
                         <span className="text-xs text-gray-400">완료</span>
                       )}
@@ -510,11 +507,10 @@ export default function MaterialPage() {
                   </button>
                 )}
                 {currentSelected.status === '자재분출' && (
-                  <button onClick={() => handleReplace(currentSelected)}
-                    className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 mb-2">
-                    ✅ 교체완료 처리
-                  </button>
-                )}
+  <div className="w-full py-3 bg-blue-50 text-blue-600 rounded-xl text-sm font-semibold text-center mb-2">
+    🛗 교체완료는 앱에서 처리해주세요
+  </div>
+)}
                 <button onClick={() => handleDelete(currentSelected.id)}
                   className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl font-semibold hover:bg-red-100 text-sm mt-1">
                   🗑 삭제
