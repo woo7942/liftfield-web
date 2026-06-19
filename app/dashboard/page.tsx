@@ -147,6 +147,14 @@ if (!isSuperAdmin && !(isCompany && isAdmin)) {
             color="purple"
             onClick={() => router.push('/stats')}
           />
+          <MenuCard
+  icon="📦"
+  title="자재신청"
+  desc="자재 신청 및 처리 관리"
+  badge=""
+  color="yellow"
+  onClick={() => router.push('/material')}
+/>
           {isSuperAdmin && (
             <MenuCard
               icon="👑"
