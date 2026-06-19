@@ -2,7 +2,6 @@
 'use client';
 
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
@@ -31,10 +30,12 @@ type MaterialRequest = {
   siteName: string;
   hogiNo: string;
   materialName: string;
+  partNumber?: string;
   spec?: string;
   quantity: number;
   unit: string;
   reason?: string;
+  contractType?: string;
   requesterId?: string;
   requesterName?: string;
   dispatcherId?: string;
@@ -55,6 +56,7 @@ type Site = {
   address?: string;
   companyId?: string;
   team?: string;
+  contractType?: string;
 };
 
 type UserInfo = {
@@ -65,7 +67,7 @@ type UserInfo = {
   companyId?: string;
   team?: string;
   useNewStructure?: boolean;
-  subscriptionPlan?: string;
+  superAdmin?: boolean;
 };
 
 // ─────────────────────────────────────────────
@@ -98,11 +100,6 @@ const tsToDateStr = (ts: any): string => {
   } catch { return ''; }
 };
 
-const todayStr = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-};
-
 const printHtml = (html: string) => {
   const w = window.open('', '_blank');
   if (!w) return;
@@ -116,38 +113,38 @@ const printHtml = (html: string) => {
 // 메인 컴포넌트
 // ─────────────────────────────────────────────
 export default function MaterialPage() {
-  const [userInfo, setUserInfo]     = useState<UserInfo | null>(null);
-  const [loading, setLoading]       = useState(true);
-  const [requests, setRequests]     = useState<MaterialRequest[]>([]);
-  const [sites, setSites]           = useState<Site[]>([]);
+  const [userInfo, setUserInfo]   = useState<UserInfo | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [requests, setRequests]   = useState<MaterialRequest[]>([]);
+  const [sites, setSites]         = useState<Site[]>([]);
 
   // 필터
-  const [search, setSearch]             = useState('');
-  const [statusFilter, setStatusFilter] = useState<MaterialStatus | '전체'>('전체');
-  const [teamFilter, setTeamFilter]     = useState('전체');
+  const [search, setSearch]               = useState('');
+  const [statusFilter, setStatusFilter]   = useState<MaterialStatus | '전체'>('전체');
+  const [teamFilter, setTeamFilter]       = useState('전체');
 
   // 상세 모달
-  const [detailModal, setDetailModal]   = useState(false);
-  const [selected, setSelected]         = useState<MaterialRequest | null>(null);
+  const [detailModal, setDetailModal]     = useState(false);
+  const [selected, setSelected]           = useState<MaterialRequest | null>(null);
 
   // PDF 모달
-  const [pdfModal, setPdfModal]         = useState(false);
-  const [pdfSiteId, setPdfSiteId]       = useState('');
-  const [pdfSiteName, setPdfSiteName]   = useState('');
-  const [pdfDateFrom, setPdfDateFrom]   = useState('');
-  const [pdfDateTo, setPdfDateTo]       = useState('');
+  const [pdfModal, setPdfModal]           = useState(false);
+  const [pdfSiteId, setPdfSiteId]         = useState('');
+  const [pdfSiteName, setPdfSiteName]     = useState('');
+  const [pdfDateFrom, setPdfDateFrom]     = useState('');
+  const [pdfDateTo, setPdfDateTo]         = useState('');
   const [pdfStatusFilter, setPdfStatusFilter] = useState<MaterialStatus | '전체'>('전체');
 
-  // ── 인증 및 데이터 구독 ──
+  // ── 인증 ──
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) { window.location.href = '/login'; return; }
       try {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const snap = await getDoc(doc(db, 'users', user.uid));
+        const { doc: firestoreDoc, getDoc } = await import('firebase/firestore');
+        const snap = await getDoc(firestoreDoc(db, 'users', user.uid));
         if (!snap.exists()) { window.location.href = '/login'; return; }
         const data = snap.data() as UserInfo;
-        if (!['admin', 'superadmin'].includes(data.role)) {
+        if (!['admin', 'superadmin'].includes(data.role) && data.superAdmin !== true) {
           alert('관리자만 접근 가능합니다.');
           window.location.href = '/';
           return;
@@ -161,15 +158,15 @@ export default function MaterialPage() {
     return () => unsub();
   }, []);
 
+  // ── 데이터 구독 ──
   useEffect(() => {
     if (!userInfo) return;
-    const isSuperAdmin = userInfo.role === 'superadmin';
+    const isSuperAdmin = userInfo.superAdmin === true || userInfo.role === 'superadmin';
     const useNew = userInfo.useNewStructure && !!userInfo.companyId;
     const cid = userInfo.companyId || '';
-
     const unsubs: (() => void)[] = [];
 
-    // materialRequests 구독
+    // materialRequests
     const matCol = useNew
       ? collection(db, 'companies', cid, 'materialRequests')
       : collection(db, 'materialRequests');
@@ -178,12 +175,16 @@ export default function MaterialPage() {
       : useNew
         ? query(matCol, orderBy('createdAt', 'desc'))
         : query(matCol, where('companyId', '==', cid), orderBy('createdAt', 'desc'));
+
     unsubs.push(onSnapshot(matQ, (snap) => {
       setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as MaterialRequest)));
       setLoading(false);
+    }, (err) => {
+      console.error('자재신청 로드 실패:', err);
+      setLoading(false);
     }));
 
-    // sites 구독
+    // sites
     const siteCol = useNew
       ? collection(db, 'companies', cid, 'sites')
       : collection(db, 'sites');
@@ -208,7 +209,7 @@ export default function MaterialPage() {
   // ── 필터된 목록 ──
   const filtered = useMemo(() => {
     let list = requests;
-    if (teamFilter !== '전체') list = list.filter((r) => r.team === teamFilter);
+    if (teamFilter !== '전체')   list = list.filter((r) => r.team === teamFilter);
     if (statusFilter !== '전체') list = list.filter((r) => r.status === statusFilter);
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -216,7 +217,9 @@ export default function MaterialPage() {
         r.siteName?.toLowerCase().includes(s) ||
         r.materialName?.toLowerCase().includes(s) ||
         r.hogiNo?.toLowerCase().includes(s) ||
-        r.requesterName?.toLowerCase().includes(s)
+        r.requesterName?.toLowerCase().includes(s) ||
+        r.partNumber?.toLowerCase().includes(s) ||
+        r.contractType?.toLowerCase().includes(s)
       );
     }
     return list;
@@ -249,11 +252,7 @@ export default function MaterialPage() {
         dispatcherId: userInfo?.uid || '',
         dispatcherName: userInfo?.name || '',
       });
-      // 상세 모달 내용 갱신
-      setSelected((prev) => prev ? { ...prev, status: '자재분출', dispatcherName: userInfo?.name } : prev);
-    } catch (e) {
-      alert('자재분출 처리 실패');
-    }
+    } catch { alert('자재분출 처리 실패'); }
   };
 
   // ── 자재교체 완료 처리 ──
@@ -266,10 +265,7 @@ export default function MaterialPage() {
         replacerId: userInfo?.uid || '',
         replacerName: userInfo?.name || '',
       });
-      setSelected((prev) => prev ? { ...prev, status: '자재교체', replacerName: userInfo?.name } : prev);
-    } catch (e) {
-      alert('자재교체 처리 실패');
-    }
+    } catch { alert('자재교체 처리 실패'); }
   };
 
   // ── 삭제 ──
@@ -278,18 +274,16 @@ export default function MaterialPage() {
     try {
       await deleteDoc(getDocRef(id));
       setDetailModal(false);
-    } catch {
-      alert('삭제 실패');
-    }
+    } catch { alert('삭제 실패'); }
   };
 
   // ── PDF 필터된 목록 ──
   const pdfFiltered = useMemo(() => {
     let list = requests;
-    if (pdfSiteId) list = list.filter((r) => r.siteId === pdfSiteId);
+    if (pdfSiteId)          list = list.filter((r) => r.siteId === pdfSiteId);
     if (pdfStatusFilter !== '전체') list = list.filter((r) => r.status === pdfStatusFilter);
-    if (pdfDateFrom) list = list.filter((r) => tsToDateStr(r.requestedAt) >= pdfDateFrom);
-    if (pdfDateTo)   list = list.filter((r) => tsToDateStr(r.requestedAt) <= pdfDateTo);
+    if (pdfDateFrom)        list = list.filter((r) => tsToDateStr(r.requestedAt) >= pdfDateFrom);
+    if (pdfDateTo)          list = list.filter((r) => tsToDateStr(r.requestedAt) <= pdfDateTo);
     return list;
   }, [requests, pdfSiteId, pdfStatusFilter, pdfDateFrom, pdfDateTo]);
 
@@ -310,7 +304,9 @@ export default function MaterialPage() {
         <td>${formatTs(r.requestedAt)}</td>
         <td>${r.siteName}</td>
         <td style="text-align:center">${r.hogiNo}</td>
+        <td>${r.contractType || '-'}</td>
         <td>${r.materialName}${r.spec ? ` (${r.spec})` : ''}</td>
+        <td>${r.partNumber || '-'}</td>
         <td style="text-align:center">${r.quantity}${r.unit}</td>
         <td>${r.reason || '-'}</td>
         <td style="text-align:center">
@@ -348,8 +344,9 @@ export default function MaterialPage() {
             <thead>
               <tr>
                 <th>번호</th><th>신청일시</th><th>현장</th><th>호기</th>
-                <th>자재명</th><th>수량</th><th>사유</th><th>상태</th>
-                <th>신청자</th><th>분출일시</th><th>교체완료일시</th>
+                <th>계약종류</th><th>자재명</th><th>파트번호</th><th>수량</th>
+                <th>사유</th><th>상태</th><th>신청자</th>
+                <th>분출일시</th><th>교체완료일시</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -360,6 +357,12 @@ export default function MaterialPage() {
     printHtml(html);
     setPdfModal(false);
   };
+
+  // ── 현재 선택된 항목 실시간 반영 ──
+  const currentSelected = useMemo(() => {
+    if (!selected) return null;
+    return requests.find((r) => r.id === selected.id) || selected;
+  }, [selected, requests]);
 
   if (loading) {
     return (
@@ -392,53 +395,42 @@ export default function MaterialPage() {
       {/* 통계 카드 */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         {([
-          { label: '전체',     value: stats.전체,     color: 'text-gray-700',  bg: 'bg-gray-50'   },
-          { label: '신청중',   value: stats.신청중,   color: 'text-yellow-700',bg: 'bg-yellow-50' },
-          { label: '자재분출', value: stats.자재분출, color: 'text-blue-700',  bg: 'bg-blue-50'   },
-          { label: '교체완료', value: stats.자재교체, color: 'text-green-700', bg: 'bg-green-50'  },
+          { label: '전체',     value: stats.전체,     color: 'text-gray-700',  bg: 'bg-gray-50',   border: 'border-gray-200'  },
+          { label: '신청중',   value: stats.신청중,   color: 'text-yellow-700',bg: 'bg-yellow-50', border: 'border-yellow-200'},
+          { label: '자재분출', value: stats.자재분출, color: 'text-blue-700',  bg: 'bg-blue-50',   border: 'border-blue-200'  },
+          { label: '교체완료', value: stats.자재교체, color: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-200' },
         ] as const).map((s) => (
-          <div key={s.label} className={`${s.bg} rounded-xl p-4 border border-gray-100`}>
+          <div key={s.label} className={`${s.bg} rounded-xl p-4 border ${s.border}`}>
             <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
             <p className="text-sm text-gray-500 mt-1">{s.label}</p>
           </div>
         ))}
       </div>
 
-      {/* 필터 영역 */}
+      {/* 필터 */}
       <div className="flex flex-wrap gap-3 mb-4">
-        {/* 검색 */}
         <input
           type="text"
-          placeholder="현장명, 자재명, 호기, 신청자 검색"
+          placeholder="현장명, 자재명, 파트번호, 계약종류, 신청자 검색"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="border border-gray-200 rounded-lg px-4 py-2 text-sm w-72 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+          className="border border-gray-200 rounded-lg px-4 py-2 text-sm w-80 focus:outline-none focus:ring-2 focus:ring-yellow-400"
         />
-
-        {/* 상태 필터 */}
         <div className="flex gap-2">
           {(['전체', '신청중', '자재분출', '자재교체'] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
+            <button key={s} onClick={() => setStatusFilter(s)}
               className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                 statusFilter === s
                   ? 'bg-yellow-400 text-white border-yellow-400'
                   : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-              }`}
-            >
+              }`}>
               {s === '자재교체' ? '교체완료' : s}
             </button>
           ))}
         </div>
-
-        {/* 팀 필터 */}
         {teams.length > 1 && (
-          <select
-            value={teamFilter}
-            onChange={(e) => setTeamFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
-          >
+          <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
             {teams.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
@@ -454,7 +446,9 @@ export default function MaterialPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">신청일시</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">현장</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">호기</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">계약종류</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">자재명</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">파트번호</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">수량</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">신청자</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">분출일시</th>
@@ -465,7 +459,7 @@ export default function MaterialPage() {
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-16 text-gray-400">
+                  <td colSpan={12} className="text-center py-16 text-gray-400">
                     <div className="text-4xl mb-2">📦</div>
                     <p>자재신청 내역이 없습니다.</p>
                   </td>
@@ -473,41 +467,36 @@ export default function MaterialPage() {
               ) : filtered.map((r) => {
                 const st = STATUS_STYLE[r.status] || STATUS_STYLE['신청중'];
                 return (
-                  <tr
-                    key={r.id}
-                    className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => { setSelected(r); setDetailModal(true); }}
-                  >
+                  <tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => { setSelected(r); setDetailModal(true); }}>
                     <td className="px-4 py-3">
                       <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
-                        className="px-2 py-1 rounded-full text-xs font-semibold">
+                        className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
                         {st.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">{formatTs(r.requestedAt)}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-900">{r.siteName}</td>
-                    <td className="px-4 py-3 text-gray-600">{r.hogiNo}호기</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.requestedAt)}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap">{r.siteName}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.hogiNo}호기</td>
+                    <td className="px-4 py-3 text-blue-700 text-xs font-semibold whitespace-nowrap">{r.contractType || '-'}</td>
                     <td className="px-4 py-3 text-gray-900">
                       {r.materialName}{r.spec ? ` (${r.spec})` : ''}
                     </td>
-                    <td className="px-4 py-3 font-semibold text-yellow-700">{r.quantity}{r.unit}</td>
-                    <td className="px-4 py-3 text-gray-600">{r.requesterName || '-'}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatTs(r.dispatchedAt)}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatTs(r.replacedAt)}</td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{r.partNumber || '-'}</td>
+                    <td className="px-4 py-3 font-semibold text-yellow-700 whitespace-nowrap">{r.quantity}{r.unit}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{r.requesterName || '-'}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.dispatchedAt)}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{formatTs(r.replacedAt)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       {r.status === '신청중' && (
-                        <button
-                          onClick={() => handleDispatch(r)}
-                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200"
-                        >
+                        <button onClick={() => handleDispatch(r)}
+                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
                           📦 자재분출
                         </button>
                       )}
                       {r.status === '자재분출' && (
-                        <button
-                          onClick={() => handleReplace(r)}
-                          className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-semibold hover:bg-green-200"
-                        >
+                        <button onClick={() => handleReplace(r)}
+                          className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs font-semibold hover:bg-green-200">
                           ✅ 교체완료
                         </button>
                       )}
@@ -524,14 +513,11 @@ export default function MaterialPage() {
       </div>
 
       {/* ── 상세 모달 ── */}
-      {detailModal && selected && (() => {
-        const st = STATUS_STYLE[selected.status] || STATUS_STYLE['신청중'];
-        // 최신 데이터 반영
-        const current = requests.find((r) => r.id === selected.id) || selected;
+      {detailModal && currentSelected && (() => {
+        const st = STATUS_STYLE[currentSelected.status] || STATUS_STYLE['신청중'];
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-              {/* 모달 헤더 */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <h2 className="text-lg font-bold text-gray-900">자재신청 상세</h2>
                 <button onClick={() => setDetailModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
@@ -550,16 +536,20 @@ export default function MaterialPage() {
                 <div className="bg-gray-50 rounded-xl p-4 mb-4">
                   <p className="text-xs font-bold text-blue-600 mb-3">📋 신청 정보</p>
                   {[
-                    { label: '현장',   value: current.siteName },
-                    { label: '호기',   value: `${current.hogiNo}호기` },
-                    { label: '자재명', value: `${current.materialName}${current.spec ? ` (${current.spec})` : ''}` },
-                    { label: '수량',   value: `${current.quantity}${current.unit}` },
-                    { label: '사유',   value: current.reason || '-' },
-                    { label: '비고',   value: current.note   || '-' },
+                    { label: '현장',     value: currentSelected.siteName },
+                    { label: '호기',     value: `${currentSelected.hogiNo}호기` },
+                    { label: '계약종류', value: currentSelected.contractType || '-' },
+                    { label: '자재명',   value: `${currentSelected.materialName}${currentSelected.spec ? ` (${currentSelected.spec})` : ''}` },
+                    { label: '파트번호', value: currentSelected.partNumber || '-' },
+                    { label: '수량',     value: `${currentSelected.quantity}${currentSelected.unit}` },
+                    { label: '사유',     value: currentSelected.reason || '-' },
+                    { label: '비고',     value: currentSelected.note   || '-' },
                   ].map((row) => (
                     <div key={row.label} className="flex py-2 border-b border-gray-100 last:border-0">
-                      <span className="w-20 text-xs text-gray-500 font-semibold">{row.label}</span>
-                      <span className="text-sm text-gray-900 flex-1">{row.value}</span>
+                      <span className="w-20 text-xs text-gray-500 font-semibold shrink-0">{row.label}</span>
+                      <span className={`text-sm flex-1 ${row.label === '파트번호' ? 'font-mono text-gray-600' : row.label === '계약종류' ? 'text-blue-700 font-semibold' : 'text-gray-900'}`}>
+                        {row.value}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -568,12 +558,12 @@ export default function MaterialPage() {
                 <div className="bg-gray-50 rounded-xl p-4 mb-4">
                   <p className="text-xs font-bold text-blue-600 mb-3">⏱ 처리 이력</p>
                   {[
-                    { label: '신청일시', value: formatTs(current.requestedAt),  sub: current.requesterName },
-                    { label: '분출일시', value: formatTs(current.dispatchedAt), sub: current.dispatcherName },
-                    { label: '교체완료', value: formatTs(current.replacedAt),   sub: current.replacerName },
+                    { label: '신청일시', value: formatTs(currentSelected.requestedAt),  sub: currentSelected.requesterName },
+                    { label: '분출일시', value: formatTs(currentSelected.dispatchedAt), sub: currentSelected.dispatcherName },
+                    { label: '교체완료', value: formatTs(currentSelected.replacedAt),   sub: currentSelected.replacerName },
                   ].map((row) => (
                     <div key={row.label} className="flex py-2 border-b border-gray-100 last:border-0">
-                      <span className="w-20 text-xs text-gray-500 font-semibold">{row.label}</span>
+                      <span className="w-20 text-xs text-gray-500 font-semibold shrink-0">{row.label}</span>
                       <div className="flex-1">
                         <p className="text-sm text-gray-900">{row.value}</p>
                         {row.sub && <p className="text-xs text-gray-400 mt-0.5">{row.sub}</p>}
@@ -583,26 +573,20 @@ export default function MaterialPage() {
                 </div>
 
                 {/* 액션 버튼 */}
-                {current.status === '신청중' && (
-                  <button
-                    onClick={() => handleDispatch(current)}
-                    className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 mb-2"
-                  >
+                {currentSelected.status === '신청중' && (
+                  <button onClick={() => handleDispatch(currentSelected)}
+                    className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 mb-2">
                     📦 자재분출 처리
                   </button>
                 )}
-                {current.status === '자재분출' && (
-                  <button
-                    onClick={() => handleReplace(current)}
-                    className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 mb-2"
-                  >
+                {currentSelected.status === '자재분출' && (
+                  <button onClick={() => handleReplace(currentSelected)}
+                    className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 mb-2">
                     ✅ 교체완료 처리
                   </button>
                 )}
-                <button
-                  onClick={() => handleDelete(current.id)}
-                  className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl font-semibold hover:bg-red-100 text-sm mt-1"
-                >
+                <button onClick={() => handleDelete(currentSelected.id)}
+                  className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl font-semibold hover:bg-red-100 text-sm mt-1">
                   🗑 삭제
                 </button>
               </div>
@@ -680,28 +664,24 @@ export default function MaterialPage() {
 
               {/* 현장 선택 */}
               <p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
-              <select
-                value={pdfSiteId}
+              <select value={pdfSiteId}
                 onChange={(e) => {
                   const id = e.target.value;
                   setPdfSiteId(id);
                   setPdfSiteName(sites.find((s) => s.id === id)?.siteName || '');
                 }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-yellow-400"
-              >
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-yellow-400">
                 <option value="">전체 현장</option>
                 {sites.map((s) => <option key={s.id} value={s.id}>{s.siteName}</option>)}
               </select>
 
-              {/* 미리보기 건수 */}
+              {/* 출력 대상 건수 */}
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4 text-sm text-yellow-800">
                 출력 대상: <strong>{pdfFiltered.length}건</strong>
               </div>
 
-              <button
-                onClick={exportPDF}
-                className="w-full py-3 bg-yellow-400 text-white rounded-xl font-bold hover:bg-yellow-500"
-              >
+              <button onClick={exportPDF}
+                className="w-full py-3 bg-yellow-400 text-white rounded-xl font-bold hover:bg-yellow-500">
                 📄 PDF 출력
               </button>
             </div>
