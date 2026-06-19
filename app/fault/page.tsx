@@ -163,8 +163,8 @@ export default function FaultPage() {
       ? collection(db, 'companies', cid, 'faultReports')
       : collection(db, 'faultReports');
     const faultQ = useNew
-      ? query(faultCol, orderBy('createdAt', 'desc'))
-      : query(faultCol, where('companyId', '==', cid), orderBy('createdAt', 'desc'));
+  ? query(faultCol, orderBy('createdAt', 'desc'))
+  : query(faultCol, where('companyId', '==', cid), orderBy('createdAt', 'desc'));
     unsubs.push(onSnapshot(faultQ, snap => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as FaultReport));
       setFaults(data);
@@ -227,7 +227,7 @@ export default function FaultPage() {
     try {
       await addDoc(getFaultCol(), {
         ...form,
-        team: userInfo?.team || '',
+        team: sites.find(s => s.id === form.siteId)?.team || '',
         companyId: userInfo?.companyId || '',
         status: '접수대기',
         createdAt: serverTimestamp(),
