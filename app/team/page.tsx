@@ -133,7 +133,7 @@ if (!isSuperAdmin && !isAdmin) {
   useEffect(() => {
     if (!userInfo) return;
     const q = query(collection(db, 'companies', userInfo.companyId, 'teams'));
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       const list: TeamItem[] = snap.docs.map((d) => ({
         id: d.id,
         name: d.data().name || '',
@@ -142,8 +142,7 @@ if (!isSuperAdmin && !isAdmin) {
       }));
       list.sort((a, b) => (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0));
       setTeams(list);
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo]);
 
   // ── 초대코드 실시간 구독 ──
@@ -153,7 +152,7 @@ if (!isSuperAdmin && !isAdmin) {
       collection(db, 'invitations'),
       where('companyId', '==', userInfo.companyId)
     );
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       const map: Record<string, InviteInfo> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
@@ -172,8 +171,7 @@ if (!isSuperAdmin && !isAdmin) {
         }
       });
       setInvitations(map);
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo]);
 
   // ── 멤버 실시간 구독 ──
@@ -183,7 +181,7 @@ if (!isSuperAdmin && !isAdmin) {
   collection(db, 'users'),
   where('companyId', '==', userInfo.companyId)
 );
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       const list: TeamMember[] = snap.docs.map((d) => ({
         uid: d.id,
         name: d.data().name || '',
@@ -194,8 +192,7 @@ if (!isSuperAdmin && !isAdmin) {
         createdAt: toDate(d.data().createdAt),
       }));
       setMembers(list);
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo]);
 
   // ── 팀 생성 ──

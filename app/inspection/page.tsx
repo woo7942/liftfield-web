@@ -113,11 +113,9 @@ export default function InspectionPage() {
   // ── 팀 목록 로드 ──────────────────────────────
   useEffect(() => {
     if (!userInfo) return;
-    const unsub = onSnapshot(
-      collection(db, 'companies', userInfo.companyId, 'teams'),
+    getDocs(collection(db, 'companies', userInfo.companyId, 'teams')).then(
       snap => setTeams(snap.docs.map(d => ({ id: d.id, name: d.data().name || '' })))
-    );
-    return unsub;
+    ).catch(console.error);
   }, [userInfo]);
 
   // ── 현장 목록 로드 ────────────────────────────
@@ -145,11 +143,11 @@ export default function InspectionPage() {
       where('scheduledDate', '<=', endDate),
       orderBy('scheduledDate', 'asc')
     );
-    const unsub = onSnapshot(q, snap => {
+    setLoading(true);
+    getDocs(q).then(snap => {
       setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as InspectionRecord)));
       setLoading(false);
-    });
-    return unsub;
+    }).catch(err => { console.error(err); setLoading(false); });
   }, [userInfo, year, month]);
 
   // ── 팀 필터 적용 ──────────────────────────────

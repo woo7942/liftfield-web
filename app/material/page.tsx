@@ -2,7 +2,7 @@
 'use client';
 
 import {
-  collection, doc, onSnapshot, orderBy, query,
+  collection, doc, getDocs, onSnapshot, orderBy, query,
   serverTimestamp, Timestamp, updateDoc, deleteDoc, where,
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -160,9 +160,9 @@ export default function MaterialPage() {
 
     const siteCol = useNew ? collection(db, 'companies', cid, 'sites') : collection(db, 'sites');
     const siteQ   = isSA || useNew ? query(siteCol) : query(siteCol, where('companyId', '==', cid));
-    unsubs.push(onSnapshot(siteQ, (snap) => {
+    getDocs(siteQ).then(snap => {
       setSites(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Site)));
-    }));
+    }).catch(console.error);
 
     return () => unsubs.forEach((u) => u());
   }, [userInfo]);

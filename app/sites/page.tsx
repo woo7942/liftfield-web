@@ -178,7 +178,7 @@ export default function SitesPage() {
       collection(db, 'companies', userInfo.companyId, 'sites'),
       orderBy('createdAt', 'desc')
     );
-    const unsub = onSnapshot(q, async (snap) => {
+    getDocs(q).then(async (snap) => {
       const list: SiteItem[] = snap.docs.map(d => {
         const data = d.data();
         return {
@@ -201,8 +201,7 @@ export default function SitesPage() {
         total += elevsSnap.size;
       }
       setTotalElevatorCount(total);
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo?.companyId]);
 
 
