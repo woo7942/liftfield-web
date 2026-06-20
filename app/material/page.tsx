@@ -118,6 +118,7 @@ export default function MaterialPage() {
   const [pdfModal, setPdfModal]         = useState(false);
   const [pdfSiteId, setPdfSiteId]       = useState('');
   const [pdfSiteName, setPdfSiteName]   = useState('');
+  const [pdfSiteSearch, setPdfSiteSearch] = useState('');
   const [pdfDateFrom, setPdfDateFrom]   = useState('');
   const [pdfDateTo, setPdfDateTo]       = useState('');
   const [pdfStatusFilter, setPdfStatusFilter] = useState<MaterialStatus | '전체'>('전체');
@@ -619,20 +620,47 @@ export default function MaterialPage() {
                 ))}
               </div>
 
-              <p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
-              <select value={pdfSiteId}
-                onChange={(e) => { const id = e.target.value; setPdfSiteId(id); setPdfSiteName(sites.find((s) => s.id === id)?.siteName || ''); }}
-                size={1}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-yellow-400">
-                <option value="">전체 현장</option>
-                {sites
-                  .filter((s) => s.siteName?.trim())
-                  .sort((a, b) => a.siteName.localeCompare(b.siteName, 'ko'))
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>{s.siteName?.trim()}</option>
-                  ))
-                }
-              </select>
+              // 기존 <select> 전체 교체
+<p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
+{pdfSiteName ? (
+  <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 mb-4">
+    <span className="text-sm font-semibold text-gray-800">{pdfSiteName}</span>
+    <button onClick={() => { setPdfSiteId(''); setPdfSiteName(''); }}
+      className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+  </div>
+) : (
+  <div className="relative mb-4">
+    <input
+      type="text"
+      placeholder="현장명 검색 (2글자 이상)"
+      value={pdfSiteSearch}
+      onChange={(e) => setPdfSiteSearch(e.target.value)}
+      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+    />
+    {pdfSiteSearch.trim().length >= 2 && (
+      <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-48 overflow-y-auto shadow-lg">
+        {sites
+          .filter((s) => s.siteName?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
+          .slice(0, 20)
+          .length === 0 ? (
+          <p className="text-sm text-gray-400 px-3 py-2">검색 결과 없음</p>
+        ) : (
+          sites
+            .filter((s) => s.siteName?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
+            .slice(0, 20)
+            .map((s) => (
+              <button key={s.id}
+                onClick={() => { setPdfSiteId(s.id); setPdfSiteName(s.siteName?.trim()); setPdfSiteSearch(''); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-yellow-50 border-b border-gray-50 last:border-0">
+                {s.siteName?.trim()}
+              </button>
+            ))
+        )}
+      </div>
+    )}
+  </div>
+)}
+
 
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4 text-sm text-yellow-800">
                 출력 대상: <strong>{pdfFiltered.length}건</strong>
