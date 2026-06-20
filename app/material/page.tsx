@@ -620,8 +620,9 @@ export default function MaterialPage() {
                 ))}
               </div>
 
-              // 기존 <select> 전체 교체
-<p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
+             
+              <p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
+
 {pdfSiteName ? (
   <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 mb-4">
     <span className="text-sm font-semibold text-gray-800">{pdfSiteName}</span>
