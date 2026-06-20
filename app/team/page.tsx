@@ -103,17 +103,14 @@ export default function TeamPage() {
       const endDate = toDate(sub.endDate);
       const now = new Date();
       const isSuperAdmin = data.superAdmin === true;
-      const isCompanyAdmin =
-  data.role === 'admin' &&
-  sub.plan === 'company' &&
-  sub.status === 'active';
-  // endDate 체크 제거 - 관리자는 항상 접근 가능
+      // 변경 후 - admin 역할이면 플랜 상관없이 접근 가능
+const isAdmin = data.role === 'admin';
 
+if (!isSuperAdmin && !isAdmin) {
+  router.push('/');
+  return;
+}
 
-      if (!isSuperAdmin && !isCompanyAdmin) {
-        router.push('/');
-        return;
-      }
 
       setUserInfo({
         uid: user.uid,
