@@ -58,11 +58,11 @@ export default function HomePage() {
 
   const guideQna = [
     { q: '앱은 어떻게 설치하나요?', a: 'App Store 또는 Google Play에서 "LiftField"를 검색하여 설치하세요.' },
-    { q: '현장은 어떻게 추가하나요?', a: '앱 또는 웹 대시보드의 현장관리 메뉴에서 + 버튼을 눌러 현장을 등록할 수 있습니다.' },
+    { q: '현장은 어떻게 추가하나요?', a: '앱 또는 웹 운영 페이지의 현장관리 메뉴에서 + 버튼을 눌러 현장을 등록할 수 있습니다.' },
     { q: '고장신고는 어떻게 하나요?', a: '앱 하단 고장신고 탭에서 현장과 호기를 선택한 후 내용을 입력하고 접수하세요.' },
-    { q: '팀원은 어떻게 초대하나요?', a: 'Company 플랜 관리자는 웹 대시보드 팀 관리 메뉴에서 팀별 초대코드를 발급할 수 있습니다.' },
+    { q: '팀원은 어떻게 초대하나요?', a: 'Company 플랜 관리자는 웹 운영 페이지 팀 관리 메뉴에서 팀별 초대코드를 발급할 수 있습니다.' },
     { q: '점검 일정은 어떻게 등록하나요?', a: '점검관리 메뉴에서 날짜와 현장을 선택한 후 일정을 등록하면 됩니다.' },
-    { q: '웹 대시보드는 어떻게 사용하나요?', a: 'Company 구독 이상에서 liftfield.co.kr 로그인 후 이용 가능합니다.' },
+    { q: '웹 운영 페이지는 어떻게 사용하나요?', a: 'Company 구독 이상에서 liftfield.co.kr 로그인 후 이용 가능합니다.' },
   ];
 
   return (
@@ -113,15 +113,7 @@ export default function HomePage() {
                   </button>
                 )}
 
-                {/* 점검 현황 — Company 관리자 또는 SuperAdmin */}
-{(isCompany && isAdmin || isSuperAdmin) && (
-  <button
-    onClick={() => router.push('/inspection')}
-    className="text-sm font-bold bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded-xl transition-colors"
-  >
-    🔍 점검 현황
-  </button>
-)}
+
 
                 {/* 팀 관리 — Company 관리자 또는 SuperAdmin만 표시 */}
                 {(isCompany && isAdmin || isSuperAdmin) && (
@@ -129,7 +121,7 @@ export default function HomePage() {
                     onClick={() => router.push('/team')}
                     className="text-sm font-bold bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-xl transition-colors"
                   >
-                    👥 팀 관리
+                    🔗 팀 초대하기
                   </button>
                 )}
 
@@ -149,7 +141,7 @@ export default function HomePage() {
     onClick={() => router.push('/dashboard')}
     className="text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl transition-colors"
   >
-    대시보드
+    🖥️ 운영 페이지
   </button>
 )}
 
@@ -267,7 +259,7 @@ export default function HomePage() {
                     <span className="text-green-500 font-bold">✓</span>{t}
                   </li>
                 ))}
-                {['채팅', '팀원 초대', '기술 Q&A', '웹 대시보드'].map((t) => (
+                {['채팅', '팀원 초대', '기술 Q&A', '웹 운영 페이지'].map((t) => (
                   <li key={t} className="flex items-center gap-2 text-gray-300">
                     <span className="font-bold">✗</span>
                     <span className="line-through">{t}</span>
@@ -301,7 +293,7 @@ export default function HomePage() {
                 ))}
                 <li className="flex items-center gap-2 text-blue-300">
                   <span className="font-bold">✗</span>
-                  <span className="line-through">웹 대시보드</span>
+                  <span className="line-through">웹 운영 페이지</span>
                   <span className="text-xs bg-blue-700 text-blue-200 px-2 py-0.5 rounded-full">
                     Company만
                   </span>
@@ -329,7 +321,7 @@ export default function HomePage() {
               <ul className="space-y-2.5 text-sm text-gray-600 flex-1">
                 {[
                   'Pro 모든 기능 포함',
-                  '웹 대시보드',
+                  '웹 운영 페이지',
                   '팀원 인원수 선택',
                   '팀별 초대코드 발급',
                   '전체 현장 통합 관리',
