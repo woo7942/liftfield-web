@@ -421,7 +421,7 @@ export default function SignupPage() {
 
           {/* ── STEP 1: 기본 정보 ── */}
           {step === 1 && (
-            <div className="space-y-4">
+  <form autoComplete="off" onSubmit={(e) => e.preventDefault()} className="space-y-4">
               <h2 className="text-lg font-bold text-gray-800">기본 정보 입력</h2>
 
               <div>
@@ -431,6 +431,8 @@ export default function SignupPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="홍길동"
+                  autoComplete="off"
+
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>
@@ -442,6 +444,7 @@ export default function SignupPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="example@email.com"
+                  autoComplete="off"
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>
@@ -453,6 +456,7 @@ export default function SignupPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="010-0000-0000"
+                  autoComplete="off"
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>
@@ -466,6 +470,8 @@ export default function SignupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••"
+                  autoComplete="new-password"
+
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>
@@ -479,6 +485,8 @@ export default function SignupPage() {
                   value={passwordConfirm}
                   onChange={(e) => setPasswordConfirm(e.target.value)}
                   placeholder="••••••"
+                  autoComplete="new-password"
+
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>
@@ -547,9 +555,8 @@ export default function SignupPage() {
                   로그인
                 </button>
               </p>
-            </div>
-          )}
-
+              </form>
+)}
           {/* ── STEP 2: 플랜 선택 ── */}
           {step === 2 && (
             <div className="space-y-4">
