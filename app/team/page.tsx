@@ -180,9 +180,10 @@ if (!isSuperAdmin && !isAdmin) {
   useEffect(() => {
     if (!userInfo) return;
     const q = query(
-      collection(db, 'users'),
-      where('companyId', '==', userInfo.companyId)
-    );
+  collection(db, 'users'),
+  where('companyId', '==', userInfo.companyId),
+  where('role', '==', 'admin')
+);
     const unsub = onSnapshot(q, (snap) => {
       const list: TeamMember[] = snap.docs.map((d) => ({
         uid: d.id,
@@ -241,10 +242,11 @@ if (!isSuperAdmin && !isAdmin) {
       const snap = await getDocs(q);
 
       if (!snap.empty) {
-        await updateDoc(doc(db, 'invitations', snap.docs[0].id), {
-          expireAt,
-          maxMembers: inviteMaxMembers,
-        });
+  await updateDoc(doc(db, 'invitations', snap.docs[0].id), {
+    expireAt,
+    maxMembers: inviteMaxMembers,
+    code: generateCode(), // ✅ 코드도 새로 발급
+  });
       } else {
         await addDoc(collection(db, 'invitations'), {
           code: generateCode(),
