@@ -622,9 +622,16 @@ export default function MaterialPage() {
               <p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
               <select value={pdfSiteId}
                 onChange={(e) => { const id = e.target.value; setPdfSiteId(id); setPdfSiteName(sites.find((s) => s.id === id)?.siteName || ''); }}
+                size={1}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-yellow-400">
                 <option value="">전체 현장</option>
-                {sites.map((s) => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+                {sites
+                  .filter((s) => s.siteName?.trim())
+                  .sort((a, b) => a.siteName.localeCompare(b.siteName, 'ko'))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>{s.siteName?.trim()}</option>
+                  ))
+                }
               </select>
 
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4 text-sm text-yellow-800">
