@@ -181,8 +181,7 @@ if (!isSuperAdmin && !isAdmin) {
     if (!userInfo) return;
     const q = query(
   collection(db, 'users'),
-  where('companyId', '==', userInfo.companyId),
-  where('role', '==', 'admin')
+  where('companyId', '==', userInfo.companyId)
 );
     const unsub = onSnapshot(q, (snap) => {
       const list: TeamMember[] = snap.docs.map((d) => ({
@@ -486,10 +485,11 @@ if (!isSuperAdmin && !isAdmin) {
                     </div>
                     <button
                       onClick={() => {
-                        setInviteTeam(selectedTeam);
-                        setInviteMaxMembers(invitations[selectedTeam.name]?.maxMembers || 5);
-                        setShowInviteModal(true);
-                      }}
+  const currentMax = invitations[selectedTeam.name]?.maxMembers || 5;
+  setInviteMaxMembers(currentMax);
+  setInviteTeam(selectedTeam);
+  setShowInviteModal(true);
+}}
                       className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
                     >
                       🔗 초대코드 {invitations[selectedTeam.name] ? '갱신' : '발급'}
