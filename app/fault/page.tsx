@@ -3,7 +3,7 @@
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   addDoc, collection, deleteDoc,
-  doc, getDoc, onSnapshot, orderBy,
+  doc, getDoc, getDocs, onSnapshot, orderBy,
   query, serverTimestamp, updateDoc, where
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
@@ -189,19 +189,15 @@ export default function FaultPage() {
     const siteQ = useNew
       ? query(siteCol, orderBy('siteName'))
       : query(siteCol, where('companyId', '==', cid), orderBy('siteName'));
-    unsubs.push(onSnapshot(siteQ, snap =>
+    // sites - 1회 로드면 충분
+    getDocs(siteQ).then(snap =>
       setSites(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    ));
+    ).catch(console.error);
 
-    // users
-    const userQ = query(
-      collection(db, 'users'),
-      where('companyId', '==', cid),
-      where('status', '==', 'approved')
-    );
-    unsubs.push(onSnapshot(userQ, snap =>
+    // users - 1회 로드면 충분
+    getDocs(userQ).then(snap =>
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    ));
+    ).catch(console.error);
 
     return () => unsubs.forEach(u => u());
   }, [userInfo]);

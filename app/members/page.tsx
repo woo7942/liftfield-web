@@ -92,7 +92,7 @@ export default function MembersPage() {
   useEffect(() => {
     if (!userInfo?.companyId) return;
     const q = query(collection(db, 'users'));
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       const list: Member[] = snap.docs
         .filter(d => d.data().companyId === userInfo.companyId)
         .map(d => ({
@@ -107,8 +107,7 @@ export default function MembersPage() {
       setMembers(list);
       const teamSet = new Set(list.map(m => m.team).filter(Boolean));
       setTeams(Array.from(teamSet));
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo?.companyId]);
 
   // ─── 휴가 신청 목록 구독 ───
@@ -118,14 +117,13 @@ export default function MembersPage() {
       collection(db, 'companies', userInfo.companyId, 'leaveRequests'),
       orderBy('createdAt', 'desc')
     );
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       const list: LeaveRequest[] = snap.docs.map(d => ({
         id: d.id,
         ...d.data(),
       } as LeaveRequest));
       setLeaveRequests(list);
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo?.companyId]);
 
   // ─── 직원 수정 ───

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   doc, getDoc, collection, query, where,
-  onSnapshot, orderBy, collectionGroup
+  getDocs, onSnapshot, orderBy, collectionGroup
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 
@@ -117,10 +117,9 @@ export default function DashboardPage() {
       collection(db, 'companies', cid, 'sites'),
       orderBy('createdAt', 'desc')
     );
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       setSites(snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem)));
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo]);
 
   // 승강기 총 수
@@ -128,8 +127,7 @@ export default function DashboardPage() {
     if (!userInfo) return;
     const cid = userInfo.companyId;
     const q = query(collectionGroup(db, 'elevators'), where('companyId', '==', cid));
-    const unsub = onSnapshot(q, (snap) => setTotalElevs(snap.size));
-    return () => unsub();
+    getDocs(q).then(snap => setTotalElevs(snap.size)).catch(console.error);
   }, [userInfo]);
 
   // 카운트 구독
@@ -150,11 +148,10 @@ export default function DashboardPage() {
       : query(matCol, where('companyId', '==', cid), where('status', '==', '신청중'));
     const u2 = onSnapshot(matQ, s => setCounts(p => ({ ...p, material: s.size })));
 
-    const u3 = onSnapshot(
-      query(collection(db, 'users'), where('companyId', '==', cid)),
+    getDocs(query(collection(db, 'users'), where('companyId', '==', cid))).then(
       s => setCounts(p => ({ ...p, member: s.size }))
-    );
-    return () => { u1(); u2(); u3(); };
+    ).catch(console.error);
+    return () => { u1(); u2(); };
   }, [userInfo]);
 
   const handleLogout = async () => { await signOut(auth); router.push('/'); };

@@ -125,10 +125,9 @@ export default function QnaPage() {
   useEffect(() => {
     if (!userInfo) return;
     const q = query(collection(db, 'qna'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
+    getDocs(q).then(snap => {
       setQnaList(snap.docs.map(d => ({ id: d.id, ...d.data() } as QnaItem)));
-    });
-    return () => unsub();
+    }).catch(console.error);
   }, [userInfo]);
 
   // ─── 답변 구독 ───
