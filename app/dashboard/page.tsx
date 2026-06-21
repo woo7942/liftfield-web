@@ -141,14 +141,25 @@ export default function DashboardPage() {
     return () => unsub();
   }, []);
 
-  // 현장
-  useEffect(() => {
-    if (!userInfo) return;
-    const cid = userInfo.companyId;
+  // 현장 (localStorage 캐시)
+useEffect(() => {
+  if (!userInfo) return;
+  const cid = userInfo.companyId;
+  const cacheKey = `sites_${cid}`;
+  const cached = localStorage.getItem(cacheKey);
+
+  if (cached) {
+    setSites(JSON.parse(cached));
+  } else {
     getDocs(query(collection(db, 'companies', cid, 'sites'), orderBy('createdAt', 'desc')))
-      .then(snap => setSites(snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem))))
-      .catch(console.error);
-  }, [userInfo]);
+      .then(snap => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
+        setSites(data);
+        localStorage.setItem(cacheKey, JSON.stringify(data));
+      }).catch(console.error);
+  }
+}, [userInfo]);
+
 
   // 승강기 수 (localStorage 캐시)
 useEffect(() => {
@@ -201,9 +212,19 @@ unsubs.push(onSnapshot(matQ, s => {
 }));
 
 
-    // 직원 수
-    getDocs(query(collection(db, 'users'), where('companyId', '==', cid)))
-      .then(s => setCounts(p => ({ ...p, member: s.size }))).catch(console.error);
+    // 직원 수 (localStorage 캐시)
+const memberCacheKey = `memberCount_${cid}`;
+const cachedMember = localStorage.getItem(memberCacheKey);
+if (cachedMember) {
+  setCounts(p => ({ ...p, member: Number(cachedMember) }));
+} else {
+  getDocs(query(collection(db, 'users'), where('companyId', '==', cid)))
+    .then(s => {
+      setCounts(p => ({ ...p, member: s.size }));
+      localStorage.setItem(memberCacheKey, String(s.size));
+    }).catch(console.error);
+}
+
 
     return () => unsubs.forEach(u => u());
   }, [userInfo]);
