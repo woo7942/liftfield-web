@@ -102,7 +102,6 @@ const S = {
 };
 
 // ── 알림 탭 타입 ──────────────────────────────────
-type AlertTab = 'contract' | 'fault' | 'material';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -117,7 +116,6 @@ export default function DashboardPage() {
   const [today, setToday]           = useState('');
 
   // 알림 탭
-  const [alertTab, setAlertTab]     = useState<AlertTab>('contract');
   const [faultList, setFaultList]   = useState<FaultItem[]>([]);
   const [materialList, setMaterialList] = useState<MaterialItem[]>([]);
 
