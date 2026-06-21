@@ -519,7 +519,13 @@ export default function FaultPage() {
     : sites;
 
   const selectedSite = sites.find(s => s.id === form.siteId);
-  const teamUsers = selectedSite ? users.filter(u => u.team === selectedSite.team) : [];
+  const teamUsers = selectedSite
+  ? users.filter(u =>
+      u.team === selectedSite.team ||
+      u.teamName === selectedSite.team ||
+      u.team === selectedSite.teamName
+    )
+  : [];
 
   const getCompletedCount = (siteId: string) =>
     faults.filter(f => f.siteId === siteId && f.status === '완료').length;
