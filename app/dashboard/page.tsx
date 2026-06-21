@@ -164,25 +164,29 @@ export default function DashboardPage() {
     const useNew = userInfo.useNewStructure;
     const unsubs: (() => void)[] = [];
 
-    // 고장접수
-    const faultCol = useNew ? collection(db, 'companies', cid, 'faultReports') : collection(db, 'faultReports');
-    const faultQ   = useNew
-      ? query(faultCol, where('status', '==', '접수대기'), orderBy('createdAt', 'desc'))
-      : query(faultCol, where('companyId', '==', cid), where('status', '==', '접수대기'), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(faultQ, s => {
-      setCounts(p => ({ ...p, fault: s.size }));
-      setFaultList(s.docs.map(d => ({ id: d.id, ...d.data() } as FaultItem)));
-    }));
+    // 24시간 이내만 구독
+const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // 자재신청
-    const matCol = useNew ? collection(db, 'companies', cid, 'materialRequests') : collection(db, 'materialRequests');
-    const matQ   = useNew
-      ? query(matCol, where('status', '==', '신청중'), orderBy('createdAt', 'desc'))
-      : query(matCol, where('companyId', '==', cid), where('status', '==', '신청중'), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(matQ, s => {
-      setCounts(p => ({ ...p, material: s.size }));
-      setMaterialList(s.docs.map(d => ({ id: d.id, ...d.data() } as MaterialItem)));
-    }));
+// 고장접수
+const faultCol = useNew ? collection(db, 'companies', cid, 'faultReports') : collection(db, 'faultReports');
+const faultQ   = useNew
+  ? query(faultCol, where('status', '==', '접수대기'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'))
+  : query(faultCol, where('companyId', '==', cid), where('status', '==', '접수대기'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'));
+unsubs.push(onSnapshot(faultQ, s => {
+  setCounts(p => ({ ...p, fault: s.size }));
+  setFaultList(s.docs.map(d => ({ id: d.id, ...d.data() } as FaultItem)));
+}));
+
+// 자재신청
+const matCol = useNew ? collection(db, 'companies', cid, 'materialRequests') : collection(db, 'materialRequests');
+const matQ   = useNew
+  ? query(matCol, where('status', '==', '신청중'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'))
+  : query(matCol, where('companyId', '==', cid), where('status', '==', '신청중'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'));
+unsubs.push(onSnapshot(matQ, s => {
+  setCounts(p => ({ ...p, material: s.size }));
+  setMaterialList(s.docs.map(d => ({ id: d.id, ...d.data() } as MaterialItem)));
+}));
+
 
     // 직원 수
     getDocs(query(collection(db, 'users'), where('companyId', '==', cid)))
