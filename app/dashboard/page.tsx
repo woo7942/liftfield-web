@@ -240,10 +240,11 @@ export default function DashboardPage() {
 
   return (
     <div style={{
-      height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
-      background: '#0f172a', fontSize: 15,
-    }}>
+  height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
+  background: '#0f172a', fontSize: 15, zoom: 1.15,
+}}>
+
 
       {/* ═══ 헤더 ═══════════════════════════════════ */}
       <header style={{
