@@ -150,12 +150,25 @@ export default function DashboardPage() {
       .catch(console.error);
   }, [userInfo]);
 
-  // 승강기 수
-  useEffect(() => {
-    if (!userInfo) return;
+  // 승강기 수 (localStorage 캐시)
+useEffect(() => {
+  if (!userInfo) return;
+  const cacheKey = `totalElevs_${userInfo.companyId}`;
+  const cached = localStorage.getItem(cacheKey);
+  
+  if (cached) {
+    // 저장된 값 바로 사용
+    setTotalElevs(Number(cached));
+  } else {
+    // 최초 1회만 Firebase 읽기
     getDocs(query(collectionGroup(db, 'elevators'), where('companyId', '==', userInfo.companyId)))
-      .then(snap => setTotalElevs(snap.size)).catch(console.error);
-  }, [userInfo]);
+      .then(snap => {
+        setTotalElevs(snap.size);
+        localStorage.setItem(cacheKey, String(snap.size));
+      }).catch(console.error);
+  }
+}, [userInfo]);
+
 
   // 카운트 + 알림 목록 구독
   useEffect(() => {
