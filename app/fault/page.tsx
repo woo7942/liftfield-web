@@ -182,19 +182,24 @@ export default function FaultPage() {
       setLoading(false);
     }));
 
-    // sites
+    // sites - 1회 로드
     const siteCol = useNew
       ? collection(db, 'companies', cid, 'sites')
       : collection(db, 'sites');
     const siteQ = useNew
       ? query(siteCol, orderBy('siteName'))
       : query(siteCol, where('companyId', '==', cid), orderBy('siteName'));
-    // sites - 1회 로드면 충분
     getDocs(siteQ).then(snap =>
       setSites(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     ).catch(console.error);
 
-    // users - 1회 로드면 충분
+    // ✅ users - 1회 로드 (userQ 정의 추가)
+    const userCol = useNew
+      ? collection(db, 'companies', cid, 'users')
+      : collection(db, 'users');
+    const userQ = useNew
+      ? query(userCol)
+      : query(userCol, where('companyId', '==', cid));
     getDocs(userQ).then(snap =>
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     ).catch(console.error);
@@ -321,9 +326,9 @@ export default function FaultPage() {
     setFaultCause(fault.faultCause || '');
     setFaultAction(fault.faultAction || '');
     setFaultNote(fault.faultNote || '');
-    const nowStr = getNowDatetimeLocal();
-    setArrivedAtInput(fault.arrivedAt ? toDatetimeLocal(fault.arrivedAt) : nowStr);
-    setCompletedAtInput(fault.completedAt ? toDatetimeLocal(fault.completedAt) : nowStr);
+    // ✅ 도착/완료시간이 있을 때만 입력값 채우기 (없으면 빈 문자열)
+    setArrivedAtInput(fault.arrivedAt ? toDatetimeLocal(fault.arrivedAt) : '');
+    setCompletedAtInput(fault.completedAt ? toDatetimeLocal(fault.completedAt) : '');
     setDetailModal(true);
   };
 
@@ -414,7 +419,6 @@ export default function FaultPage() {
       ? faults.filter(f => f.siteId === siteId && f.status === '완료')
       : faults.filter(f => f.status === '완료');
 
-    // 기간 필터
     if (pdfDateFrom) {
       const from = new Date(pdfDateFrom);
       from.setHours(0, 0, 0, 0);
@@ -461,7 +465,6 @@ export default function FaultPage() {
   .header { text-align:center; border-bottom:3px double #111; padding-bottom:10px; margin-bottom:12px; }
   .title { font-size:18pt; font-weight:bold; letter-spacing:8px; }
   .doc-info { display:flex; justify-content:space-between; font-size:8pt; color:#444; margin-bottom:8px; }
-  .summary { margin-bottom:8px; font-size:8.5pt; }
   table { width:100%; border-collapse:collapse; }
   th,td { border:1px solid #333; padding:4px 3px; vertical-align:middle; font-size:7.5pt; word-break:keep-all; }
   th { background:#1f2937; color:#fff; text-align:center; }
@@ -529,11 +532,11 @@ export default function FaultPage() {
   const totalCompleted = faults.filter(f => f.status === '완료').length;
 
   const stats = [
-    { label: '전체',    count: faults.length,                                       color: 'bg-gray-100 text-gray-700' },
-    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length,  color: 'bg-yellow-100 text-yellow-700' },
-    { label: '접수',    count: faults.filter(f => f.status === '접수').length,       color: 'bg-red-100 text-red-600' },
-    { label: '처리중',  count: faults.filter(f => f.status === '처리중').length,     color: 'bg-orange-100 text-orange-600' },
-    { label: '완료',    count: faults.filter(f => f.status === '완료').length,       color: 'bg-green-100 text-green-700' },
+    { label: '전체',    count: faults.length,                                      color: 'bg-gray-100 text-gray-700' },
+    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length, color: 'bg-yellow-100 text-yellow-700' },
+    { label: '접수',    count: faults.filter(f => f.status === '접수').length,      color: 'bg-red-100 text-red-600' },
+    { label: '처리중',  count: faults.filter(f => f.status === '처리중').length,    color: 'bg-orange-100 text-orange-600' },
+    { label: '완료',    count: faults.filter(f => f.status === '완료').length,      color: 'bg-green-100 text-green-700' },
   ];
 
   if (loading) return (
@@ -902,7 +905,6 @@ export default function FaultPage() {
                 className="text-gray-400 hover:text-gray-700 text-2xl">×</button>
             </div>
 
-            {/* 기간 설정 */}
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
               <p className="text-sm font-semibold text-blue-700 mb-3">📅 기간 설정 (선택)</p>
               <div className="flex gap-2 items-center">
