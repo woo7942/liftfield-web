@@ -4,10 +4,11 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, doc, getDoc, addDoc, onSnapshot,
+  collection, doc, getDoc, addDoc, getDocs, onSnapshot,
   orderBy, query, serverTimestamp, updateDoc,
   increment, deleteDoc,
 } from 'firebase/firestore';
+
 import { auth, db } from '@/lib/firebase';
 
 // ─── 타입 ───
