@@ -550,7 +550,8 @@ export default function DashboardPage() {
     </div>
 
     {/* 가로 3분할 내용 */}
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0, flex: 1, minHeight: 0, maxHeight: '100%', overflow: 'hidden', height: 0 }}>
+
 
       {/* 📅 예약건 */}
       <div style={{ borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
