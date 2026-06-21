@@ -382,7 +382,7 @@ export default function DashboardPage() {
 
           {/* ── 하단 3열: 왼쪽(만료현황) | 가운데(현장목록) | 오른쪽(알림) ── */}
           {/* gridTemplateColumns 비율 조정: 현장목록 줄이고 알림 크게 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 300px', gap: 12, flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 520px', gap: 12, flex: 1, minHeight: 0 }}>
 
             {/* ── 왼쪽: 계약 만료 현황 ── */}
             <div style={S.panel()}>
@@ -539,184 +539,159 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── 오른쪽: 알림 (탭 분리) ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+            {/* ── 오른쪽: 알림 3분할 ── */}
+<div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
 
-              {/* 알림 패널 */}
-              <div style={{ ...S.panel(), flex: 1, minHeight: 0 }}>
-                <div style={S.panelHead()}>
-                  <div style={{ width: 3, height: 14, borderRadius: 2, background: 'linear-gradient(to bottom,#ef4444,#f97316)', flexShrink: 0 }} />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#334155', flex: 1 }}>최근 알림</span>
-                  {alertCount > 0 && <span style={S.badge('#ef4444')}>{alertCount}</span>}
+  {/* 알림 3개 가로 분할 */}
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, flex: 1, minHeight: 0 }}>
+
+    {/* 📅 예약건 (계약만료) */}
+    <div style={{ ...S.panel(), minHeight: 0 }}>
+      <div style={S.panelHead()}>
+        <div style={{ width: 3, height: 13, borderRadius: 2, background: 'linear-gradient(to bottom,#ef4444,#f97316)', flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#334155', flex: 1 }}>📅 예약건</span>
+        {contractAlertCount > 0 && <span style={S.badge('#ef4444')}>{contractAlertCount}</span>}
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {expiredSites.length === 0 && urgentSites.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
+            만료 예정 없음
+          </div>
+        ) : (
+          <>
+            {expiredSites.map(s => (
+              <div key={`exp-${s.id}`} onClick={() => router.push('/sites')} style={{
+                padding: '10px 10px', borderRadius: 9, background: '#fef2f2',
+                borderLeft: '3px solid #ef4444', cursor: 'pointer', transition: 'opacity .15s',
+              }}
+              onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
+              onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626' }}>🔴 계약 만료</span>
+                  <span style={{ fontSize: 9, background: '#fee2e2', color: '#ef4444', padding: '1px 6px', borderRadius: 7, fontWeight: 700 }}>만료</span>
                 </div>
-
-                {/* ── 탭 버튼 ── */}
-                <div style={{ display: 'flex', gap: 0, padding: '0 12px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
-                  {([
-                    { key: 'contract' as AlertTab, label: '📅 예약건',  count: contractAlertCount, activeColor: '#ef4444' },
-                    { key: 'fault'    as AlertTab, label: '🔧 고장접수', count: counts.fault,        activeColor: '#f59e0b' },
-                    { key: 'material' as AlertTab, label: '📦 자재신청', count: counts.material,     activeColor: '#8b5cf6' },
-                  ] as { key: AlertTab; label: string; count: number; activeColor: string }[]).map(tab => (
-                    <button key={tab.key} onClick={() => setAlertTab(tab.key)} style={{
-                      flex: 1, padding: '9px 4px 8px', border: 'none', background: 'none',
-                      cursor: 'pointer', fontFamily: 'inherit',
-                      borderBottom: alertTab === tab.key ? `2px solid ${tab.activeColor}` : '2px solid transparent',
-                      color: alertTab === tab.key ? tab.activeColor : '#94a3b8',
-                      fontWeight: alertTab === tab.key ? 700 : 500,
-                      fontSize: 11, transition: 'all .15s', position: 'relative',
-                    }}>
-                      {tab.label}
-                      {tab.count > 0 && (
-                        <span style={{
-                          position: 'absolute', top: 5, right: 4,
-                          background: tab.activeColor, color: '#fff',
-                          fontSize: 9, fontWeight: 800,
-                          padding: '1px 5px', borderRadius: 8,
-                        }}>{tab.count}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-
-                {/* ── 탭 내용 ── */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-
-                  {/* 예약건 탭 (계약 만료) */}
-                  {alertTab === 'contract' && (
-                    <>
-                      {expiredSites.length === 0 && urgentSites.length === 0 ? (
-                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, padding: '30px 0' }}>
-                          <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-                          만료 예정 계약이 없어요
-                        </div>
-                      ) : (
-                        <>
-                          {expiredSites.map(s => (
-                            <div key={`exp-${s.id}`} onClick={() => router.push('/sites')} style={{
-                              padding: '11px 12px', borderRadius: 10, background: '#fef2f2',
-                              borderLeft: '3px solid #ef4444', cursor: 'pointer', transition: 'opacity .15s',
-                            }}
-                            onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.85'}
-                            onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                                <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>🔴 계약 만료</span>
-                                <span style={{ fontSize: 10, background: '#fee2e2', color: '#ef4444', padding: '1px 7px', borderRadius: 8, fontWeight: 700 }}>만료</span>
-                              </div>
-                              <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{s.name}</div>
-                              <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                                {s.contractType || '계약'} · 만료일 {s.contractEnd || '-'}
-                              </div>
-                            </div>
-                          ))}
-                          {urgentSites.map(s => {
-                            const info = getDdayInfo(s.contractEnd);
-                            return (
-                              <div key={`urg-${s.id}`} onClick={() => router.push('/sites')} style={{
-                                padding: '11px 12px', borderRadius: 10, background: '#fff7ed',
-                                borderLeft: '3px solid #f97316', cursor: 'pointer', transition: 'opacity .15s',
-                              }}
-                              onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.85'}
-                              onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                              >
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                                  <span style={{ fontSize: 13, fontWeight: 700, color: '#ea580c' }}>⏰ 만료 임박</span>
-                                  <span style={{ fontSize: 10, background: '#ffedd5', color: '#f97316', padding: '1px 7px', borderRadius: 8, fontWeight: 700 }}>{info?.label}</span>
-                                </div>
-                                <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{s.name}</div>
-                                <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                                  {s.contractType || '계약'} · 만료일 {s.contractEnd || '-'}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-                    </>
-                  )}
-
-                  {/* 고장접수 탭 */}
-                  {alertTab === 'fault' && (
-                    <>
-                      {faultList.length === 0 ? (
-                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, padding: '30px 0' }}>
-                          <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-                          처리 대기 중인 고장접수가 없어요
-                        </div>
-                      ) : faultList.map(f => (
-                        <div key={f.id} onClick={() => router.push('/fault')} style={{
-                          padding: '11px 12px', borderRadius: 10, background: '#fffbeb',
-                          borderLeft: '3px solid #f59e0b', cursor: 'pointer', transition: 'opacity .15s',
-                        }}
-                        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.85'}
-                        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: '#d97706' }}>🔧 고장접수 대기</span>
-                            <span style={{ fontSize: 10, color: '#94a3b8' }}>{timeAgo(f.createdAt)}</span>
-                          </div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>
-                            {f.siteName} · {f.hogiNo}
-                          </div>
-                          <div style={{ fontSize: 11, color: '#78716c', marginBottom: 2 }} >{f.content}</div>
-                          <div style={{ fontSize: 11, color: '#94a3b8' }}>담당: {f.assignedName || '미배정'}</div>
-                        </div>
-                      ))}
-                    </>
-                  )}
-
-                  {/* 자재신청 탭 */}
-                  {alertTab === 'material' && (
-                    <>
-                      {materialList.length === 0 ? (
-                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 12, padding: '30px 0' }}>
-                          <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-                          처리 대기 중인 자재신청이 없어요
-                        </div>
-                      ) : materialList.map(m => (
-                        <div key={m.id} onClick={() => router.push('/material')} style={{
-                          padding: '11px 12px', borderRadius: 10, background: '#faf5ff',
-                          borderLeft: '3px solid #8b5cf6', cursor: 'pointer', transition: 'opacity .15s',
-                        }}
-                        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.85'}
-                        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed' }}>📦 자재신청 대기</span>
-                            <span style={{ fontSize: 10, color: '#94a3b8' }}>{timeAgo(m.createdAt)}</span>
-                          </div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{m.siteName}</div>
-                          <div style={{ fontSize: 11, color: '#6d28d9', marginBottom: 2 }}>{m.itemName}</div>
-                          <div style={{ fontSize: 11, color: '#94a3b8' }}>신청자: {m.requesterName || '-'}</div>
-                        </div>
-                      ))}
-                    </>
-                  )}
-
-                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{s.name}</div>
+                <div style={{ fontSize: 10, color: '#94a3b8' }}>{s.contractType || '계약'} · {s.contractEnd || '-'}</div>
               </div>
-
-              {/* 처리 현황 바 */}
-              <div style={{ background: '#0f172a', borderRadius: 12, padding: 14, flexShrink: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 10, letterSpacing: '.2px' }}>이번달 처리 현황</div>
-                {[
-                  { name: '🔴 계약 갱신율', pct: sites.length > 0 ? Math.round((safeSites.length / sites.length) * 100) : 0, grad: 'linear-gradient(90deg,#ef4444,#f97316)' },
-                  { name: '🔧 고장 처리율', pct: 87, grad: 'linear-gradient(90deg,#f59e0b,#fbbf24)' },
-                  { name: '📋 점검 완료율', pct: 74, grad: 'linear-gradient(90deg,#3b82f6,#6366f1)' },
-                ].map(p => (
-                  <div key={p.name} style={{ marginBottom: 9 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>{p.name}</span>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: '#f1f5f9' }}>{p.pct}%</span>
-                    </div>
-                    <div style={{ height: 5, background: '#1e293b', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', borderRadius: 3, width: `${p.pct}%`, background: p.grad }} />
-                    </div>
+            ))}
+            {urgentSites.map(s => {
+              const info = getDdayInfo(s.contractEnd);
+              return (
+                <div key={`urg-${s.id}`} onClick={() => router.push('/sites')} style={{
+                  padding: '10px 10px', borderRadius: 9, background: '#fff7ed',
+                  borderLeft: '3px solid #f97316', cursor: 'pointer', transition: 'opacity .15s',
+                }}
+                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
+                onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#ea580c' }}>⏰ 만료 임박</span>
+                    <span style={{ fontSize: 9, background: '#ffedd5', color: '#f97316', padding: '1px 6px', borderRadius: 7, fontWeight: 700 }}>{info?.label}</span>
                   </div>
-                ))}
-              </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{s.name}</div>
+                  <div style={{ fontSize: 10, color: '#94a3b8' }}>{s.contractType || '계약'} · {s.contractEnd || '-'}</div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </div>
 
+    {/* 🔧 고장접수 */}
+    <div style={{ ...S.panel(), minHeight: 0 }}>
+      <div style={S.panelHead()}>
+        <div style={{ width: 3, height: 13, borderRadius: 2, background: 'linear-gradient(to bottom,#f59e0b,#fbbf24)', flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#334155', flex: 1 }}>🔧 고장접수</span>
+        {counts.fault > 0 && <span style={S.badge('#f59e0b')}>{counts.fault}</span>}
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {faultList.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
+            대기 중인 고장 없음
+          </div>
+        ) : faultList.map(f => (
+          <div key={f.id} onClick={() => router.push('/fault')} style={{
+            padding: '10px 10px', borderRadius: 9, background: '#fffbeb',
+            borderLeft: '3px solid #f59e0b', cursor: 'pointer', transition: 'opacity .15s',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
+          onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#d97706' }}>접수대기</span>
+              <span style={{ fontSize: 9, color: '#94a3b8' }}>{timeAgo(f.createdAt)}</span>
             </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>
+              {f.siteName} · {f.hogiNo}
+            </div>
+            <div style={{ fontSize: 10, color: '#78716c', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.content}</div>
+            <div style={{ fontSize: 10, color: '#94a3b8' }}>담당: {f.assignedName || '미배정'}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* 📦 자재신청 */}
+    <div style={{ ...S.panel(), minHeight: 0 }}>
+      <div style={S.panelHead()}>
+        <div style={{ width: 3, height: 13, borderRadius: 2, background: 'linear-gradient(to bottom,#8b5cf6,#a78bfa)', flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#334155', flex: 1 }}>📦 자재신청</span>
+        {counts.material > 0 && <span style={S.badge('#8b5cf6')}>{counts.material}</span>}
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {materialList.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
+            대기 중인 신청 없음
+          </div>
+        ) : materialList.map(m => (
+          <div key={m.id} onClick={() => router.push('/material')} style={{
+            padding: '10px 10px', borderRadius: 9, background: '#faf5ff',
+            borderLeft: '3px solid #8b5cf6', cursor: 'pointer', transition: 'opacity .15s',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
+          onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed' }}>신청중</span>
+              <span style={{ fontSize: 9, color: '#94a3b8' }}>{timeAgo(m.createdAt)}</span>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{m.siteName}</div>
+            <div style={{ fontSize: 11, color: '#6d28d9', marginBottom: 2 }}>{m.itemName}</div>
+            <div style={{ fontSize: 10, color: '#94a3b8' }}>신청자: {m.requesterName || '-'}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+  </div>
+
+  {/* 처리 현황 바 */}
+  <div style={{ background: '#0f172a', borderRadius: 12, padding: 14, flexShrink: 0 }}>
+    <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 10 }}>이번달 처리 현황</div>
+    {[
+      { name: '🔴 계약 갱신율', pct: sites.length > 0 ? Math.round((safeSites.length / sites.length) * 100) : 0, grad: 'linear-gradient(90deg,#ef4444,#f97316)' },
+      { name: '🔧 고장 처리율', pct: 87, grad: 'linear-gradient(90deg,#f59e0b,#fbbf24)' },
+      { name: '📋 점검 완료율', pct: 74, grad: 'linear-gradient(90deg,#3b82f6,#6366f1)' },
+    ].map(p => (
+      <div key={p.name} style={{ marginBottom: 9 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>{p.name}</span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: '#f1f5f9' }}>{p.pct}%</span>
+        </div>
+        <div style={{ height: 5, background: '#1e293b', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ height: '100%', borderRadius: 3, width: `${p.pct}%`, background: p.grad }} />
+        </div>
+      </div>
+    ))}
+  </div>
+
+</div>
+
           </div>
         </main>
       </div>
