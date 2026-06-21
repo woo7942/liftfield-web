@@ -550,11 +550,13 @@ export default function DashboardPage() {
     </div>
 
     {/* 가로 3분할 내용 */}
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0, flex: 1, minHeight: 0, maxHeight: '100%', overflow: 'hidden', height: 0 }}>
+    <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr 1fr', gridTemplateColumns: '1fr', gap: 8, flex: 1, overflow: 'hidden', padding: '8px 10px' }}>
+
 
 
       {/* 📅 예약건 */}
-      <div style={{ borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#ef4444' }}>📅 예약건</span>
           {contractAlertCount > 0 && <span style={S.badge('#ef4444')}>{contractAlertCount}</span>}
@@ -608,7 +610,8 @@ export default function DashboardPage() {
       </div>
 
       {/* 🔧 고장접수 */}
-      <div style={{ borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#d97706' }}>🔧 고장접수</span>
           {counts.fault > 0 && <span style={S.badge('#f59e0b')}>{counts.fault}</span>}
@@ -640,7 +643,8 @@ export default function DashboardPage() {
       </div>
 
       {/* 📦 자재신청 */}
-      <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>📦 자재신청</span>
           {counts.material > 0 && <span style={S.badge('#8b5cf6')}>{counts.material}</span>}
