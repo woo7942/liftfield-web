@@ -193,13 +193,15 @@ export default function FaultPage() {
       setSites(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     ).catch(console.error);
 
-    // ✅ users - 1회 로드 (userQ 정의 추가)
-    const userCol = useNew
-      ? collection(db, 'companies', cid, 'users')
-      : collection(db, 'users');
-    const userQ = useNew
-      ? query(userCol)
-      : query(userCol, where('companyId', '==', cid));
+    // users는 항상 최상위 컬렉션에서 읽기
+const userQ = query(
+  collection(db, 'users'),
+  where('companyId', '==', cid)
+);
+getDocs(userQ).then(snap =>
+  setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+).catch(console.error);
+
     getDocs(userQ).then(snap =>
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     ).catch(console.error);
