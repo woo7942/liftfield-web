@@ -105,12 +105,13 @@ export default function MembersPage() {
           annualLeave: d.data().annualLeave ?? 15,
         }));
       setMembers(list);
-      // 직원 팀 목록 대신 sites에서 팀 목록 가져오기
-getDocs(query(collection(db, 'companies', userInfo.companyId, 'sites')))
-  .then(siteSnap => {
-    const siteTeams = new Set(siteSnap.docs.map(d => d.data().team).filter(Boolean));
-    setTeams(Array.from(siteTeams));
+      // teams 컬렉션에서 팀 목록 가져오기
+getDocs(collection(db, 'companies', userInfo.companyId, 'teams'))
+  .then(teamSnap => {
+    const teamNames = teamSnap.docs.map(d => d.data().name).filter(Boolean);
+    setTeams(teamNames);
   }).catch(console.error);
+
 
     }).catch(console.error);
   }, [userInfo?.companyId]);
