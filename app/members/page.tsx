@@ -105,8 +105,13 @@ export default function MembersPage() {
           annualLeave: d.data().annualLeave ?? 15,
         }));
       setMembers(list);
-      const teamSet = new Set(list.map(m => m.team).filter(Boolean));
-      setTeams(Array.from(teamSet));
+      // 직원 팀 목록 대신 sites에서 팀 목록 가져오기
+getDocs(query(collection(db, 'companies', userInfo.companyId, 'sites')))
+  .then(siteSnap => {
+    const siteTeams = new Set(siteSnap.docs.map(d => d.data().team).filter(Boolean));
+    setTeams(Array.from(siteTeams));
+  }).catch(console.error);
+
     }).catch(console.error);
   }, [userInfo?.companyId]);
 
