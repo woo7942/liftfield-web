@@ -321,22 +321,40 @@ getDocs(collection(db, 'companies', userInfo.companyId, 'teams'))
                         <p className="text-sm text-gray-600 mt-1">💬 {leave.reason}</p>
                       )}
                     </div>
-                    {canEdit && leave.status === 'pending' && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleLeaveStatus(leave.id, 'approved')}
-                          className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600"
-                        >
-                          승인
-                        </button>
-                        <button
-                          onClick={() => handleLeaveStatus(leave.id, 'rejected')}
-                          className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg hover:bg-red-600"
-                        >
-                          거절
-                        </button>
-                      </div>
-                    )}
+                    {canEdit && (
+  <div className="flex gap-2">
+    {leave.status === 'pending' && (
+      <>
+        <button
+          onClick={() => handleLeaveStatus(leave.id, 'approved')}
+          className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600"
+        >
+          승인
+        </button>
+        <button
+          onClick={() => handleLeaveStatus(leave.id, 'rejected')}
+          className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg hover:bg-red-600"
+        >
+          거절
+        </button>
+      </>
+    )}
+    <button
+      onClick={async () => {
+        if (!confirm('휴가 신청을 삭제할까요?')) return;
+        try {
+          await deleteDoc(doc(db, 'companies', userInfo!.companyId, 'leaveRequests', leave.id));
+        } catch (e) {
+          console.error(e);
+        }
+      }}
+      className="text-xs bg-gray-100 text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50"
+    >
+      🗑 삭제
+    </button>
+  </div>
+)}
+
                   </div>
                 </div>
               ))
