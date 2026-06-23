@@ -202,9 +202,10 @@ export default function InspectPage() {
   const resultColor = (r: string) => r === '합격' ? 'text-green-600 bg-green-50' : r === '조건부합격' ? 'text-yellow-600 bg-yellow-50' : 'text-red-600 bg-red-50';
   const resultBorder = (r: string) => r === '합격' ? 'border-green-400' : r === '조건부합격' ? 'border-yellow-400' : 'border-red-400';
 
-  const filteredSites = siteSearch.trim()
-    ? sites.filter(s => (s.siteName || s.name || '').toLowerCase().includes(siteSearch.toLowerCase())).slice(0, 20)
-    : [];
+  const filteredSites = siteSearch.trim().length >= 2
+  ? sites.filter(s => (s.siteName || s.name || '').toLowerCase().includes(siteSearch.toLowerCase())).slice(0, 20)
+  : [];
+
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -235,7 +236,8 @@ export default function InspectPage() {
               <input
                 value={siteSearch}
                 onChange={e => setSiteSearch(e.target.value)}
-                placeholder="🔍 현장명 검색..."
+                placeholder="🔍 현장명 검색... (2글자 이상)"
+
                 className="w-full border rounded-xl px-4 py-3 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               />
               {siteSearch && (
