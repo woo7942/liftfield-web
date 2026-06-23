@@ -280,7 +280,7 @@ if (cachedMember) {
     <div style={{
   height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
-  background: '#0f172a', fontSize: 15, zoom: 1.15,
+  background: '#0f172a', fontSize: 'clamp(12px, 1vw, 15px)',
 }}>
 
 
