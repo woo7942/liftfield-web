@@ -76,9 +76,10 @@ console.log('user teamName:', data.teamName);
 const allSites = sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site));
 const isAdmin = data.role === 'admin' || data.superAdmin === true;
 setSites(isAdmin
-  ? allSites
-  : allSites.filter(s => (s as any).teamName === data.team)
+  ? allSites.filter((s: any) => s.source === 'member')
+  : allSites.filter((s: any) => s.source === 'member' && (s as any).teamName === data.team)
 );
+
 
 setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
 
