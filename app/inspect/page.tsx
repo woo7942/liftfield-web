@@ -68,8 +68,14 @@ export default function InspectPage() {
         setUserInfo({ uid: user.uid, name: data.name || '', companyId: data.companyId || '', role: data.role || 'member', superAdmin: data.superAdmin || false });
 
         // 현장 목록 로드 (1회)
-        const sitesSnap = await getDocs(collection(db, 'companies', data.companyId, 'sites'));
-        setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
+        const sitesSnap = await getDocs(
+  query(
+    collection(db, 'companies', data.companyId, 'sites'),
+    where('team', '==', data.team)
+  )
+);
+setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
+
       } catch (e) {
         console.error(e);
       } finally {
