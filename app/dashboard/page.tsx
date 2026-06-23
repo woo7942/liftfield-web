@@ -75,11 +75,13 @@ const MENUS = [
   { icon: '🏢', label: '현장관리',  path: '/sites',      badgeKey: '' },
   { icon: '🔧', label: '고장접수',  path: '/fault',      badgeKey: 'fault' },
   { icon: '📋', label: '점검관리',  path: '/inspection', badgeKey: '' },
+  { icon: '🔍', label: '검사지적',  path: '/(pages)/inspect', badgeKey: '' },
   { icon: '📦', label: '자재신청',  path: '/material',   badgeKey: 'material' },
   { icon: '👥', label: '직원관리',  path: '/members',    badgeKey: 'member' },
   { icon: '📊', label: '통계',      path: '/stats',      badgeKey: '' },
   { icon: '🔗', label: '팀 초대',   path: '/team',       badgeKey: '' },
 ];
+
 
 const BADGE_COLORS: Record<string, string> = {
   fault: '#ef4444', material: '#f59e0b', member: '#8b5cf6',
