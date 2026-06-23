@@ -67,18 +67,25 @@ export default function InspectPage() {
         const data = snap.data();
         setUserInfo({ uid: user.uid, name: data.name || '', companyId: data.companyId || '', role: data.role || 'member', superAdmin: data.superAdmin || false });
 
+        console.log('user team:', data.team);
+console.log('user teamName:', data.teamName);
         // 현장 목록 로드 (1회)
         const sitesSnap = await getDocs(
-  query(
-    collection(db, 'companies', data.companyId, 'sites'),
-    where('team', '==', data.team)
-  )
+  collection(db, 'companies', data.companyId, 'sites')
 );
+const allSites = sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site));
+const isAdmin = data.role === 'admin' || data.superAdmin === true;
+setSites(isAdmin
+  ? allSites
+  : allSites.filter(s => (s as any).teamName === data.team)
+);
+
 setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
 
       } catch (e) {
         console.error(e);
       } finally {
+        
         setLoading(false);
       }
     });
