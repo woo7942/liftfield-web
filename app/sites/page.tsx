@@ -72,27 +72,135 @@ function getExpiryInfo(dateStr?: string) {
 }
 
 // ─── 헤더 매핑 ───
+// 키: 엑셀에서 올 수 있는 모든 변형 헤더명 (소문자·공백제거 후 비교)
 const HEADER_MAP: Record<string, keyof SiteItem> = {
-  '현장명': 'name',
-  '원장번호': 'contractNumber',
-  '원장변호': 'contractNumber',
-  '보수료': 'maintenanceFee',
-  '대수': 'elevatorCount',
-  '계약일자': 'contractStart',
-  '만료일자': 'contractEnd',
-  '생활유통': 'contractType',
-  '계약종류': 'contractType',
-  '계약 종류': 'contractType',
-  '전화번호': 'phone',
-  '계약자': 'contractPerson',
-  '제약자': 'contractPerson',
-  '업체명': 'companyName',
-  '계약업체': 'companyName',
-  '지역': 'region',
-  '주소': 'address',
-  '메일주소': 'email',
-  '이메일': 'email',
+  // 현장명
+  '현장명': 'name', '현장': 'name', '사이트명': 'name', '건물명': 'name', '빌딩명': 'name', 'name': 'name', 'sitename': 'name',
+  // 계약번호
+  '원장번호': 'contractNumber', '원장변호': 'contractNumber', '계약번호': 'contractNumber', '원장': 'contractNumber',
+  // 보수료
+  '보수료': 'maintenanceFee', '유지보수료': 'maintenanceFee', '월보수료': 'maintenanceFee', '금액': 'maintenanceFee',
+  // 대수
+  '대수': 'elevatorCount', '승강기대수': 'elevatorCount', '엘리베이터대수': 'elevatorCount', '승강기수': 'elevatorCount', '대': 'elevatorCount',
+  // 계약 시작
+  '계약일자': 'contractStart', '계약시작': 'contractStart', '계약시작일': 'contractStart', '시작일': 'contractStart', '계약일': 'contractStart',
+  // 계약 만료
+  '만료일자': 'contractEnd', '만료일': 'contractEnd', '계약만료': 'contractEnd', '계약만료일': 'contractEnd', '종료일': 'contractEnd', '계약종료일': 'contractEnd',
+  // 계약 종류
+  '생활유통': 'contractType', '계약종류': 'contractType', '계약 종류': 'contractType', '계약유형': 'contractType', '종류': 'contractType',
+  // 전화번호
+  '전화번호': 'phone', '연락처': 'phone', '전화': 'phone', '핸드폰': 'phone', '휴대폰': 'phone', 'tel': 'phone', 'phone': 'phone',
+  // 계약자
+  '계약자': 'contractPerson', '제약자': 'contractPerson', '담당자': 'contractPerson', '담당': 'contractPerson',
+  // 업체명
+  '업체명': 'companyName', '계약업체': 'companyName', '업체': 'companyName', '회사명': 'companyName', '회사': 'companyName',
+  // 지역
+  '지역': 'region', '지역명': 'region', '구역': 'region',
+  // 주소
+  '주소': 'address', '도로명주소': 'address', '지번주소': 'address', '소재지': 'address',
+  // 이메일
+  '메일주소': 'email', '이메일': 'email', 'email': 'email', '이-메일': 'email',
 };
+
+// 헤더 문자열 정규화 (공백·특수문자 제거, 소문자 변환)
+function normalizeHeader(h: string): string {
+  return String(h).replace(/[\s\u3000\t\r\n]/g, '').replace(/[()（）\[\]【】]/g, '').toLowerCase();
+}
+
+// 정규화된 HEADER_MAP (초기화 시 캐시)
+const NORMALIZED_HEADER_MAP: Record<string, keyof SiteItem> = (() => {
+  const m: Record<string, keyof SiteItem> = {};
+  for (const [k, v] of Object.entries(HEADER_MAP)) {
+    m[normalizeHeader(k)] = v;
+  }
+  return m;
+})();
+
+// 엑셀 날짜 시리얼 숫자 → 'YYYY-MM-DD' 변환
+function excelSerialToDate(serial: number): string {
+  // 엑셀 기준일: 1900-01-01 (단, 1900년 2월 29일 버그로 +1 보정)
+  const utcDays = Math.floor(serial - 25569);
+  const date = new Date(utcDays * 86400 * 1000);
+  return date.toISOString().split('T')[0];
+}
+
+// 다양한 날짜 형식 → 'YYYY-MM-DD' 통일
+function parseDateValue(val: unknown): string {
+  if (!val && val !== 0) return '';
+  // XLSX가 이미 Date 객체로 변환한 경우
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    return val.toISOString().split('T')[0];
+  }
+  const s = String(val).trim();
+  if (!s) return '';
+  // 숫자형 시리얼 (예: 44927)
+  if (/^\d{4,6}$/.test(s)) {
+    const n = Number(s);
+    if (n > 30000 && n < 60000) return excelSerialToDate(n);
+  }
+  // YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const isoMatch = s.match(/^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2,'0')}-${isoMatch[3].padStart(2,'0')}`;
+  // YY-MM-DD, YY/MM/DD (두 자리 연도)
+  const yyMatch = s.match(/^(\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
+  if (yyMatch) {
+    const year = parseInt(yyMatch[1]) >= 50 ? `19${yyMatch[1]}` : `20${yyMatch[1]}`;
+    return `${year}-${yyMatch[2].padStart(2,'0')}-${yyMatch[3].padStart(2,'0')}`;
+  }
+  // 한국식: 2024년 12월 31일
+  const koMatch = s.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일?/);
+  if (koMatch) return `${koMatch[1]}-${koMatch[2].padStart(2,'0')}-${koMatch[3].padStart(2,'0')}`;
+  return s;
+}
+
+// 헤더 행 자동 탐지: 상위 10행 중 HEADER_MAP 매칭 수가 가장 많은 행 반환
+function detectHeaderRow(rows: unknown[][]): { headerRowIdx: number; colMap: Record<number, keyof SiteItem> } {
+  let bestIdx = 0;
+  let bestScore = 0;
+  let bestColMap: Record<number, keyof SiteItem> = {};
+
+  const limit = Math.min(rows.length, 10);
+  for (let r = 0; r < limit; r++) {
+    const colMap: Record<number, keyof SiteItem> = {};
+    let score = 0;
+    const row = rows[r] as unknown[];
+    for (let c = 0; c < row.length; c++) {
+      const norm = normalizeHeader(String(row[c] ?? ''));
+      if (norm && NORMALIZED_HEADER_MAP[norm]) {
+        colMap[c] = NORMALIZED_HEADER_MAP[norm];
+        score++;
+        if (NORMALIZED_HEADER_MAP[norm] === 'name') score += 3; // 현장명 가중치
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = r;
+      bestColMap = colMap;
+    }
+  }
+  return { headerRowIdx: bestIdx, colMap: bestColMap };
+}
+
+// 단일 행 → SiteItem 파싱
+function parseRow(row: unknown[], colMap: Record<number, keyof SiteItem>): Partial<SiteItem> {
+  const item: Partial<SiteItem> = {};
+  for (const [colStr, field] of Object.entries(colMap)) {
+    const idx = Number(colStr);
+    const val = row[idx];
+    if (val === '' || val === null || val === undefined) continue;
+    if (field === 'contractStart' || field === 'contractEnd') {
+      const parsed = parseDateValue(val);
+      if (parsed) (item as Record<string, unknown>)[field] = parsed;
+    } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
+      const n = Number(String(val).replace(/[,원\s]/g, ''));
+      if (!isNaN(n)) (item as Record<string, unknown>)[field] = n;
+    } else {
+      (item as Record<string, unknown>)[field] = String(val).trim();
+    }
+  }
+  return item;
+}
 
 type SortKey = 'name' | 'contractEnd' | 'maintenanceFee' | 'elevatorCount' | 'companyName';
 type ExpiryFilter = 'all' | 'expired' | 'urgent' | 'warning';
@@ -129,6 +237,7 @@ export default function SitesPage() {
   const [importTeam, setImportTeam] = useState('');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState('');
+  const [excelParseInfo, setExcelParseInfo] = useState(''); // 헤더 감지 정보
 
   // 추가/수정 모달
   const [showAddModal, setShowAddModal] = useState(false);
@@ -301,11 +410,14 @@ export default function SitesPage() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
+      // cellDates:true → 날짜 셀을 JS Date로 변환, raw:false → 숫자 서식 문자열 보존
       const data = new Uint8Array(evt.target?.result as ArrayBuffer);
       const wb = XLSX.read(data, { type: 'array', cellDates: true });
       setExcelWorkbook(wb);
       setExcelSheets(wb.SheetNames);
       setSelectedSheet(wb.SheetNames[0]);
+      setImportResult('');
+      setExcelParseInfo('');
       setShowExcelModal(true);
       previewSheet(wb, wb.SheetNames[0]);
     };
@@ -315,26 +427,43 @@ export default function SitesPage() {
 
   function previewSheet(wb: XLSX.WorkBook, sheetName: string) {
     const ws = wb.Sheets[sheetName];
+    // defval:'' 로 빈 셀을 빈 문자열로 채움
     const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    if (rows.length < 2) { setExcelPreview([]); return; }
-    const headers = (rows[0] as string[]).map(h => String(h).trim());
+
+    // 완전히 빈 행 제거
+    const cleanRows = rows.filter(row =>
+      (row as unknown[]).some(cell => String(cell ?? '').trim() !== '')
+    );
+    if (cleanRows.length < 2) {
+      setExcelPreview([]);
+      setExcelParseInfo('⚠️ 데이터를 찾을 수 없어요. 파일을 확인해 주세요.');
+      return;
+    }
+
+    // 헤더 행 자동 탐지
+    const { headerRowIdx, colMap } = detectHeaderRow(cleanRows);
+    const matchedFields = Object.values(colMap);
+    const hasName = matchedFields.includes('name');
+
+    // 감지 정보 메시지 생성
+    const headerRowNum = headerRowIdx + 1;
+    const mappedCount = Object.keys(colMap).length;
+    if (mappedCount === 0) {
+      setExcelParseInfo(
+        `⚠️ 인식 가능한 컬럼을 찾지 못했어요.\n` +
+        `헤더 행에 현장명, 만료일자, 보수료 등 컬럼명이 있는지 확인해 주세요.`
+      );
+      setExcelPreview([]);
+      return;
+    }
+    const infoMsg = `✅ ${headerRowNum}행을 헤더로 인식 · ${mappedCount}개 컬럼 매칭` +
+      (!hasName ? ' ⚠️ 현장명 컬럼 없음' : '');
+    setExcelParseInfo(infoMsg);
+
+    // 데이터 행 파싱 (헤더 다음 행부터, 상위 5개 미리보기)
     const preview: Partial<SiteItem>[] = [];
-    for (let i = 1; i < Math.min(rows.length, 6); i++) {
-      const row = rows[i] as unknown[];
-      const item: Partial<SiteItem> = {};
-      headers.forEach((h, idx) => {
-        const field = HEADER_MAP[h];
-        if (field && row[idx] !== '') {
-          if (field === 'contractStart' || field === 'contractEnd') {
-            const val = row[idx];
-            (item as Record<string, unknown>)[field] = val instanceof Date ? val.toISOString().split('T')[0] : String(val);
-          } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
-            (item as Record<string, unknown>)[field] = Number(row[idx]) || 0;
-          } else {
-            (item as Record<string, unknown>)[field] = String(row[idx]);
-          }
-        }
-      });
+    for (let i = headerRowIdx + 1; i < Math.min(cleanRows.length, headerRowIdx + 6); i++) {
+      const item = parseRow(cleanRows[i] as unknown[], colMap);
       if (item.name) preview.push(item);
     }
     setExcelPreview(preview);
@@ -342,6 +471,7 @@ export default function SitesPage() {
 
   function handleSheetChange(sheetName: string) {
     setSelectedSheet(sheetName);
+    setExcelParseInfo('');
     if (excelWorkbook) previewSheet(excelWorkbook, sheetName);
   }
 
@@ -353,38 +483,50 @@ export default function SitesPage() {
     try {
       const ws = excelWorkbook.Sheets[selectedSheet];
       const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-      if (rows.length < 2) { setImportResult('데이터가 없어요.'); return; }
-      const headers = (rows[0] as string[]).map(h => String(h).trim());
+
+      // 완전히 빈 행 제거
+      const cleanRows = rows.filter(row =>
+        (row as unknown[]).some(cell => String(cell ?? '').trim() !== '')
+      );
+      if (cleanRows.length < 2) {
+        setImportResult('⚠️ 데이터가 없어요.');
+        setImporting(false);
+        return;
+      }
+
+      // 헤더 행 자동 탐지
+      const { headerRowIdx, colMap } = detectHeaderRow(cleanRows);
+      if (Object.keys(colMap).length === 0) {
+        setImportResult('⚠️ 인식 가능한 컬럼을 찾지 못했어요. 헤더명을 확인해 주세요.');
+        setImporting(false);
+        return;
+      }
+
+      // 기존 현장 목록 조회 (덮어쓰기 판단용)
       const existingSnap = await getDocs(collection(db, 'companies', userInfo.companyId, 'sites'));
       const existingMap = new Map<string, string>();
       existingSnap.docs.forEach(d => {
         const name = d.data().name;
-        if (name) existingMap.set(name, d.id);
+        if (name) existingMap.set(String(name).trim(), d.id);
       });
+
       let addCount = 0;
       let updateCount = 0;
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i] as unknown[];
+      let skipCount = 0;
+
+      for (let i = headerRowIdx + 1; i < cleanRows.length; i++) {
+        const parsed = parseRow(cleanRows[i] as unknown[], colMap);
+        // 현장명 없는 행 스킵 (합계행, 빈행 등)
+        if (!parsed.name || !String(parsed.name).trim()) { skipCount++; continue; }
+
         const item: Record<string, unknown> = {
+          ...parsed,
           source: 'admin',
           teamName: importTeam || '',
           updatedAt: serverTimestamp(),
         };
-        headers.forEach((h, idx) => {
-          const field = HEADER_MAP[h];
-          if (field && row[idx] !== '') {
-            if (field === 'contractStart' || field === 'contractEnd') {
-              const val = row[idx];
-              item[field] = val instanceof Date ? val.toISOString().split('T')[0] : String(val);
-            } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
-              item[field] = Number(row[idx]) || 0;
-            } else {
-              item[field] = String(row[idx]);
-            }
-          }
-        });
-        if (!item.name) continue;
-        const existingId = existingMap.get(item.name as string);
+
+        const existingId = existingMap.get(String(parsed.name).trim());
         if (existingId) {
           await updateDoc(doc(db, 'companies', userInfo.companyId, 'sites', existingId), item);
           updateCount++;
@@ -394,7 +536,8 @@ export default function SitesPage() {
           addCount++;
         }
       }
-      setImportResult(`✅ 신규 ${addCount}개 추가 · 기존 ${updateCount}개 업데이트 완료!`);
+      const skipMsg = skipCount > 0 ? ` (현장명 없는 ${skipCount}행 제외)` : '';
+      setImportResult(`✅ 신규 ${addCount}개 추가 · 기존 ${updateCount}개 업데이트 완료!${skipMsg}`);
     } catch (e) {
       console.error(e);
       setImportResult('❌ 가져오기 중 오류가 발생했어요.');
@@ -704,17 +847,34 @@ export default function SitesPage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5">
             <h2 className="font-bold text-lg mb-4">📊 엑셀 가져오기</h2>
-            <div className="mb-3">
-              <label className="text-sm font-medium text-gray-700 mb-1 block">시트 선택</label>
-              <div className="flex flex-wrap gap-2">
-                {excelSheets.map(s => (
-                  <button key={s} onClick={() => handleSheetChange(s)}
-                    className={`text-sm px-3 py-1.5 rounded-lg border ${selectedSheet === s ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-600'}`}>
-                    {s}
-                  </button>
-                ))}
+
+            {/* 시트 선택 */}
+            {excelSheets.length > 1 && (
+              <div className="mb-3">
+                <label className="text-sm font-medium text-gray-700 mb-1 block">시트 선택</label>
+                <div className="flex flex-wrap gap-2">
+                  {excelSheets.map(s => (
+                    <button key={s} onClick={() => handleSheetChange(s)}
+                      className={`text-sm px-3 py-1.5 rounded-lg border ${selectedSheet === s ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-600'}`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* 헤더 자동 감지 결과 */}
+            {excelParseInfo && (
+              <div className={`mb-3 rounded-xl p-3 text-xs font-medium ${
+                excelParseInfo.startsWith('✅')
+                  ? 'bg-green-50 text-green-700'
+                  : 'bg-orange-50 text-orange-700'
+              }`}>
+                {excelParseInfo.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+              </div>
+            )}
+
+            {/* 팀 배정 */}
             <div className="mb-3">
               <label className="text-sm font-medium text-gray-700 mb-1 block">팀 배정</label>
               <select value={importTeam} onChange={e => setImportTeam(e.target.value)}
@@ -723,6 +883,8 @@ export default function SitesPage() {
                 {teams.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
+
+            {/* 미리보기 */}
             {excelPreview.length > 0 && (
               <div className="mb-4">
                 <p className="text-sm font-medium text-gray-700 mb-1">미리보기 (상위 5개)</p>
@@ -742,7 +904,7 @@ export default function SitesPage() {
                           <td className="px-2 py-1.5 font-medium">{item.name}</td>
                           <td className="px-2 py-1.5 text-gray-500">{item.companyName || '-'}</td>
                           <td className="px-2 py-1.5 text-center text-gray-500">{item.contractEnd || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-gray-500">{item.elevatorCount || '-'}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500">{item.elevatorCount ?? '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -750,16 +912,27 @@ export default function SitesPage() {
                 </div>
               </div>
             )}
+
+            {/* 미리보기 없고 오류도 없을 때 안내 */}
+            {excelPreview.length === 0 && !excelParseInfo && (
+              <div className="mb-4 bg-gray-50 rounded-xl p-3 text-xs text-gray-500 text-center">
+                파일을 분석 중이에요...
+              </div>
+            )}
+
             <div className="bg-blue-50 rounded-xl p-3 mb-4 text-xs text-blue-700">
-              💡 현장명이 같으면 <strong>덮어쓰기</strong>, 없으면 <strong>새로 추가</strong>돼요
+              💡 헤더 행 위치를 자동으로 감지해요 · 현장명이 같으면 <strong>덮어쓰기</strong>, 없으면 <strong>새로 추가</strong>돼요
             </div>
+
             {importResult && (
-              <p className="text-sm text-center mb-3 font-medium text-green-600">{importResult}</p>
+              <p className={`text-sm text-center mb-3 font-medium ${importResult.startsWith('✅') ? 'text-green-600' : 'text-red-500'}`}>
+                {importResult}
+              </p>
             )}
             <div className="flex gap-2">
-              <button onClick={() => { setShowExcelModal(false); setImportResult(''); }}
+              <button onClick={() => { setShowExcelModal(false); setImportResult(''); setExcelParseInfo(''); }}
                 className="flex-1 py-2 border rounded-xl text-sm text-gray-600">닫기</button>
-              <button onClick={handleImport} disabled={importing}
+              <button onClick={handleImport} disabled={importing || excelPreview.length === 0}
                 className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                 {importing ? '가져오는 중...' : '가져오기'}
               </button>
