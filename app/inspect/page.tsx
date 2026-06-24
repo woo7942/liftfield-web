@@ -67,22 +67,23 @@ export default function InspectPage() {
         const data = snap.data();
         setUserInfo({ uid: user.uid, name: data.name || '', companyId: data.companyId || '', role: data.role || 'member', superAdmin: data.superAdmin || false });
 
-        console.log('user team:', data.team);
-console.log('user teamName:', data.teamName);
-        // 현장 목록 로드 (1회)
+        // 현장 목록 로드 — 팀별현장(source==='member')만 검사지적 대상
         const sitesSnap = await getDocs(
   collection(db, 'companies', data.companyId, 'sites')
 );
 const allSites = sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site));
+// 팀별현장 필터: source === 'member'
+const teamSites = allSites.filter((s: any) => s.source === 'member');
 const isAdmin = data.role === 'admin' || data.superAdmin === true;
-setSites(isAdmin
-  ? allSites.filter((s: any) => s.team)
-  : allSites.filter((s: any) => s.team === data.team)
-);
-
-
-
-setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
+if (isAdmin) {
+  // 관리자: 팀별현장 전체
+  setSites(teamSites);
+} else {
+  // 일반 팀원: 본인 팀 소속 팀별현장만
+  setSites(teamSites.filter((s: any) =>
+    s.teamName === data.team || s.teamName === data.teamName
+  ));
+}
 
       } catch (e) {
         console.error(e);
@@ -217,9 +218,9 @@ setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
   const resultColor = (r: string) => r === '합격' ? 'text-green-600 bg-green-50' : r === '조건부합격' ? 'text-yellow-600 bg-yellow-50' : 'text-red-600 bg-red-50';
   const resultBorder = (r: string) => r === '합격' ? 'border-green-400' : r === '조건부합격' ? 'border-yellow-400' : 'border-red-400';
 
-  const filteredSites = siteSearch.trim().length >= 2
+  const filteredSites = siteSearch.trim().length >= 1
   ? sites.filter(s => (s.siteName || s.name || '').toLowerCase().includes(siteSearch.toLowerCase())).slice(0, 20)
-  : [];
+  : sites.slice(0, 20); // 검색어 없을 때 상위 20개 표시
 
 
   if (loading) return (
@@ -246,21 +247,26 @@ setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
         {/* ── 현장 검색 ── */}
         {!selectedSite && (
           <div className="max-w-xl mx-auto mt-8">
-            <p className="text-gray-500 text-sm mb-3 text-center">검사이력을 조회할 현장을 검색하세요</p>
+            <p className="text-gray-500 text-sm mb-3 text-center">
+              팀별현장 목록에서 검사이력을 조회할 현장을 선택하세요
+            </p>
             <div className="relative">
               <input
                 value={siteSearch}
                 onChange={e => setSiteSearch(e.target.value)}
-                placeholder="🔍 현장명 검색... (2글자 이상)"
-
+                placeholder="🔍 현장명 검색..."
                 className="w-full border rounded-xl px-4 py-3 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               />
               {siteSearch && (
                 <button onClick={() => setSiteSearch('')} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600">✕</button>
               )}
             </div>
-            {filteredSites.length > 0 && (
+            {/* 언제나 표시: 검색 있으면 필터링, 없으면 상위 20개 */}
+            {filteredSites.length > 0 ? (
               <div className="mt-2 bg-white border rounded-xl shadow-sm overflow-hidden">
+                {!siteSearch && (
+                  <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-400">팀별현장 전체 ({sites.length}개)</div>
+                )}
                 {filteredSites.map(site => (
                   <button
                     key={site.id}
@@ -271,9 +277,10 @@ setSites(sitesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Site)));
                   </button>
                 ))}
               </div>
-            )}
-            {siteSearch.trim() && filteredSites.length === 0 && (
-              <p className="text-center text-gray-400 text-sm mt-4">검색 결과가 없습니다</p>
+            ) : (
+              <div className="mt-4 text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
+                {siteSearch ? '검색 결과가 없습니다' : '팀별현장이 없어요. 걸 → 팀별현장에서 현장을 등록해 주세요.'}
+              </div>
             )}
           </div>
         )}
