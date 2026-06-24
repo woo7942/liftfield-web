@@ -10,6 +10,7 @@ import {
   serverTimestamp, orderBy, getDocs
 } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
+import { invalidateSitesCache } from '@/app/dashboard/page';
 
 // ─── 타입 정의 ───
 interface UserInfo {
@@ -284,6 +285,8 @@ export default function SitesPage() {
   const reloadSites = async (companyId?: string) => {
     const cid = companyId ?? userInfo?.companyId;
     if (!cid) return;
+    // 대시보드 캐시 무효화 → 다음 대시보드 진입 시 Firestore 재조회
+    invalidateSitesCache(cid);
     const q = query(
       collection(db, 'companies', cid, 'sites'),
       orderBy('createdAt', 'desc')
