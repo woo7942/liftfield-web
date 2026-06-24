@@ -280,37 +280,43 @@ export default function SitesPage() {
     return () => unsub();
   }, [router]);
 
-  // ─── 현장 구독 ───
-  useEffect(() => {
-    if (!userInfo?.companyId) return;
+  // ─── 현장 목록 로드 (공통 함수 — 모든 CUD 작업 후 호출) ───
+  const reloadSites = async (companyId?: string) => {
+    const cid = companyId ?? userInfo?.companyId;
+    if (!cid) return;
     const q = query(
-      collection(db, 'companies', userInfo.companyId, 'sites'),
+      collection(db, 'companies', cid, 'sites'),
       orderBy('createdAt', 'desc')
     );
-    getDocs(q).then(async (snap) => {
-      const list: SiteItem[] = snap.docs.map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          name: data.name || data.siteName || '',
-          teamName: data.teamName || data.team || '',
-        } as SiteItem;
-      });
-      setSites(list);
-      const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
-      setTeams(Array.from(teamSet));
+    const snap = await getDocs(q);
+    const list: SiteItem[] = snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        name: data.name || data.siteName || '',
+        teamName: data.teamName || data.team || '',
+      } as SiteItem;
+    });
+    setSites(list);
+    const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
+    setTeams(Array.from(teamSet));
+    // 전체 호기 수 합산
+    let total = 0;
+    for (const siteDoc of snap.docs) {
+      const elevsSnap = await getDocs(
+        collection(db, 'companies', cid, 'sites', siteDoc.id, 'elevators')
+      );
+      total += elevsSnap.size;
+    }
+    setTotalElevatorCount(total);
+  };
 
-      // 전체 호기 수 합산
-      let total = 0;
-      for (const siteDoc of snap.docs) {
-        const elevsSnap = await getDocs(
-          collection(db, 'companies', userInfo.companyId, 'sites', siteDoc.id, 'elevators')
-        );
-        total += elevsSnap.size;
-      }
-      setTotalElevatorCount(total);
-    }).catch(console.error);
+  // ─── 현장 최초 로드 ───
+  useEffect(() => {
+    if (!userInfo?.companyId) return;
+    reloadSites(userInfo.companyId).catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userInfo?.companyId]);
 
 
@@ -387,7 +393,7 @@ export default function SitesPage() {
 
   // 만료 통계
   const tabSites = sites.filter(s => {
-    if (activeTab === 'contract') return s.source !== 'member';
+    if (activeTab === 'contract') return s.source === 'admin' || !s.source;
     return s.source === 'member';
   });
   const expiredCount = tabSites.filter(s => (getDday(s.contractEnd) ?? 999) <= 0).length;
@@ -538,6 +544,8 @@ export default function SitesPage() {
       }
       const skipMsg = skipCount > 0 ? ` (현장명 없는 ${skipCount}행 제외)` : '';
       setImportResult(`✅ 신규 ${addCount}개 추가 · 기존 ${updateCount}개 업데이트 완료!${skipMsg}`);
+      // ✅ FIX: 엑셀 가져오기 완료 후 목록 즉시 갱신
+      await reloadSites();
     } catch (e) {
       console.error(e);
       setImportResult('❌ 가져오기 중 오류가 발생했어요.');
@@ -559,6 +567,8 @@ export default function SitesPage() {
       });
       setShowAddModal(false);
       setAddForm({});
+      // ✅ FIX: 추가 후 목록 즉시 갱신
+      await reloadSites();
     } catch (e) {
       console.error(e);
     } finally {
@@ -575,7 +585,9 @@ export default function SitesPage() {
         updatedAt: serverTimestamp(),
       });
       setEditMode(false);
+      // ✅ FIX: 수정 후 목록 즉시 갱신 (로컬 state + Firestore 재조회)
       setSelectedSite({ ...selectedSite, ...editForm });
+      setSites(prev => prev.map(s => s.id === selectedSite.id ? { ...s, ...editForm } : s));
     } catch (e) {
       console.error(e);
     }
@@ -585,8 +597,15 @@ export default function SitesPage() {
   async function handleDeleteSite(siteId: string) {
     if (!userInfo?.companyId) return;
     if (!confirm('현장을 삭제할까요?')) return;
-    await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', siteId));
-    setSelectedSite(null);
+    try {
+      await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', siteId));
+      setSelectedSite(null);
+      // ✅ FIX: 삭제 후 목록 즉시 갱신
+      setSites(prev => prev.filter(s => s.id !== siteId));
+    } catch (e) {
+      console.error(e);
+      alert('❌ 삭제 중 오류가 발생했어요.');
+    }
   }
 
   // ─── 전체 삭제 ───
@@ -600,13 +619,17 @@ export default function SitesPage() {
       return;
     }
     try {
+      // ✅ FIX: source 필터 명확화 ('admin' 탭 → source==='admin', 팀 탭 → source==='member')
+      // 기존 버그: source가 undefined인 레코드가 'contract' 탭 삭제에 포함되는 문제
       const targetSites = sites.filter(s => {
-        if (activeTab === 'contract') return s.source !== 'member';
+        if (activeTab === 'contract') return s.source === 'admin' || !s.source;
         return s.source === 'member';
       });
       for (const site of targetSites) {
         await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', site.id));
       }
+      // ✅ FIX: 삭제 후 즉시 UI 갱신 (Firestore 재조회)
+      await reloadSites();
       alert(`✅ ${targetSites.length}개 현장이 삭제됐어요.`);
     } catch (e) {
       console.error(e);
