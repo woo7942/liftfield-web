@@ -9,6 +9,40 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 
+// ── localStorage TTL 캐시 헬퍼 ──────────────────────
+// 저장: { data, ts } 형태로 저장 시각 포함
+// 읽기: TTL(ms) 이내면 캐시 반환, 초과 또는 없으면 null 반환
+const cache = {
+  set(key: string, data: unknown) {
+    try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); } catch {}
+  },
+  get<T>(key: string, ttlMs: number): T | null {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const { data, ts } = JSON.parse(raw);
+      if (Date.now() - ts > ttlMs) { localStorage.removeItem(key); return null; }
+      return data as T;
+    } catch { return null; }
+  },
+  invalidate(key: string) {
+    try { localStorage.removeItem(key); } catch {}
+  },
+  invalidatePrefix(prefix: string) {
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith(prefix))
+        .forEach(k => localStorage.removeItem(k));
+    } catch {}
+  },
+};
+
+// 현장 캐시 무효화 헬퍼 — sites/page.tsx 등에서 CUD 후 호출 가능하도록 export
+export function invalidateSitesCache(companyId: string) {
+  cache.invalidate(`sites_${companyId}`);
+  cache.invalidate(`totalElevs_${companyId}`);
+}
+
 // ── 타입 ──────────────────────────────────────────
 interface SiteItem {
   id: string;
@@ -143,41 +177,41 @@ export default function DashboardPage() {
     return () => unsub();
   }, []);
 
-  // 현장 (localStorage 캐시)
+  // 현장 (TTL 캐시 5분 — CUD 발생 시 무효화됨)
 useEffect(() => {
   if (!userInfo) return;
   const cid = userInfo.companyId;
   const cacheKey = `sites_${cid}`;
-  const cached = localStorage.getItem(cacheKey);
+  const TTL = 5 * 60 * 1000; // 5분
 
+  const cached = cache.get<SiteItem[]>(cacheKey, TTL);
   if (cached) {
-    setSites(JSON.parse(cached));
+    setSites(cached);
   } else {
     getDocs(query(collection(db, 'companies', cid, 'sites'), orderBy('createdAt', 'desc')))
       .then(snap => {
         const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
         setSites(data);
-        localStorage.setItem(cacheKey, JSON.stringify(data));
+        cache.set(cacheKey, data);
       }).catch(console.error);
   }
 }, [userInfo]);
 
 
-  // 승강기 수 (localStorage 캐시)
+  // 승강기 수 (TTL 캐시 10분)
 useEffect(() => {
   if (!userInfo) return;
   const cacheKey = `totalElevs_${userInfo.companyId}`;
-  const cached = localStorage.getItem(cacheKey);
-  
-  if (cached) {
-    // 저장된 값 바로 사용
-    setTotalElevs(Number(cached));
+  const TTL = 10 * 60 * 1000; // 10분
+
+  const cached = cache.get<number>(cacheKey, TTL);
+  if (cached !== null) {
+    setTotalElevs(cached);
   } else {
-    // 최초 1회만 Firebase 읽기
     getDocs(query(collectionGroup(db, 'elevators'), where('companyId', '==', userInfo.companyId)))
       .then(snap => {
         setTotalElevs(snap.size);
-        localStorage.setItem(cacheKey, String(snap.size));
+        cache.set(cacheKey, snap.size);
       }).catch(console.error);
   }
 }, [userInfo]);
@@ -214,16 +248,17 @@ unsubs.push(onSnapshot(matQ, s => {
 }));
 
 
-    // 직원 수 (localStorage 캐시)
+    // 직원 수 (TTL 캐시 10분)
 const memberCacheKey = `memberCount_${cid}`;
-const cachedMember = localStorage.getItem(memberCacheKey);
-if (cachedMember) {
-  setCounts(p => ({ ...p, member: Number(cachedMember) }));
+const TTL_member = 10 * 60 * 1000;
+const cachedMember = cache.get<number>(memberCacheKey, TTL_member);
+if (cachedMember !== null) {
+  setCounts(p => ({ ...p, member: cachedMember }));
 } else {
   getDocs(query(collection(db, 'users'), where('companyId', '==', cid)))
     .then(s => {
       setCounts(p => ({ ...p, member: s.size }));
-      localStorage.setItem(memberCacheKey, String(s.size));
+      cache.set(memberCacheKey, s.size);
     }).catch(console.error);
 }
 
