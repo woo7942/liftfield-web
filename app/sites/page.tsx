@@ -221,8 +221,7 @@ export default function SitesPage() {
   const [totalElevatorCount, setTotalElevatorCount] = useState(0);
 
   // 필터/정렬
-  // contract-sites 전용: activeTab 항상 'contract' (계약현장만)
-  const activeTab = 'contract' as const;
+  // contract-sites 전용: activeTab 상수 불필요 (제거)
   const [selectedTeam, setSelectedTeam] = useState('전체');
   const [selectedType, setSelectedType] = useState('전체');
   const [searchText, setSearchText] = useState('');
@@ -343,11 +342,11 @@ export default function SitesPage() {
     }
   }
 
-  // ─── 필터 + 정렬 ───
+  // ─── 필터 + 정렬 ─── (계약현장 전용: source=admin || !source만 표시)
   const filteredSites = sites
     .filter(s => {
-      if (activeTab === 'contract' && s.source === 'member') return false;
-      if (activeTab === 'team' && s.source === 'admin') return false;
+      // 계약현장만 — source==='admin' 이거나 source가 없는 데이터
+      if (s.source === 'member') return false;
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contractType !== selectedType) return false;
@@ -395,11 +394,8 @@ export default function SitesPage() {
       return 0;
     });
 
-  // 만료 통계
-  const tabSites = sites.filter(s => {
-    if (activeTab === 'contract') return s.source === 'admin' || !s.source;
-    return s.source === 'member';
-  });
+  // 만료 통계 (계약현장만 기준)
+  const tabSites = sites.filter(s => s.source === 'admin' || !s.source);
   const expiredCount = tabSites.filter(s => (getDday(s.contractEnd) ?? 999) <= 0).length;
   const urgentCount = tabSites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; }).length;
   const warningCount = tabSites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; }).length;
@@ -623,12 +619,8 @@ export default function SitesPage() {
       return;
     }
     try {
-      // ✅ FIX: source 필터 명확화 ('admin' 탭 → source==='admin', 팀 탭 → source==='member')
-      // 기존 버그: source가 undefined인 레코드가 'contract' 탭 삭제에 포함되는 문제
-      const targetSites = sites.filter(s => {
-        if (activeTab === 'contract') return s.source === 'admin' || !s.source;
-        return s.source === 'member';
-      });
+      // 계약현장만 전체삭제 (source==='admin' || !source)
+      const targetSites = sites.filter(s => s.source === 'admin' || !s.source);
       for (const site of targetSites) {
         await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', site.id));
       }
