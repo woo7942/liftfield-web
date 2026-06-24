@@ -229,23 +229,29 @@ if (!isSuperAdmin && !isAdmin) {
       const expireAt = new Date();
       expireAt.setDate(expireAt.getDate() + 7);
 
+      // 기존 코드(active/used/expired 모두) 조회 → 갱신 or 신규 생성
       const q = query(
         collection(db, 'invitations'),
         where('companyId', '==', userInfo.companyId),
-        where('teamName', '==', inviteTeam.name),
-        where('status', '==', 'active')
+        where('teamName', '==', inviteTeam.name)
       );
       const snap = await getDocs(q);
+      const newCode = generateCode();
 
       if (!snap.empty) {
-  await updateDoc(doc(db, 'invitations', snap.docs[0].id), {
-    expireAt,
-    maxMembers: inviteMaxMembers,
-    code: generateCode(), // ✅ 코드도 새로 발급
-  });
+        // 기존 문서 재활성화 (used/expired 포함)
+        await updateDoc(doc(db, 'invitations', snap.docs[0].id), {
+          code: newCode,
+          status: 'active',
+          expireAt,
+          maxMembers: inviteMaxMembers,
+          usedCount: 0,
+          ownerName: userInfo.name,
+          companyDisplayName: userInfo.companyDisplayName,
+        });
       } else {
         await addDoc(collection(db, 'invitations'), {
-          code: generateCode(),
+          code: newCode,
           companyId: userInfo.companyId,
           companyDisplayName: userInfo.companyDisplayName,
           teamName: inviteTeam.name,
@@ -257,6 +263,39 @@ if (!isSuperAdmin && !isAdmin) {
           expireAt,
         });
       }
+      // 발급 후 invitations 상태 즉시 갱신
+      setInvitations(prev => ({
+        ...prev,
+        [inviteTeam.name]: {
+          docId: snap.empty ? '' : snap.docs[0].id,
+          code: newCode,
+          status: 'active',
+          expireAt,
+          usedCount: 0,
+          maxMembers: inviteMaxMembers,
+        },
+      }));
+      // Firestore에서 정확한 docId 포함해 재조회
+      const reloadQ = query(
+        collection(db, 'invitations'),
+        where('companyId', '==', userInfo.companyId)
+      );
+      getDocs(reloadQ).then(reSnap => {
+        const map: Record<string, InviteInfo> = {};
+        reSnap.docs.forEach(d => {
+          const data = d.data();
+          const expAt = toDate(data.expireAt);
+          const isExpired = data.status !== 'active' || (expAt && expAt < new Date());
+          if (!isExpired) {
+            map[data.teamName] = {
+              docId: d.id, code: data.code, status: data.status,
+              expireAt: expAt, usedCount: data.usedCount || 0, maxMembers: data.maxMembers || 0,
+            };
+          }
+        });
+        setInvitations(map);
+      }).catch(console.error);
+
       setShowInviteModal(false);
       setInviteTeam(null);
     } catch (e) {
