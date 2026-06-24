@@ -106,14 +106,15 @@ function timeAgo(v: any): string {
 
 // ── 사이드바 메뉴 ──────────────────────────────────
 const MENUS = [
-  { icon: '🏢', label: '현장관리',  path: '/sites',      badgeKey: '' },
-  { icon: '🔧', label: '고장접수',  path: '/fault',      badgeKey: 'fault' },
-  { icon: '📋', label: '점검관리',  path: '/inspection', badgeKey: '' },
-  { icon: '🔍', label: '검사지적',  path: '/inspect', badgeKey: '' },
-  { icon: '📦', label: '자재신청',  path: '/material',   badgeKey: 'material' },
-  { icon: '👥', label: '직원관리',  path: '/members',    badgeKey: 'member' },
-  { icon: '📊', label: '통계',      path: '/stats',      badgeKey: '' },
-  { icon: '🔗', label: '팀 초대',   path: '/team',       badgeKey: '' },
+  { icon: '📋', label: '계약현장',   path: '/sites',       badgeKey: '' },
+  { icon: '🏢', label: '팀별현장',   path: '/team-sites',  badgeKey: '' },
+  { icon: '🔧', label: '고장접수',   path: '/fault',       badgeKey: 'fault' },
+  { icon: '📋', label: '점검관리',   path: '/inspection',  badgeKey: '' },
+  { icon: '🔍', label: '검사지적',   path: '/inspect',     badgeKey: '' },
+  { icon: '📦', label: '자재신청',   path: '/material',    badgeKey: 'material' },
+  { icon: '👥', label: '직원관리',   path: '/members',     badgeKey: 'member' },
+  { icon: '📊', label: '통계',       path: '/stats',       badgeKey: '' },
+  { icon: '🔗', label: '팀 초대',    path: '/team',        badgeKey: '' },
 ];
 
 
@@ -177,7 +178,7 @@ export default function DashboardPage() {
     return () => unsub();
   }, []);
 
-  // 현장 (TTL 캐시 5분 — CUD 발생 시 무효화됨)
+  // 현장 — 계약현장(source==='admin' || !source)만 로드 (TTL 캐시 5분)
 useEffect(() => {
   if (!userInfo) return;
   const cid = userInfo.companyId;
@@ -186,13 +187,15 @@ useEffect(() => {
 
   const cached = cache.get<SiteItem[]>(cacheKey, TTL);
   if (cached) {
-    setSites(cached);
+    // 캐시에서도 계약현장만 필터링
+    setSites(cached.filter((s: any) => s.source === 'admin' || !s.source));
   } else {
     getDocs(query(collection(db, 'companies', cid, 'sites'), orderBy('createdAt', 'desc')))
       .then(snap => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
-        setSites(data);
-        cache.set(cacheKey, data);
+        const allData = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
+        cache.set(cacheKey, allData); // 전체 캐시 저장 (무효화 공유 목적)
+        // 대시보드에는 계약현장만 표시
+        setSites(allData.filter((s: any) => s.source === 'admin' || !s.source));
       }).catch(console.error);
   }
 }, [userInfo]);
@@ -410,7 +413,7 @@ if (cachedMember !== null) {
                 안녕하세요, {userInfo?.name}님 👋
               </h1>
               <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
-                {userInfo?.companyDisplayName || ''} · 전체 {sites.length}개 현장 관리 중
+                {userInfo?.companyDisplayName || ''} · 계약현장 {sites.length}개 관리 중
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -517,7 +520,7 @@ if (cachedMember !== null) {
               <div style={S.panelHead()}>
                 <div style={{ width: 3, height: 14, borderRadius: 2, background: 'linear-gradient(to bottom,#3b82f6,#6366f1)', flexShrink: 0 }} />
                 <span style={{ fontSize: 13, fontWeight: 700, color: '#334155', flex: 1 }}>현장 목록</span>
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>전체 {sites.length}개</span>
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>계약현장 {sites.length}개</span>
               </div>
 
               {/* 검색 + 필터 */}

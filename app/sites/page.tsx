@@ -221,7 +221,8 @@ export default function SitesPage() {
   const [totalElevatorCount, setTotalElevatorCount] = useState(0);
 
   // 필터/정렬
-  const [activeTab, setActiveTab] = useState<'contract' | 'team'>('contract');
+  // contract-sites 전용: activeTab 항상 'contract' (계약현장만)
+  const activeTab = 'contract' as const;
   const [selectedTeam, setSelectedTeam] = useState('전체');
   const [selectedType, setSelectedType] = useState('전체');
   const [searchText, setSearchText] = useState('');
@@ -652,7 +653,7 @@ export default function SitesPage() {
       <header className="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <button onClick={() => router.push('/')} className="text-gray-500 hover:text-gray-700 text-lg">←</button>
-          <h1 className="font-bold text-lg">🏢 현장 관리</h1>
+          <h1 className="font-bold text-lg">📋 계약 현장</h1>
           <span className="text-sm text-gray-400">({filteredSites.length}개)</span>
         </div>
         {canEdit && (
@@ -682,20 +683,7 @@ export default function SitesPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-4">
 
-        {/* 탭 */}
-        {canEdit && (
-          <div className="flex gap-2 mb-3">
-            {(['contract', 'team'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => { setActiveTab(tab); setExpiryFilter('all'); }}
-                className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-colors ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}
-              >
-                {tab === 'contract' ? '📋 계약 현장' : '🏢 팀 현장'}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* 계약현장 전용 — 탭 UI 없음 */}
 
         {/* 만료 필터 탭 */}
         <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
