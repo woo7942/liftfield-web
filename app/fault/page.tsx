@@ -168,12 +168,17 @@ export default function FaultPage() {
       const teamSet = new Set(faultList.map(f => f.team).filter(Boolean));
       setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
 
-      // sites 로드
-      const { data: sitesData } = await supabase
+      // sites 로드 (member는 자기 팀 현장만)
+      const isAdminOrSuper = userData.super_admin || userData.role === 'admin';
+      let sitesQuery = supabase
         .from('sites')
         .select('*')
         .eq('company_id', cid)
         .order('name');
+      if (!isAdminOrSuper && userData.team) {
+        sitesQuery = sitesQuery.eq('team_name', userData.team);
+      }
+      const { data: sitesData } = await sitesQuery;
       setSites(sitesData || []);
 
       // users 로드 (bugfix: userQ 미정의 버그 수정)

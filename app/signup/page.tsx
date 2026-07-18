@@ -164,6 +164,15 @@ export default function SignupPage() {
         // 초대코드 사용 처리
         await supabase.from('invitations').update({ used: true, used_by: uid }).eq('id', inviteInfo.docId);
 
+        // company_members 테이블에도 등록 (팀 현장 조회 연동용)
+        await supabase.from('company_members').insert({
+          user_id: uid,
+          company_id: inviteInfo.companyId,
+          team: inviteInfo.teamName,
+          role: 'member',
+          joined_at: now,
+        });
+
         setDone(true);
         return;
       }

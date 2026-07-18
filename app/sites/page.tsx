@@ -179,11 +179,18 @@ export default function SitesPage() {
   useEffect(() => {
     if (!userInfo?.company_id) return;
     const loadSites = async () => {
-      const { data, error } = await supabase
+      // member(일반팀원)는 DB 쿼리 레벨에서 자신의 팀 현장만 조회
+      let query = supabase
         .from('sites')
         .select('*')
         .eq('company_id', userInfo.company_id)
         .order('created_at', { ascending: false });
+
+      if (!canEdit && userInfo.team) {
+        query = query.eq('team_name', userInfo.team);
+      }
+
+      const { data, error } = await query;
 
       if (error) { console.error(error); return; }
       const list = (data || []) as SiteItem[];
@@ -193,14 +200,30 @@ export default function SitesPage() {
       setTeams(Array.from(teamSet));
 
       // 전체 호기 수 합산
-      const { count } = await supabase
+      let elevQuery = supabase
         .from('elevators')
         .select('id', { count: 'exact', head: true })
         .eq('company_id', userInfo.company_id);
+
+      if (!canEdit && userInfo.team) {
+        // member는 자기 팀 현장의 호기만 카운트
+        const siteIds = list.map(s => s.id);
+        if (siteIds.length > 0) {
+          elevQuery = supabase
+            .from('elevators')
+            .select('id', { count: 'exact', head: true })
+            .in('site_id', siteIds);
+        } else {
+          setTotalElevatorCount(0);
+          return;
+        }
+      }
+
+      const { count } = await elevQuery;
       setTotalElevatorCount(count ?? 0);
     };
     loadSites();
-  }, [userInfo?.company_id]);
+  }, [userInfo?.company_id, canEdit, userInfo?.team]);
 
   // ─── 현장 클릭 시 호기 로드 ───
   async function handleSiteClick(site: SiteItem) {
@@ -228,7 +251,7 @@ export default function SitesPage() {
     .filter(s => {
       if (activeTab === 'contract' && s.source === 'member') return false;
       if (activeTab === 'team' && s.source === 'admin') return false;
-      if (!canEdit && s.team_name !== userInfo?.team) return false;
+      // member는 DB 쿼리에서 이미 team_name 필터링됨 — 클라이언트 중복 필터 불필요
       if (canEdit && selectedTeam !== '전체' && s.team_name !== selectedTeam) return false;
       if (selectedType !== '전체' && s.contract_type !== selectedType) return false;
       if (expiryFilter === 'expired') {
