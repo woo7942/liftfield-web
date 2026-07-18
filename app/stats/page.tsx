@@ -2,127 +2,73 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  collection, query, where, getDocs,
-  doc, getDoc, orderBy
-} from 'firebase/firestore';
-
-interface UserInfo {
-  uid: string;
-  name: string;
-  companyId: string;
-  role: string;
-  superAdmin?: boolean;
-  useNewStructure?: boolean;
-}
+import { supabase } from '@/lib/supabase';
 
 interface Inspection {
   id: string;
-  companyId: string;
-  scheduledDate: string;
+  company_id: string;
+  scheduled_date: string;
   status: string;
-  teamName: string;
-  totalCount: number;
-  completedCount: number;
-  createdAt?: unknown;
+  team_name: string;
+  total_count: number;
+  completed_count: number;
 }
 
 interface FaultReport {
   id: string;
-  companyId: string;
+  company_id: string;
   status: string;
-  teamName?: string;
-  team?: string;
-  createdAt?: unknown;
+  team: string;
 }
 
 export default function StatsPage() {
   const router = useRouter();
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [faultReports, setFaultReports] = useState<FaultReport[]>([]);
 
-  // ─── 인증 ───
+  // ─── 인증 + 데이터 로드 ───
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
-      try {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (!snap.exists()) { router.push('/login'); return; }
-        const data = snap.data();
-        if (!data.companyId) { router.push('/'); return; }
-        setUserInfo({
-          uid: user.uid,
-          name: data.name || '',
-          companyId: data.companyId,
-          role: data.role || 'member',
-          superAdmin: data.superAdmin || false,
-          useNewStructure: data.useNewStructure || false,
-        });
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      if (!userData) { router.push('/login'); return; }
+
+      const cid = userData.company_id;
+      if (!cid) { router.push('/'); return; }
+
+      // 점검 + 고장 동시 로드 (useNewStructure 패턴 제거)
+      const [{ data: inspData }, { data: faultData }] = await Promise.all([
+        supabase
+          .from('inspections')
+          .select('*')
+          .eq('company_id', cid)
+          .order('scheduled_date', { ascending: false }),
+        supabase
+          .from('fault_reports')
+          .select('*')
+          .eq('company_id', cid)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      setInspections((inspData || []) as Inspection[]);
+      setFaultReports((faultData || []) as FaultReport[]);
+      setLoading(false);
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') router.push('/login');
     });
-    return () => unsub();
-  }, [router]);
-
-  // ─── 점검 데이터 로드 ───
-  useEffect(() => {
-    if (!userInfo?.companyId) return;
-    const load = async () => {
-      try {
-        const snap = await getDocs(
-          query(
-            collection(db, 'inspections'),
-            where('companyId', '==', userInfo.companyId),
-            orderBy('scheduledDate', 'desc')
-          )
-        );
-        setInspections(snap.docs.map(d => ({ id: d.id, ...d.data() } as Inspection)));
-      } catch (e) {
-        console.error(e);
-      }
-    };
-    load();
-  }, [userInfo?.companyId]);
-
-  // ─── 고장접수 데이터 로드 ───
-  useEffect(() => {
-    if (!userInfo?.companyId) return;
-    const load = async () => {
-      try {
-        const useNew = userInfo.useNewStructure && !!userInfo.companyId;
-        const cid = userInfo.companyId;
-
-        let snap;
-        if (useNew) {
-          snap = await getDocs(
-            query(
-              collection(db, 'companies', cid, 'faultReports'),
-              orderBy('createdAt', 'desc')
-            )
-          );
-        } else {
-          snap = await getDocs(
-            query(
-              collection(db, 'faultReports'),
-              where('companyId', '==', cid),
-              orderBy('createdAt', 'desc')
-            )
-          );
-        }
-        setFaultReports(snap.docs.map(d => ({ id: d.id, ...d.data() } as FaultReport)));
-      } catch (e) {
-        console.error('고장접수 로드 실패:', e);
-      }
-    };
-    load();
-  }, [userInfo]);
+    return () => subscription.unsubscribe();
+  }, []);
 
   // ─── 점검 통계 ───
   const totalInspections      = inspections.length;
@@ -136,7 +82,6 @@ export default function StatsPage() {
   const totalFaults     = faultReports.length;
   const resolvedFaults  = faultReports.filter(f => f.status === '완료' || f.status === '처리완료').length;
   const pendingFaults   = faultReports.filter(f => f.status === '접수' || f.status === '신규' || f.status === '신청중').length;
-  const progressFaults  = faultReports.filter(f => f.status === '진행중' || f.status === '처리중').length;
   const faultResolveRate = totalFaults > 0
     ? Math.round((resolvedFaults / totalFaults) * 100) : 0;
 
@@ -144,8 +89,8 @@ export default function StatsPage() {
   const monthlyStats = (() => {
     const map: Record<string, { total: number; completed: number }> = {};
     inspections.forEach(i => {
-      if (!i.scheduledDate) return;
-      const month = i.scheduledDate.slice(0, 7);
+      if (!i.scheduled_date) return;
+      const month = i.scheduled_date.slice(0, 7);
       if (!map[month]) map[month] = { total: 0, completed: 0 };
       map[month].total++;
       if (i.status === '완료') map[month].completed++;
@@ -157,7 +102,7 @@ export default function StatsPage() {
   const teamStats = (() => {
     const map: Record<string, { total: number; completed: number }> = {};
     inspections.forEach(i => {
-      const team = i.teamName || '미배정';
+      const team = i.team_name || '미배정';
       if (!map[team]) map[team] = { total: 0, completed: 0 };
       map[team].total++;
       if (i.status === '완료') map[team].completed++;
@@ -169,7 +114,7 @@ export default function StatsPage() {
   const teamFaultStats = (() => {
     const map: Record<string, { total: number; resolved: number; pending: number }> = {};
     faultReports.forEach(f => {
-      const team = f.teamName || f.team || '미배정';
+      const team = f.team || '미배정';
       if (!map[team]) map[team] = { total: 0, resolved: 0, pending: 0 };
       map[team].total++;
       if (f.status === '완료' || f.status === '처리완료') map[team].resolved++;
@@ -227,9 +172,9 @@ export default function StatsPage() {
           <h2 className="text-sm font-bold text-gray-500 mb-3">🔧 고장접수 현황</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: '전체 고장',  value: totalFaults,        color: 'gray',   icon: '🔧' },
-              { label: '처리완료',   value: resolvedFaults,     color: 'green',  icon: '✅' },
-              { label: '접수/대기',  value: pendingFaults,      color: 'red',    icon: '🚨' },
+              { label: '전체 고장',  value: totalFaults,            color: 'gray',   icon: '🔧' },
+              { label: '처리완료',   value: resolvedFaults,         color: 'green',  icon: '✅' },
+              { label: '접수/대기',  value: pendingFaults,          color: 'red',    icon: '🚨' },
               { label: '처리율',     value: `${faultResolveRate}%`, color: 'purple', icon: '📊' },
             ].map(card => (
               <div key={card.label} className="bg-white rounded-2xl border p-4 shadow-sm">

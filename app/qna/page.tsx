@@ -2,13 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  collection, doc, getDoc, addDoc, onSnapshot,
-  orderBy, query, serverTimestamp, updateDoc,
-  increment, deleteDoc,
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 // ─── 타입 ───
 interface QnaItem {
@@ -17,25 +11,25 @@ interface QnaItem {
   content: string;
   tag: string;
   brand: string;
-  brandLabel: string;
-  modelName: string;
-  customBrandName: string;
-  authorUid: string;
-  authorName: string;
-  companyId: string;
-  companyName: string;
-  isPublic: boolean;
-  answerCount: number;
-  createdAt: any;
+  brand_label: string;
+  model_name: string;
+  custom_brand_name: string;
+  author_uid: string;
+  author_name: string;
+  company_id: string;
+  company_name: string;
+  is_public: boolean;
+  answer_count: number;
+  created_at: string | null;
 }
 
 interface Answer {
   id: string;
   content: string;
-  authorName: string;
-  authorUid: string;
-  companyName: string;
-  createdAt: any;
+  author_name: string;
+  author_uid: string;
+  company_name: string;
+  created_at: string | null;
 }
 
 // ─── 제조사 ───
@@ -62,9 +56,9 @@ const TAG_COLORS: Record<string, string> = {
   '기타':        'bg-gray-100 text-gray-600',
 };
 
-const toDateStr = (v: any) => {
+const toDateStr = (v: string | null) => {
   if (!v) return '';
-  const d = v?.toDate ? v.toDate() : new Date(v);
+  const d = new Date(v);
   return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 };
 
@@ -102,55 +96,97 @@ export default function QnaPage() {
   const [answerText, setAnswerText] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const answerUnsubRef = useRef<(() => void) | null>(null);
+  const answerChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // ─── 인증 ───
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
-      const data = snap.data();
-      const plan = data.subscription?.plan;
-      const isPro = plan === 'pro' || plan === 'company';
-      const isSuperAdmin = data.superAdmin === true;
-      if (!isPro && !isSuperAdmin) { router.push('/'); return; }
-      setUserInfo({ ...data, uid: user.uid });
-      setAuthLoading(false);
-    });
-    return () => unsub();
-  }, []);
 
-  // ─── Q&A 목록 구독 ───
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (!userData) { router.push('/login'); return; }
+
+      const plan = userData.subscription_plan;
+      const isPro = plan === 'pro' || plan === 'company';
+      const isSuperAdmin = userData.super_admin === true;
+      if (!isPro && !isSuperAdmin) { router.push('/'); return; }
+
+      setUserInfo({ ...userData, uid: user.id });
+      setAuthLoading(false);
+    };
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') router.push('/login');
+    });
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  // ─── Q&A 목록 로드 ───
   useEffect(() => {
     if (!userInfo) return;
-    const q = query(collection(db, 'qna'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      setQnaList(snap.docs.map(d => ({ id: d.id, ...d.data() } as QnaItem)));
-    });
-    return () => unsub();
+    const loadQna = async () => {
+      const { data, error } = await supabase
+        .from('qna')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) { console.error(error); return; }
+      setQnaList((data || []) as QnaItem[]);
+    };
+    loadQna();
   }, [userInfo]);
 
-  // ─── 답변 구독 ───
+  // ─── 답변 로드 (selected 변경 시) ───
   useEffect(() => {
-    if (answerUnsubRef.current) { answerUnsubRef.current(); answerUnsubRef.current = null; }
+    // 이전 채널 정리
+    if (answerChannelRef.current) {
+      supabase.removeChannel(answerChannelRef.current);
+      answerChannelRef.current = null;
+    }
     if (!selected) { setAnswers([]); return; }
-    const q = query(collection(db, 'qna', selected.id, 'answers'), orderBy('createdAt', 'asc'));
-    answerUnsubRef.current = onSnapshot(q, (snap) => {
-      setAnswers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Answer)));
-    });
-    return () => { if (answerUnsubRef.current) answerUnsubRef.current(); };
+
+    // 초기 로드
+    const loadAnswers = async () => {
+      const { data, error } = await supabase
+        .from('qna_answers')
+        .select('*')
+        .eq('qna_id', selected.id)
+        .order('created_at', { ascending: true });
+      if (error) { console.error(error); return; }
+      setAnswers((data || []) as Answer[]);
+    };
+    loadAnswers();
+
+    // Realtime 구독
+    const channel = supabase
+      .channel(`qna-answers-${selected.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'qna_answers',
+        filter: `qna_id=eq.${selected.id}`,
+      }, () => { loadAnswers(); })
+      .subscribe();
+
+    answerChannelRef.current = channel;
+    return () => { supabase.removeChannel(channel); };
   }, [selected]);
 
   // ─── 권한 ───
-  const isSuperAdmin = userInfo?.superAdmin === true;
-  const myCompanyId = userInfo?.companyId || '';
-  const myCompanyName = userInfo?.companyDisplayName || userInfo?.name || '';
+  const isSuperAdmin = userInfo?.super_admin === true;
+  const myCompanyId = userInfo?.company_id || '';
+  const myCompanyName = userInfo?.company_display_name || userInfo?.name || '';
 
   // ─── 필터링 ───
   const filtered = qnaList.filter(item => {
-    if (!item.isPublic && item.companyId !== myCompanyId && !isSuperAdmin) return false;
-    if (filterMode === 'myCompany' && item.companyId !== myCompanyId) return false;
+    if (!item.is_public && item.company_id !== myCompanyId && !isSuperAdmin) return false;
+    if (filterMode === 'myCompany' && item.company_id !== myCompanyId) return false;
     if (activeBrand !== 'all' && item.brand !== activeBrand) return false;
     if (activeTag !== '전체' && item.tag !== activeTag) return false;
     if (searchText.trim()) {
@@ -158,8 +194,8 @@ export default function QnaPage() {
       return (
         item.title.toLowerCase().includes(s) ||
         item.content.toLowerCase().includes(s) ||
-        item.modelName?.toLowerCase().includes(s) ||
-        item.customBrandName?.toLowerCase().includes(s)
+        item.model_name?.toLowerCase().includes(s) ||
+        item.custom_brand_name?.toLowerCase().includes(s)
       );
     }
     return true;
@@ -172,24 +208,29 @@ export default function QnaPage() {
     setSubmitting(true);
     try {
       const brandInfo = getBrand(form.brand);
-      await addDoc(collection(db, 'qna'), {
+      const { data: newQna, error } = await supabase.from('qna').insert({
         title: form.title.trim(),
         content: form.content.trim(),
         tag: form.tag,
         brand: form.brand,
-        brandLabel: form.brand === 'other' ? form.customBrandName.trim() : brandInfo.label,
-        modelName: form.modelName.trim(),
-        customBrandName: form.brand === 'other' ? form.customBrandName.trim() : '',
-        isPublic: form.isPublic,
-        authorUid: userInfo.uid,
-        authorName: userInfo.name || '',
-        companyId: myCompanyId,
-        companyName: myCompanyName,
-        answerCount: 0,
-        createdAt: serverTimestamp(),
-      });
+        brand_label: form.brand === 'other' ? form.customBrandName.trim() : brandInfo.label,
+        model_name: form.modelName.trim(),
+        custom_brand_name: form.brand === 'other' ? form.customBrandName.trim() : '',
+        is_public: form.isPublic,
+        author_uid: userInfo.uid,
+        author_name: userInfo.name || '',
+        company_id: myCompanyId,
+        company_name: myCompanyName,
+        answer_count: 0,
+        created_at: new Date().toISOString(),
+      }).select().single();
+
+      if (error) throw error;
+      if (newQna) setQnaList(prev => [newQna as QnaItem, ...prev]);
       setForm({ title: '', content: '', tag: '기타', brand: '', modelName: '', customBrandName: '', isPublic: true });
       setShowWrite(false);
+    } catch (e) {
+      console.error(e);
     } finally {
       setSubmitting(false);
     }
@@ -200,15 +241,36 @@ export default function QnaPage() {
     if (!answerText.trim() || !selected) return;
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'qna', selected.id, 'answers'), {
+      // 답변 insert
+      const { error: ansErr } = await supabase.from('qna_answers').insert({
+        qna_id: selected.id,
         content: answerText.trim(),
-        authorUid: userInfo.uid,
-        authorName: userInfo.name || '',
-        companyName: myCompanyName,
-        createdAt: serverTimestamp(),
+        author_uid: userInfo.uid,
+        author_name: userInfo.name || '',
+        company_name: myCompanyName,
+        created_at: new Date().toISOString(),
       });
-      await updateDoc(doc(db, 'qna', selected.id), { answerCount: increment(1) });
+      if (ansErr) throw ansErr;
+
+      // answer_count 업데이트: 현재 count 조회 후 +1
+      const { count } = await supabase
+        .from('qna_answers')
+        .select('id', { count: 'exact', head: true })
+        .eq('qna_id', selected.id);
+
+      await supabase
+        .from('qna')
+        .update({ answer_count: count ?? 0 })
+        .eq('id', selected.id);
+
+      // 로컬 상태 업데이트
+      setQnaList(prev => prev.map(q =>
+        q.id === selected.id ? { ...q, answer_count: count ?? 0 } : q
+      ));
+      setSelected(prev => prev ? { ...prev, answer_count: count ?? 0 } : null);
       setAnswerText('');
+    } catch (e) {
+      console.error(e);
     } finally {
       setSubmitting(false);
     }
@@ -218,7 +280,9 @@ export default function QnaPage() {
   const deleteQna = async (id: string) => {
     if (!isSuperAdmin) return;
     if (!confirm('정말 삭제하시겠습니까?')) return;
-    await deleteDoc(doc(db, 'qna', id));
+    await supabase.from('qna_answers').delete().eq('qna_id', id);
+    await supabase.from('qna').delete().eq('id', id);
+    setQnaList(prev => prev.filter(q => q.id !== id));
     if (selected?.id === id) setSelected(null);
   };
 
@@ -237,9 +301,9 @@ export default function QnaPage() {
   const BrandBadge = ({ item }: { item: QnaItem }) => {
     const brand = getBrand(item.brand);
     const label = item.brand === 'other'
-      ? `⚙️ ${item.customBrandName || '그 외'}`
+      ? `⚙️ ${item.custom_brand_name || '그 외'}`
       : `${brand.icon} ${brand.label}`;
-    const modelStr = item.modelName ? ` · ${item.modelName}` : '';
+    const modelStr = item.model_name ? ` · ${item.model_name}` : '';
     return (
       <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${brand.color}`}>
         {label}{modelStr}
@@ -264,12 +328,11 @@ export default function QnaPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400 hidden sm:block">
-  {userInfo?.name}
-  {myCompanyName && myCompanyName !== userInfo?.name && (
-    <> · {myCompanyName}</>
-  )}
-</span>
-
+              {userInfo?.name}
+              {myCompanyName && myCompanyName !== userInfo?.name && (
+                <> · {myCompanyName}</>
+              )}
+            </span>
             <button
               onClick={() => setShowWrite(true)}
               className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors"
@@ -301,7 +364,6 @@ export default function QnaPage() {
               <div>
                 <p className="text-xs font-bold text-gray-400 mb-2">제조사</p>
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                  {/* 전체 버튼 */}
                   <button
                     onClick={() => setActiveBrand('all')}
                     className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
@@ -330,7 +392,6 @@ export default function QnaPage() {
 
               {/* 회사 필터 + 태그 필터 */}
               <div className="flex flex-col sm:flex-row gap-3">
-                {/* 내 회사 필터 */}
                 <div className="flex gap-2">
                   <button
                     onClick={() => setFilterMode('all')}
@@ -407,20 +468,16 @@ export default function QnaPage() {
 
                         {/* 뱃지 행 */}
                         <div className="flex items-center gap-2 flex-wrap mb-2">
-                          {/* 제조사 + 기종 뱃지 */}
                           <BrandBadge item={item} />
-                          {/* 태그 */}
                           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${TAG_COLORS[item.tag] || 'bg-gray-100 text-gray-600'}`}>
                             {item.tag}
                           </span>
-                          {/* 비공개 */}
-                          {!item.isPublic && (
+                          {!item.is_public && (
                             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
                               🔒 우리 회사만
                             </span>
                           )}
-                          {/* 내 질문 */}
-                          {item.authorUid === userInfo?.uid && (
+                          {item.author_uid === userInfo?.uid && (
                             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
                               내 질문
                             </span>
@@ -438,11 +495,11 @@ export default function QnaPage() {
 
                       {/* 오른쪽 정보 */}
                       <div className="text-right shrink-0 space-y-1">
-                        <div className={`text-sm font-black ${item.answerCount > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
-                          💬 {item.answerCount}
+                        <div className={`text-sm font-black ${item.answer_count > 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                          💬 {item.answer_count}
                         </div>
-                        <div className="text-xs text-gray-400">{item.authorName}</div>
-                        <div className="text-xs text-gray-300">{toDateStr(item.createdAt).slice(0, 10)}</div>
+                        <div className="text-xs text-gray-400">{item.author_name}</div>
+                        <div className="text-xs text-gray-300">{toDateStr(item.created_at).slice(0, 10)}</div>
                       </div>
                     </div>
 
@@ -475,7 +532,7 @@ export default function QnaPage() {
                 <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${TAG_COLORS[selected.tag] || 'bg-gray-100 text-gray-600'}`}>
                   {selected.tag}
                 </span>
-                {!selected.isPublic && (
+                {!selected.is_public && (
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-600">
                     🔒 우리 회사만
                   </span>
@@ -491,8 +548,8 @@ export default function QnaPage() {
               </p>
 
               <div className="flex items-center justify-between text-xs text-gray-400">
-                <span>✍️ {selected.authorName} · {selected.companyName}</span>
-                <span>{toDateStr(selected.createdAt)}</span>
+                <span>✍️ {selected.author_name} · {selected.company_name}</span>
+                <span>{toDateStr(selected.created_at)}</span>
               </div>
             </div>
 
@@ -513,7 +570,7 @@ export default function QnaPage() {
                     <div
                       key={ans.id}
                       className={`rounded-2xl p-5 shadow-sm ${
-                        ans.authorUid === userInfo?.uid
+                        ans.author_uid === userInfo?.uid
                           ? 'bg-emerald-50 border border-emerald-100'
                           : 'bg-white border border-gray-100'
                       }`}
@@ -521,21 +578,21 @@ export default function QnaPage() {
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-2">
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0 ${
-                            ans.authorUid === userInfo?.uid ? 'bg-emerald-500' : 'bg-blue-400'
+                            ans.author_uid === userInfo?.uid ? 'bg-emerald-500' : 'bg-blue-400'
                           }`}>
                             {idx + 1}
                           </div>
                           <div>
-                            <span className="text-sm font-bold text-gray-800">{ans.authorName}</span>
-                            {ans.companyName && (
-                              <span className="ml-1.5 text-xs text-gray-400">· {ans.companyName}</span>
+                            <span className="text-sm font-bold text-gray-800">{ans.author_name}</span>
+                            {ans.company_name && (
+                              <span className="ml-1.5 text-xs text-gray-400">· {ans.company_name}</span>
                             )}
-                            {ans.authorUid === userInfo?.uid && (
+                            {ans.author_uid === userInfo?.uid && (
                               <span className="ml-1.5 text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">내 답변</span>
                             )}
                           </div>
                         </div>
-                        <span className="text-xs text-gray-400 shrink-0">{toDateStr(ans.createdAt)}</span>
+                        <span className="text-xs text-gray-400 shrink-0">{toDateStr(ans.created_at)}</span>
                       </div>
                       <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap pl-9">
                         {ans.content}
@@ -613,7 +670,6 @@ export default function QnaPage() {
                     ))}
                   </div>
 
-                  {/* 그 외 기종 - 회사명 직접 입력 */}
                   {form.brand === 'other' && (
                     <div className="mt-3">
                       <input
@@ -627,7 +683,7 @@ export default function QnaPage() {
                   )}
                 </div>
 
-                {/* 기종/모델명 - 모든 제조사 공통 */}
+                {/* 기종/모델명 */}
                 {form.brand && (
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1.5">

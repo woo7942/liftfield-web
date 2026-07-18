@@ -1,63 +1,47 @@
-// app/(pages)/material/page.tsx
 'use client';
 
-import {
-  collection, doc, onSnapshot, orderBy, query,
-  serverTimestamp, Timestamp, updateDoc, deleteDoc, where,
-} from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
 import { useEffect, useMemo, useState } from 'react';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 type MaterialStatus = '신청중' | '접수' | '자재분출' | '자재교체';
 
 type MaterialRequest = {
   id: string;
-  companyId: string;
+  company_id: string;
   team?: string;
-  siteId: string;
-  siteName: string;
-  hogiNo: string;
-  materialName: string;
-  partNumber?: string;
+  site_id: string;
+  site_name: string;
+  hogi_no: string;
+  material_name: string;
+  part_number?: string;
   spec?: string;
   quantity: number;
   unit: string;
   reason?: string;
-  contractType?: string;
-  requesterId?: string;
-  requesterName?: string;
-  receiverId?: string;
-  receiverName?: string;
-  dispatcherId?: string;
-  dispatcherName?: string;
-  replacerId?: string;
-  replacerName?: string;
+  contract_type?: string;
+  requester_id?: string;
+  requester_name?: string;
+  receiver_id?: string;
+  receiver_name?: string;
+  dispatcher_id?: string;
+  dispatcher_name?: string;
+  replacer_id?: string;
+  replacer_name?: string;
   status: MaterialStatus;
-  requestedAt?: any;
-  receivedAt?: any;
-  dispatchedAt?: any;
-  replacedAt?: any;
+  requested_at?: string | null;
+  received_at?: string | null;
+  dispatched_at?: string | null;
+  replaced_at?: string | null;
   note?: string;
-  createdAt?: any;
+  created_at?: string | null;
 };
 
 type Site = {
   id: string;
-  siteName: string;
-  companyId?: string;
-  team?: string;
-  contractType?: string;
-};
-
-type UserInfo = {
-  uid: string;
   name: string;
-  role: string;
-  companyId?: string;
-  team?: string;
-  useNewStructure?: boolean;
-  superAdmin?: boolean;
+  company_id?: string;
+  team_name?: string;
+  contract_type?: string;
 };
 
 const STATUS_STYLE: Record<MaterialStatus, { bg: string; text: string; border: string; label: string }> = {
@@ -67,18 +51,19 @@ const STATUS_STYLE: Record<MaterialStatus, { bg: string; text: string; border: s
   자재교체: { bg: '#D1FAE5', text: '#065F46', border: '#10B981', label: '교체완료' },
 };
 
-const formatTs = (ts: any): string => {
+const formatTs = (ts: string | null | undefined): string => {
   if (!ts) return '-';
   try {
-    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    const d = new Date(ts);
     if (isNaN(d.getTime())) return '-';
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   } catch { return '-'; }
 };
-const formatTsTwo = (ts: any): { date: string; time: string } => {
+
+const formatTsTwo = (ts: string | null | undefined): { date: string; time: string } => {
   if (!ts) return { date: '-', time: '' };
   try {
-    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    const d = new Date(ts);
     if (isNaN(d.getTime())) return { date: '-', time: '' };
     return {
       date: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
@@ -87,10 +72,10 @@ const formatTsTwo = (ts: any): { date: string; time: string } => {
   } catch { return { date: '-', time: '' }; }
 };
 
-const tsToDateStr = (ts: any): string => {
+const tsToDateStr = (ts: string | null | undefined): string => {
   if (!ts) return '';
   try {
-    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    const d = new Date(ts);
     if (isNaN(d.getTime())) return '';
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   } catch { return ''; }
@@ -106,7 +91,7 @@ const printHtml = (html: string) => {
 };
 
 export default function MaterialPage() {
-  const [userInfo, setUserInfo]   = useState<UserInfo | null>(null);
+  const [userInfo, setUserInfo]   = useState<any>(null);
   const [loading, setLoading]     = useState(true);
   const [requests, setRequests]   = useState<MaterialRequest[]>([]);
   const [sites, setSites]         = useState<Site[]>([]);
@@ -124,48 +109,70 @@ export default function MaterialPage() {
   const [pdfStatusFilter, setPdfStatusFilter] = useState<MaterialStatus | '전체'>('전체');
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    let matChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) { window.location.href = '/login'; return; }
-      try {
-        const { doc: fd, getDoc } = await import('firebase/firestore');
-        const snap = await getDoc(fd(db, 'users', user.uid));
-        if (!snap.exists()) { window.location.href = '/login'; return; }
-        const data = snap.data() as UserInfo;
-        if (!['admin', 'superadmin'].includes(data.role) && data.superAdmin !== true) {
-          alert('관리자만 접근 가능합니다.');
-          window.location.href = '/';
-          return;
-        }
-        setUserInfo({ ...data, uid: user.uid });
-      } catch { window.location.href = '/login'; }
-    });
-    return () => unsub();
-  }, []);
 
-  useEffect(() => {
-    if (!userInfo) return;
-    const isSA  = userInfo.superAdmin === true || userInfo.role === 'superadmin';
-    const useNew = userInfo.useNewStructure && !!userInfo.companyId;
-    const cid   = userInfo.companyId || '';
-    const unsubs: (() => void)[] = [];
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      if (!userData) { window.location.href = '/login'; return; }
 
-    const matCol = useNew ? collection(db, 'companies', cid, 'materialRequests') : collection(db, 'materialRequests');
-    const matQ   = isSA || useNew
-      ? query(matCol, orderBy('createdAt', 'desc'))
-      : query(matCol, where('companyId', '==', cid), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(matQ, (snap) => {
-      setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as MaterialRequest)));
+      if (!['admin', 'superadmin'].includes(userData.role) && userData.super_admin !== true) {
+        alert('관리자만 접근 가능합니다.');
+        window.location.href = '/';
+        return;
+      }
+      setUserInfo({ ...userData, uid: user.id });
+
+      const cid = userData.company_id || '';
+
+      // material_requests 초기 로드
+      const { data: matData } = await supabase
+        .from('material_requests')
+        .select('*')
+        .eq('company_id', cid)
+        .order('created_at', { ascending: false });
+      setRequests((matData || []) as MaterialRequest[]);
+
+      // sites 로드
+      const { data: sitesData } = await supabase
+        .from('sites')
+        .select('id, name, company_id, team_name, contract_type')
+        .eq('company_id', cid);
+      setSites((sitesData || []) as Site[]);
+
       setLoading(false);
-    }, () => setLoading(false)));
 
-    const siteCol = useNew ? collection(db, 'companies', cid, 'sites') : collection(db, 'sites');
-    const siteQ   = isSA || useNew ? query(siteCol) : query(siteCol, where('companyId', '==', cid));
-    unsubs.push(onSnapshot(siteQ, (snap) => {
-      setSites(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Site)));
-    }));
+      // Realtime: material_requests
+      matChannel = supabase
+        .channel(`material-channel-${cid}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'material_requests', filter: `company_id=eq.${cid}` }, async () => {
+          const { data } = await supabase
+            .from('material_requests')
+            .select('*')
+            .eq('company_id', cid)
+            .order('created_at', { ascending: false });
+          setRequests((data || []) as MaterialRequest[]);
+        })
+        .subscribe();
+    };
 
-    return () => unsubs.forEach((u) => u());
-  }, [userInfo]);
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') window.location.href = '/login';
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      if (matChannel) supabase.removeChannel(matChannel);
+    };
+  }, []);
 
   const teams = useMemo(() => {
     const set = new Set(requests.map((r) => r.team).filter(Boolean) as string[]);
@@ -179,12 +186,12 @@ export default function MaterialPage() {
     if (search.trim()) {
       const s = search.toLowerCase();
       list = list.filter((r) =>
-        r.siteName?.toLowerCase().includes(s) ||
-        r.materialName?.toLowerCase().includes(s) ||
-        r.hogiNo?.toLowerCase().includes(s) ||
-        r.requesterName?.toLowerCase().includes(s) ||
-        r.partNumber?.toLowerCase().includes(s) ||
-        r.contractType?.toLowerCase().includes(s)
+        r.site_name?.toLowerCase().includes(s) ||
+        r.material_name?.toLowerCase().includes(s) ||
+        r.hogi_no?.toLowerCase().includes(s) ||
+        r.requester_name?.toLowerCase().includes(s) ||
+        r.part_number?.toLowerCase().includes(s) ||
+        r.contract_type?.toLowerCase().includes(s)
       );
     }
     return list;
@@ -198,79 +205,66 @@ export default function MaterialPage() {
     자재교체: requests.filter((r) => r.status === '자재교체').length,
   }), [requests]);
 
-  const getDocRef = (id: string) => {
-    const useNew = userInfo?.useNewStructure && !!userInfo?.companyId;
-    const cid = userInfo?.companyId || '';
-    return useNew ? doc(db, 'companies', cid, 'materialRequests', id) : doc(db, 'materialRequests', id);
-  };
-
   // ✅ 접수 처리
   const handleReceive = async (item: MaterialRequest) => {
-    if (!confirm(`${item.materialName} 접수 처리하시겠습니까?`)) return;
+    if (!confirm(`${item.material_name} 접수 처리하시겠습니까?`)) return;
     try {
-      await updateDoc(getDocRef(item.id), {
-        status:       '접수',
-        receivedAt:   serverTimestamp(),
-        receiverId:   userInfo?.uid  || '',
-        receiverName: userInfo?.name || '',
-      });
+      const { error } = await supabase.from('material_requests').update({
+        status:        '접수',
+        received_at:   new Date().toISOString(),
+        receiver_id:   userInfo?.uid  || '',
+        receiver_name: userInfo?.name || '',
+      }).eq('id', item.id);
+      if (error) throw error;
     } catch { alert('접수 처리 실패'); }
   };
 
   const handleDispatch = async (item: MaterialRequest) => {
-    if (!confirm(`${item.materialName} 자재분출 처리하시겠습니까?`)) return;
+    if (!confirm(`${item.material_name} 자재분출 처리하시겠습니까?`)) return;
     try {
-      await updateDoc(getDocRef(item.id), {
-        status:         '자재분출',
-        dispatchedAt:   serverTimestamp(),
-        dispatcherId:   userInfo?.uid  || '',
-        dispatcherName: userInfo?.name || '',
-      });
+      const { error } = await supabase.from('material_requests').update({
+        status:          '자재분출',
+        dispatched_at:   new Date().toISOString(),
+        dispatcher_id:   userInfo?.uid  || '',
+        dispatcher_name: userInfo?.name || '',
+      }).eq('id', item.id);
+      if (error) throw error;
     } catch { alert('자재분출 처리 실패'); }
-  };
-
-  const handleReplace = async (item: MaterialRequest) => {
-    if (!confirm(`${item.materialName} 교체완료 처리하시겠습니까?`)) return;
-    try {
-      await updateDoc(getDocRef(item.id), {
-        status:       '자재교체',
-        replacedAt:   serverTimestamp(),
-        replacerId:   userInfo?.uid  || '',
-        replacerName: userInfo?.name || '',
-      });
-    } catch { alert('자재교체 처리 실패'); }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('이 자재신청을 삭제하시겠습니까?')) return;
-    try { await deleteDoc(getDocRef(id)); setDetailModal(false); }
-    catch { alert('삭제 실패'); }
+    try {
+      const { error } = await supabase.from('material_requests').delete().eq('id', id);
+      if (error) throw error;
+      setDetailModal(false);
+    } catch { alert('삭제 실패'); }
   };
 
   const pdfFiltered = useMemo(() => {
     let list = requests;
-    if (pdfSiteId)          list = list.filter((r) => r.siteId === pdfSiteId);
+    if (pdfSiteId)          list = list.filter((r) => r.site_id === pdfSiteId);
     if (pdfStatusFilter !== '전체') list = list.filter((r) => r.status === pdfStatusFilter);
-    if (pdfDateFrom)        list = list.filter((r) => tsToDateStr(r.requestedAt) >= pdfDateFrom);
-    if (pdfDateTo)          list = list.filter((r) => tsToDateStr(r.requestedAt) <= pdfDateTo);
+    if (pdfDateFrom)        list = list.filter((r) => tsToDateStr(r.requested_at) >= pdfDateFrom);
+    if (pdfDateTo)          list = list.filter((r) => tsToDateStr(r.requested_at) <= pdfDateTo);
     return list;
   }, [requests, pdfSiteId, pdfStatusFilter, pdfDateFrom, pdfDateTo]);
 
   const exportPDF = () => {
     if (pdfFiltered.length === 0) { alert('출력할 내역이 없습니다.'); return; }
-    const titleSite   = pdfSiteId ? (sites.find((s) => s.id === pdfSiteId)?.siteName || '') : '전체 현장';
+    const titleSite   = pdfSiteId ? (sites.find((s) => s.id === pdfSiteId)?.name || '') : '전체 현장';
     const titlePeriod = pdfDateFrom && pdfDateTo ? `${pdfDateFrom} ~ ${pdfDateTo}`
       : pdfDateFrom ? `${pdfDateFrom} 이후` : pdfDateTo ? `${pdfDateTo} 이전` : '전체 기간';
 
     const rows = pdfFiltered.map((r, i) => `
       <tr>
         <td style="text-align:center">${i+1}</td>
-        <td>${formatTs(r.requestedAt)}</td>
-        <td>${r.siteName}</td>
-        <td style="text-align:center">${r.hogiNo}</td>
-        <td>${r.contractType || '-'}</td>
-        <td>${r.materialName}${r.spec ? ` (${r.spec})` : ''}</td>
-        <td>${r.partNumber || '-'}</td>
+        <td>${formatTs(r.requested_at)}</td>
+        <td>${r.site_name}</td>
+        <td style="text-align:center">${r.hogi_no}</td>
+        <td>${r.contract_type || '-'}</td>
+        <td>${r.material_name}${r.spec ? ` (${r.spec})` : ''}</td>
+        <td>${r.part_number || '-'}</td>
         <td style="text-align:center">${r.quantity}${r.unit}</td>
         <td>${r.reason || '-'}</td>
         <td style="text-align:center">
@@ -280,10 +274,10 @@ export default function MaterialPage() {
             ${r.status}
           </span>
         </td>
-        <td>${r.requesterName || '-'}</td>
-        <td>${formatTs(r.receivedAt)}</td>
-        <td>${formatTs(r.dispatchedAt)}</td>
-        <td>${formatTs(r.replacedAt)}</td>
+        <td>${r.requester_name || '-'}</td>
+        <td>${formatTs(r.received_at)}</td>
+        <td>${formatTs(r.dispatched_at)}</td>
+        <td>${formatTs(r.replaced_at)}</td>
       </tr>`).join('');
 
     printHtml(`
@@ -388,8 +382,8 @@ export default function MaterialPage() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 {['상태','신청일시','현장','호기','계약종류','자재명','파트번호','수량','신청자','접수일시','분출일시','교체완료일시','처리'].map((h) => (
-  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
-))}
+                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -401,72 +395,66 @@ export default function MaterialPage() {
               ) : filtered.map((r) => {
                 const st = STATUS_STYLE[r.status] || STATUS_STYLE['신청중'];
                 return (
-                  // ✅ 기존 tr 안쪽 전체를 아래로 교체
-<tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
-  onClick={() => { setSelected(r); setDetailModal(true); }}>
-  <td className="px-3 py-3">
-    <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
-      className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
-      {st.label}
-    </span>
-  </td>
-  {/* 신청일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.requestedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  <td className="px-3 py-3 font-semibold text-gray-900">{r.siteName}</td>
-  <td className="px-3 py-3 text-gray-700 text-xs font-semibold">{r.hogiNo}</td>
-  <td className="px-3 py-3 text-blue-700 text-xs font-semibold">{r.contractType || '-'}</td>
-  <td className="px-3 py-3 text-gray-900 text-sm">{r.materialName}{r.spec ? ` (${r.spec})` : ''}</td>
-  <td className="px-3 py-3 text-gray-500 text-xs font-mono">{r.partNumber || '-'}</td>
-  <td className="px-3 py-3 font-semibold text-yellow-700">{r.quantity}{r.unit}</td>
-  <td className="px-3 py-3 text-gray-600">{r.requesterName || '-'}</td>
-  {/* 접수일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.receivedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  {/* 분출일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.dispatchedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  {/* 교체완료일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.replacedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-    {r.status === '신청중' && (
-      <button onClick={() => handleReceive(r)}
-        className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold hover:bg-purple-200">
-        📬 접수
-      </button>
-    )}
-    {r.status === '접수' && (
-      <button onClick={() => handleDispatch(r)}
-        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
-        📦 자재분출
-      </button>
-    )}
-    {r.status === '자재분출' && (
-      <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
-    )}
-    {r.status === '자재교체' && (
-      <span className="text-xs text-gray-400">완료</span>
-    )}
-  </td>
-</tr>
-
+                  <tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => { setSelected(r); setDetailModal(true); }}>
+                    <td className="px-3 py-3">
+                      <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
+                        className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
+                        {st.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.requested_at); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 font-semibold text-gray-900">{r.site_name}</td>
+                    <td className="px-3 py-3 text-gray-700 text-xs font-semibold">{r.hogi_no}</td>
+                    <td className="px-3 py-3 text-blue-700 text-xs font-semibold">{r.contract_type || '-'}</td>
+                    <td className="px-3 py-3 text-gray-900 text-sm">{r.material_name}{r.spec ? ` (${r.spec})` : ''}</td>
+                    <td className="px-3 py-3 text-gray-500 text-xs font-mono">{r.part_number || '-'}</td>
+                    <td className="px-3 py-3 font-semibold text-yellow-700">{r.quantity}{r.unit}</td>
+                    <td className="px-3 py-3 text-gray-600">{r.requester_name || '-'}</td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.received_at); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.dispatched_at); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.replaced_at); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      {r.status === '신청중' && (
+                        <button onClick={() => handleReceive(r)}
+                          className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold hover:bg-purple-200">
+                          📬 접수
+                        </button>
+                      )}
+                      {r.status === '접수' && (
+                        <button onClick={() => handleDispatch(r)}
+                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
+                          📦 자재분출
+                        </button>
+                      )}
+                      {r.status === '자재분출' && (
+                        <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
+                      )}
+                      {r.status === '자재교체' && (
+                        <span className="text-xs text-gray-400">완료</span>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
@@ -490,15 +478,14 @@ export default function MaterialPage() {
                     className="px-6 py-2 rounded-full text-sm font-bold">{st.label}</span>
                 </div>
 
-                {/* 신청 정보 */}
                 <div className="bg-gray-50 rounded-xl p-4 mb-4">
                   <p className="text-xs font-bold text-blue-600 mb-3">📋 신청 정보</p>
                   {[
-                    { label: '현장',     value: currentSelected.siteName },
-                    { label: '호기',     value: currentSelected.hogiNo },
-                    { label: '계약종류', value: currentSelected.contractType || '-' },
-                    { label: '자재명',   value: `${currentSelected.materialName}${currentSelected.spec ? ` (${currentSelected.spec})` : ''}` },
-                    { label: '파트번호', value: currentSelected.partNumber || '-' },
+                    { label: '현장',     value: currentSelected.site_name },
+                    { label: '호기',     value: currentSelected.hogi_no },
+                    { label: '계약종류', value: currentSelected.contract_type || '-' },
+                    { label: '자재명',   value: `${currentSelected.material_name}${currentSelected.spec ? ` (${currentSelected.spec})` : ''}` },
+                    { label: '파트번호', value: currentSelected.part_number || '-' },
                     { label: '수량',     value: `${currentSelected.quantity}${currentSelected.unit}` },
                     { label: '사유',     value: currentSelected.reason || '-' },
                     { label: '비고',     value: currentSelected.note   || '-' },
@@ -512,14 +499,13 @@ export default function MaterialPage() {
                   ))}
                 </div>
 
-                {/* 처리 이력 */}
                 <div className="bg-gray-50 rounded-xl p-4 mb-4">
                   <p className="text-xs font-bold text-blue-600 mb-3">⏱ 처리 이력</p>
                   {[
-                    { label: '신청일시', value: formatTs(currentSelected.requestedAt),  sub: currentSelected.requesterName },
-                    { label: '접수일시', value: formatTs(currentSelected.receivedAt),   sub: currentSelected.receiverName  },
-                    { label: '분출일시', value: formatTs(currentSelected.dispatchedAt), sub: currentSelected.dispatcherName },
-                    { label: '교체완료', value: formatTs(currentSelected.replacedAt),   sub: currentSelected.replacerName  },
+                    { label: '신청일시', value: formatTs(currentSelected.requested_at),  sub: currentSelected.requester_name },
+                    { label: '접수일시', value: formatTs(currentSelected.received_at),   sub: currentSelected.receiver_name  },
+                    { label: '분출일시', value: formatTs(currentSelected.dispatched_at), sub: currentSelected.dispatcher_name },
+                    { label: '교체완료', value: formatTs(currentSelected.replaced_at),   sub: currentSelected.replacer_name  },
                   ].map((row) => (
                     <div key={row.label} className="flex py-2 border-b border-gray-100 last:border-0">
                       <span className="w-20 text-xs text-gray-500 font-semibold shrink-0">{row.label}</span>
@@ -531,7 +517,6 @@ export default function MaterialPage() {
                   ))}
                 </div>
 
-                {/* 액션 버튼 */}
                 {currentSelected.status === '신청중' && (
                   <button onClick={() => handleReceive(currentSelected)}
                     className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 mb-2">
@@ -545,10 +530,10 @@ export default function MaterialPage() {
                   </button>
                 )}
                 {currentSelected.status === '자재분출' && (
-  <div className="w-full py-3 bg-blue-50 text-blue-600 rounded-xl text-sm font-semibold text-center mb-2">
-    🛗 교체완료는 앱에서 처리해주세요
-  </div>
-)}
+                  <div className="w-full py-3 bg-blue-50 text-blue-600 rounded-xl text-sm font-semibold text-center mb-2">
+                    🛗 교체완료는 앱에서 처리해주세요
+                  </div>
+                )}
                 <button onClick={() => handleDelete(currentSelected.id)}
                   className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl font-semibold hover:bg-red-100 text-sm mt-1">
                   🗑 삭제
@@ -620,48 +605,45 @@ export default function MaterialPage() {
                 ))}
               </div>
 
-             
               <p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
-
-{pdfSiteName ? (
-  <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 mb-4">
-    <span className="text-sm font-semibold text-gray-800">{pdfSiteName}</span>
-    <button onClick={() => { setPdfSiteId(''); setPdfSiteName(''); }}
-      className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
-  </div>
-) : (
-  <div className="relative mb-4">
-    <input
-      type="text"
-      placeholder="현장명 검색 (2글자 이상)"
-      value={pdfSiteSearch}
-      onChange={(e) => setPdfSiteSearch(e.target.value)}
-      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
-    />
-    {pdfSiteSearch.trim().length >= 2 && (
-      <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-48 overflow-y-auto shadow-lg">
-        {sites
-          .filter((s) => s.siteName?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
-          .slice(0, 20)
-          .length === 0 ? (
-          <p className="text-sm text-gray-400 px-3 py-2">검색 결과 없음</p>
-        ) : (
-          sites
-            .filter((s) => s.siteName?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
-            .slice(0, 20)
-            .map((s) => (
-              <button key={s.id}
-                onClick={() => { setPdfSiteId(s.id); setPdfSiteName(s.siteName?.trim()); setPdfSiteSearch(''); }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-yellow-50 border-b border-gray-50 last:border-0">
-                {s.siteName?.trim()}
-              </button>
-            ))
-        )}
-      </div>
-    )}
-  </div>
-)}
-
+              {pdfSiteName ? (
+                <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 mb-4">
+                  <span className="text-sm font-semibold text-gray-800">{pdfSiteName}</span>
+                  <button onClick={() => { setPdfSiteId(''); setPdfSiteName(''); }}
+                    className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+                </div>
+              ) : (
+                <div className="relative mb-4">
+                  <input
+                    type="text"
+                    placeholder="현장명 검색 (2글자 이상)"
+                    value={pdfSiteSearch}
+                    onChange={(e) => setPdfSiteSearch(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  />
+                  {pdfSiteSearch.trim().length >= 2 && (
+                    <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-48 overflow-y-auto shadow-lg">
+                      {sites
+                        .filter((s) => s.name?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
+                        .slice(0, 20)
+                        .length === 0 ? (
+                        <p className="text-sm text-gray-400 px-3 py-2">검색 결과 없음</p>
+                      ) : (
+                        sites
+                          .filter((s) => s.name?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
+                          .slice(0, 20)
+                          .map((s) => (
+                            <button key={s.id}
+                              onClick={() => { setPdfSiteId(s.id); setPdfSiteName(s.name?.trim()); setPdfSiteSearch(''); }}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-yellow-50 border-b border-gray-50 last:border-0">
+                              {s.name?.trim()}
+                            </button>
+                          ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4 text-sm text-yellow-800">
                 출력 대상: <strong>{pdfFiltered.length}건</strong>

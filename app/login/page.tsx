@@ -1,10 +1,8 @@
 'use client';
 
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
-import { auth, db } from '@/lib/firebase';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 function LoginContent() {
   const router = useRouter();
@@ -20,27 +18,39 @@ function LoginContent() {
     setError('');
 
     try {
-      const userCred = await signInWithEmailAndPassword(auth, email, password);
-      const uid = userCred.user.uid;
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-      const userSnap = await getDoc(doc(db, 'users', uid));
-      if (!userSnap.exists()) {
-        setError('사용자 정보를 찾을 수 없습니다.');
+      if (authError || !data.user) {
+        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
         setLoading(false);
         return;
       }
 
-      const userData = userSnap.data();
+      const uid = data.user.id;
 
-            // ✅ 슈퍼어드민, 관리자, 멤버 모두 접근 가능 (trial 제외)
-      const plan = userData.subscription?.plan || 'trial';
-      const isSuperAdmin = userData.superAdmin === true;
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', uid)
+        .single();
+
+      if (userError || !userData) {
+        setError('사용자 정보를 찾을 수 없습니다.');
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
+
+      const plan = userData.subscription_plan || 'trial';
+      const isSuperAdmin = userData.super_admin === true;
       const isAdmin = userData.role === 'admin';
       const isMember = userData.role === 'member';
-      const isPro = plan === 'pro' && userData.subscription?.status === 'active';
-      const isCompany = plan === 'company' && userData.subscription?.status === 'active';
+      const isPro = plan === 'pro' && userData.subscription_status === 'active';
+      const isCompany = plan === 'company' && userData.subscription_status === 'active';
 
-      // ✅ /join 으로 리다이렉트되는 경우 권한 체크 없이 통과
       const redirectUrl = searchParams.get('redirect') || '/';
       if (redirectUrl.startsWith('/join')) {
         router.push(redirectUrl);
@@ -49,24 +59,14 @@ function LoginContent() {
 
       if (!isSuperAdmin && !isAdmin && !isMember && !isPro && !isCompany) {
         setError('접근 권한이 없습니다.');
-        await auth.signOut();
+        await supabase.auth.signOut();
         setLoading(false);
         return;
       }
 
       router.push(redirectUrl);
-
-
-    } catch (e: any) {
-      if (
-        e.code === 'auth/user-not-found' ||
-        e.code === 'auth/wrong-password' ||
-        e.code === 'auth/invalid-credential'
-      ) {
-        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
-      } else {
-        setError('로그인 중 오류가 발생했습니다.');
-      }
+    } catch {
+      setError('로그인 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -145,7 +145,6 @@ function LoginContent() {
   );
 }
 
-// ✅ Suspense 래핑 필수 (useSearchParams 때문)
 export default function LoginPage() {
   return (
     <Suspense fallback={

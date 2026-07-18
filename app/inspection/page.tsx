@@ -2,22 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  doc, getDoc, collection, query, onSnapshot,
-  addDoc, updateDoc, deleteDoc, serverTimestamp,
-  orderBy, where, getDocs,
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 // ── 타입 ──────────────────────────────────────────
 interface UserInfo {
   uid: string;
   name: string;
-  companyId: string;
-  companyDisplayName: string;
+  company_id: string;
+  company_display_name: string;
   role: string;
-  superAdmin: boolean;
+  super_admin: boolean;
 }
 
 interface Team {
@@ -28,21 +22,21 @@ interface Team {
 interface Site {
   id: string;
   name: string;
-  teamName?: string;
+  team_name?: string;
 }
 
 interface InspectionRecord {
   id: string;
-  siteId: string;
-  siteName: string;
-  teamName: string;
-  scheduledDate: string;
-  completedDate?: string;
-  totalCount: number;
-  completedCount: number;
+  site_id: string;
+  site_name: string;
+  team_name: string;
+  scheduled_date: string;
+  completed_date?: string;
+  total_count: number;
+  completed_count: number;
   status: '예정' | '진행중' | '완료';
   note?: string;
-  createdAt?: any;
+  created_at?: string;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -77,92 +71,104 @@ export default function InspectionPage() {
 
   // 폼
   const [form, setForm] = useState({
-    siteId: '',
-    siteName: '',
-    teamName: '',
-    scheduledDate: '',
-    totalCount: '',
-    completedCount: '',
+    site_id: '',
+    site_name: '',
+    team_name: '',
+    scheduled_date: '',
+    total_count: '',
+    completed_count: '',
     status: '예정' as InspectionRecord['status'],
     note: '',
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // ── 인증 ──────────────────────────────────────
+  // ── 인증 + 초기 데이터 ────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
-      const data = snap.data();
-      const isSuperAdmin = data.superAdmin === true;
-      const isAdmin = data.role === 'admin';
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      if (!userData) { router.push('/login'); return; }
+
+      const isSuperAdmin = userData.super_admin === true;
+      const isAdmin = userData.role === 'admin';
       if (!isSuperAdmin && !isAdmin) { router.push('/'); return; }
-      setUserInfo({
-        uid: user.uid,
-        name: data.name || '',
-        companyId: data.companyId || '',
-        companyDisplayName: data.companyDisplayName || '',
-        role: data.role || 'member',
-        superAdmin: isSuperAdmin,
-      });
-    });
-    return unsub;
-  }, [router]);
 
-  // ── 팀 목록 로드 ──────────────────────────────
-  useEffect(() => {
-    if (!userInfo) return;
-    const unsub = onSnapshot(
-      collection(db, 'companies', userInfo.companyId, 'teams'),
-      snap => setTeams(snap.docs.map(d => ({ id: d.id, name: d.data().name || '' })))
-    );
-    return unsub;
-  }, [userInfo]);
+      const ui: UserInfo = {
+        uid: user.id,
+        name: userData.name || '',
+        company_id: userData.company_id || '',
+        company_display_name: userData.company_display_name || '',
+        role: userData.role || 'member',
+        super_admin: isSuperAdmin,
+      };
+      setUserInfo(ui);
 
-  // ── 현장 목록 로드 ────────────────────────────
-  useEffect(() => {
-    if (!userInfo) return;
-    const load = async () => {
-      const snap = await getDocs(collection(db, 'companies', userInfo.companyId, 'sites'));
-      setSites(snap.docs.map(d => ({
-        id: d.id,
-        name: d.data().name || d.data().siteName || '',
-        teamName: d.data().teamName || '',
-      })));
+      const cid = userData.company_id || '';
+
+      // 팀 목록
+      const { data: teamsData } = await supabase
+        .from('teams')
+        .select('id, name')
+        .eq('company_id', cid)
+        .order('created_at');
+      setTeams((teamsData || []) as Team[]);
+
+      // 현장 목록
+      const { data: sitesData } = await supabase
+        .from('sites')
+        .select('id, name, team_name')
+        .eq('company_id', cid)
+        .order('name');
+      setSites((sitesData || []) as Site[]);
     };
-    load();
-  }, [userInfo]);
 
-  // ── 점검 기록 구독 ────────────────────────────
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') router.push('/login');
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── 점검 기록 로드 (월 변경 시) ───────────────
   useEffect(() => {
     if (!userInfo) return;
-    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
-    const endDate   = `${year}-${String(month).padStart(2,'0')}-31`;
-    const q = query(
-      collection(db, 'companies', userInfo.companyId, 'inspections'),
-      where('scheduledDate', '>=', startDate),
-      where('scheduledDate', '<=', endDate),
-      orderBy('scheduledDate', 'asc')
-    );
-    const unsub = onSnapshot(q, snap => {
-      setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as InspectionRecord)));
+    const loadRecords = async () => {
+      setLoading(true);
+      const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+      const endDate   = `${year}-${String(month).padStart(2,'0')}-31`;
+
+      const { data } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('company_id', userInfo.company_id)
+        .gte('scheduled_date', startDate)
+        .lte('scheduled_date', endDate)
+        .order('scheduled_date', { ascending: true });
+
+      setRecords((data || []) as InspectionRecord[]);
       setLoading(false);
-    });
-    return unsub;
+    };
+    loadRecords();
   }, [userInfo, year, month]);
 
   // ── 팀 필터 적용 ──────────────────────────────
   const filteredRecords = activeTeam === '전체'
     ? records
-    : records.filter(r => r.teamName === activeTeam);
+    : records.filter(r => r.team_name === activeTeam);
 
   // ── 통계 ──────────────────────────────────────
   const stats = {
-    total:    filteredRecords.length,
-    done:     filteredRecords.filter(r => r.status === '완료').length,
+    total:      filteredRecords.length,
+    done:       filteredRecords.filter(r => r.status === '완료').length,
     inProgress: filteredRecords.filter(r => r.status === '진행중').length,
-    planned:  filteredRecords.filter(r => r.status === '예정').length,
+    planned:    filteredRecords.filter(r => r.status === '예정').length,
     rate: filteredRecords.length > 0
       ? Math.round(filteredRecords.filter(r => r.status === '완료').length / filteredRecords.length * 100)
       : 0,
@@ -173,34 +179,46 @@ export default function InspectionPage() {
     const site = sites.find(s => s.id === siteId);
     setForm(f => ({
       ...f,
-      siteId,
-      siteName: site?.name || '',
-      teamName: site?.teamName || f.teamName,
+      site_id: siteId,
+      site_name: site?.name || '',
+      team_name: site?.team_name || f.team_name,
     }));
   };
 
   // ── 추가 ──────────────────────────────────────
   const handleAdd = async () => {
-    if (!form.siteId || !form.scheduledDate) {
+    if (!form.site_id || !form.scheduled_date) {
       alert('현장과 점검일은 필수예요!');
       return;
     }
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'companies', userInfo!.companyId, 'inspections'), {
-        siteId:         form.siteId,
-        siteName:       form.siteName,
-        teamName:       form.teamName,
-        scheduledDate:  form.scheduledDate,
-        totalCount:     Number(form.totalCount) || 0,
-        completedCount: Number(form.completedCount) || 0,
-        status:         form.status,
-        note:           form.note.trim(),
-        createdAt:      serverTimestamp(),
-        companyId:      userInfo!.companyId,
+      const { error } = await supabase.from('inspections').insert({
+        site_id:         form.site_id,
+        site_name:       form.site_name,
+        team_name:       form.team_name,
+        scheduled_date:  form.scheduled_date,
+        total_count:     Number(form.total_count) || 0,
+        completed_count: Number(form.completed_count) || 0,
+        status:          form.status,
+        note:            form.note.trim(),
+        created_at:      new Date().toISOString(),
+        company_id:      userInfo!.company_id,
       });
+      if (error) throw error;
       setAddModal(false);
       resetForm();
+      // 현재 월 재로드
+      const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+      const endDate   = `${year}-${String(month).padStart(2,'0')}-31`;
+      const { data } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('company_id', userInfo!.company_id)
+        .gte('scheduled_date', startDate)
+        .lte('scheduled_date', endDate)
+        .order('scheduled_date', { ascending: true });
+      setRecords((data || []) as InspectionRecord[]);
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -213,22 +231,31 @@ export default function InspectionPage() {
     if (!selectedRecord) return;
     setSubmitting(true);
     try {
-      await updateDoc(
-        doc(db, 'companies', userInfo!.companyId, 'inspections', selectedRecord.id),
-        {
-          siteId:         form.siteId,
-          siteName:       form.siteName,
-          teamName:       form.teamName,
-          scheduledDate:  form.scheduledDate,
-          totalCount:     Number(form.totalCount) || 0,
-          completedCount: Number(form.completedCount) || 0,
-          status:         form.status,
-          note:           form.note.trim(),
-        }
-      );
+      const { error } = await supabase.from('inspections').update({
+        site_id:         form.site_id,
+        site_name:       form.site_name,
+        team_name:       form.team_name,
+        scheduled_date:  form.scheduled_date,
+        total_count:     Number(form.total_count) || 0,
+        completed_count: Number(form.completed_count) || 0,
+        status:          form.status,
+        note:            form.note.trim(),
+      }).eq('id', selectedRecord.id);
+      if (error) throw error;
       setEditModal(false);
       setSelectedRecord(null);
       resetForm();
+      // 재로드
+      const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+      const endDate   = `${year}-${String(month).padStart(2,'0')}-31`;
+      const { data } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('company_id', userInfo!.company_id)
+        .gte('scheduled_date', startDate)
+        .lte('scheduled_date', endDate)
+        .order('scheduled_date', { ascending: true });
+      setRecords((data || []) as InspectionRecord[]);
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -239,9 +266,10 @@ export default function InspectionPage() {
   // ── 삭제 ──────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'companies', userInfo!.companyId, 'inspections', id));
+    await supabase.from('inspections').delete().eq('id', id);
     setEditModal(false);
     setSelectedRecord(null);
+    setRecords(prev => prev.filter(r => r.id !== id));
   };
 
   // ── 빠른 상태 변경 ────────────────────────────
@@ -249,28 +277,27 @@ export default function InspectionPage() {
     const next: Record<string, InspectionRecord['status']> = {
       '예정': '진행중', '진행중': '완료', '완료': '예정',
     };
-    await updateDoc(
-      doc(db, 'companies', userInfo!.companyId, 'inspections', record.id),
-      { status: next[record.status] }
-    );
+    const newStatus = next[record.status];
+    await supabase.from('inspections').update({ status: newStatus }).eq('id', record.id);
+    setRecords(prev => prev.map(r => r.id === record.id ? { ...r, status: newStatus } : r));
   };
 
   const resetForm = () => setForm({
-    siteId: '', siteName: '', teamName: '', scheduledDate: '',
-    totalCount: '', completedCount: '', status: '예정', note: '',
+    site_id: '', site_name: '', team_name: '', scheduled_date: '',
+    total_count: '', completed_count: '', status: '예정', note: '',
   });
 
   const openEdit = (r: InspectionRecord) => {
     setSelectedRecord(r);
     setForm({
-      siteId:         r.siteId,
-      siteName:       r.siteName,
-      teamName:       r.teamName,
-      scheduledDate:  r.scheduledDate,
-      totalCount:     String(r.totalCount),
-      completedCount: String(r.completedCount),
-      status:         r.status,
-      note:           r.note || '',
+      site_id:         r.site_id,
+      site_name:       r.site_name,
+      team_name:       r.team_name,
+      scheduled_date:  r.scheduled_date,
+      total_count:     String(r.total_count),
+      completed_count: String(r.completed_count),
+      status:          r.status,
+      note:            r.note || '',
     });
     setEditModal(true);
   };
@@ -285,7 +312,7 @@ export default function InspectionPage() {
     else setMonth(m => m + 1);
   };
 
-  if (loading && !userInfo) {
+  if (!userInfo) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -301,7 +328,7 @@ export default function InspectionPage() {
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">현장</label>
         <select
           className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          value={form.siteId}
+          value={form.site_id}
           onChange={e => handleSiteChange(e.target.value)}
         >
           <option value="">현장 선택</option>
@@ -316,8 +343,8 @@ export default function InspectionPage() {
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">팀</label>
         <select
           className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          value={form.teamName}
-          onChange={e => setForm(f => ({ ...f, teamName: e.target.value }))}
+          value={form.team_name}
+          onChange={e => setForm(f => ({ ...f, team_name: e.target.value }))}
         >
           <option value="">팀 선택</option>
           {teams.map(t => (
@@ -332,8 +359,8 @@ export default function InspectionPage() {
         <input
           type="date"
           className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          value={form.scheduledDate}
-          onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))}
+          value={form.scheduled_date}
+          onChange={e => setForm(f => ({ ...f, scheduled_date: e.target.value }))}
         />
       </div>
 
@@ -344,8 +371,8 @@ export default function InspectionPage() {
           <input
             type="number" min="0"
             className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-            value={form.totalCount}
-            onChange={e => setForm(f => ({ ...f, totalCount: e.target.value }))}
+            value={form.total_count}
+            onChange={e => setForm(f => ({ ...f, total_count: e.target.value }))}
             placeholder="0"
           />
         </div>
@@ -354,8 +381,8 @@ export default function InspectionPage() {
           <input
             type="number" min="0"
             className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-            value={form.completedCount}
-            onChange={e => setForm(f => ({ ...f, completedCount: e.target.value }))}
+            value={form.completed_count}
+            onChange={e => setForm(f => ({ ...f, completed_count: e.target.value }))}
             placeholder="0"
           />
         </div>
@@ -409,9 +436,9 @@ export default function InspectionPage() {
             </button>
             <span className="text-gray-300">|</span>
             <h1 className="text-lg font-bold text-gray-800">📋 점검 관리</h1>
-            {userInfo?.companyDisplayName && (
+            {userInfo?.company_display_name && (
               <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full font-semibold">
-                🏢 {userInfo.companyDisplayName}
+                🏢 {userInfo.company_display_name}
               </span>
             )}
           </div>
@@ -494,20 +521,20 @@ export default function InspectionPage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filteredRecords.map(r => {
-                  const rate = r.totalCount > 0
-                    ? Math.round(r.completedCount / r.totalCount * 100)
+                  const rate = r.total_count > 0
+                    ? Math.round(r.completed_count / r.total_count * 100)
                     : 0;
                   return (
                     <tr key={r.id} className="hover:bg-gray-50 transition">
-                      <td className="px-4 py-3 font-semibold text-gray-800">{r.siteName}</td>
+                      <td className="px-4 py-3 font-semibold text-gray-800">{r.site_name}</td>
                       <td className="px-4 py-3 text-gray-500">
                         <span className="bg-indigo-50 text-indigo-600 text-xs px-2 py-0.5 rounded-full font-semibold">
-                          {r.teamName || '-'}
+                          {r.team_name || '-'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-500">{r.scheduledDate}</td>
+                      <td className="px-4 py-3 text-gray-500">{r.scheduled_date}</td>
                       <td className="px-4 py-3 text-center text-gray-600">
-                        {r.completedCount}/{r.totalCount}
+                        {r.completed_count}/{r.total_count}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

@@ -1,21 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import {
-  collection,
-  onSnapshot,
-  doc,
-  updateDoc,
-  deleteDoc,
-  getDoc,
-  query,
-  orderBy,
-  Timestamp,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 // ───────────────────────────────────────────
 // 타입
@@ -27,20 +14,17 @@ interface UserDoc {
   phone?: string;
   role: string;
   team?: string;
-  companyId?: string;
-  companyDisplayName?: string;
-  superAdmin?: boolean;
+  company_id?: string;
+  company_display_name?: string;
+  super_admin?: boolean;
   status?: string;
-  createdAt?: Date;
-  createdFrom?: string;
-  subscription?: {
-    plan: string;
-    status: string;
-    isPro?: boolean;
-    endDate?: Date;
-    startDate?: Date;
-    maxMembers?: number;
-  };
+  created_at?: string;
+  created_from?: string;
+  subscription_plan?: string;
+  subscription_status?: string;
+  subscription_end_date?: string;
+  subscription_start_date?: string;
+  max_members?: number;
 }
 
 interface QnaDoc {
@@ -49,39 +33,29 @@ interface QnaDoc {
   content: string;
   tag?: string;
   brand?: string;
-  brandLabel?: string;
-  modelName?: string;
-  authorName: string;
-  authorUid: string;
-  companyName?: string;
-  isPublic?: boolean;
-  answerCount?: number;
-  createdAt?: Date;
+  brand_label?: string;
+  model_name?: string;
+  author_name: string;
+  author_uid: string;
+  company_name?: string;
+  is_public?: boolean;
+  answer_count?: number;
+  created_at?: string;
 }
 
 // ───────────────────────────────────────────
 // 헬퍼
 // ───────────────────────────────────────────
-function toDate(value: unknown): Date | undefined {
-  if (!value) return undefined;
-  if (value instanceof Date) return value;
-  if (value instanceof Timestamp) return value.toDate();
-  if (typeof value === 'object' && 'toDate' in (value as object)) {
-    return (value as { toDate: () => Date }).toDate();
-  }
-  return undefined;
-}
-
-function formatDate(date?: Date): string {
+function formatDate(date?: string): string {
   if (!date) return '-';
-  return date.toLocaleDateString('ko-KR', {
+  return new Date(date).toLocaleDateString('ko-KR', {
     year: 'numeric', month: '2-digit', day: '2-digit',
   });
 }
 
-function formatDateTime(date?: Date): string {
+function formatDateTime(date?: string): string {
   if (!date) return '-';
-  return date.toLocaleDateString('ko-KR', {
+  return new Date(date).toLocaleDateString('ko-KR', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   });
@@ -127,107 +101,149 @@ export default function AdminPage() {
   const [manageUser, setManageUser] = useState<UserDoc | null>(null);
   const [manageLoading, setManageLoading] = useState(false);
 
+  // Realtime 채널 refs
+  const usersChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const qnaChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  // ── 유저 로드 헬퍼 ──
+  const loadUsers = async () => {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) { console.error(error); return; }
+    const list: UserDoc[] = (data || []).map((d) => ({
+      uid: d.id,
+      name: d.name || '',
+      email: d.email || '',
+      phone: d.phone || '',
+      role: d.role || 'user',
+      team: d.team || '',
+      company_id: d.company_id || '',
+      company_display_name: d.company_display_name || '',
+      super_admin: d.super_admin || false,
+      status: d.status || 'approved',
+      created_at: d.created_at,
+      created_from: d.created_from || 'app',
+      subscription_plan: d.subscription_plan || 'trial',
+      subscription_status: d.subscription_status || 'active',
+      subscription_end_date: d.subscription_end_date,
+      subscription_start_date: d.subscription_start_date,
+      max_members: d.max_members || 1,
+    }));
+    setUsers(list);
+  };
+
+  // ── Q&A 로드 헬퍼 ──
+  const loadQna = async () => {
+    const { data, error } = await supabase
+      .from('qna')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) { console.error(error); return; }
+    const list: QnaDoc[] = (data || []).map((d) => ({
+      id: d.id,
+      title: d.title || '',
+      content: d.content || '',
+      tag: d.tag || '',
+      brand: d.brand || '',
+      brand_label: d.brand_label || '',
+      model_name: d.model_name || '',
+      author_name: d.author_name || '',
+      author_uid: d.author_uid || '',
+      company_name: d.company_name || '',
+      is_public: d.is_public ?? true,
+      answer_count: d.answer_count || 0,
+      created_at: d.created_at,
+    }));
+    setQnaList(list);
+  };
+
   // ── 인증 확인 ──
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists() || snap.data().superAdmin !== true) {
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (!userData || userData.super_admin !== true) {
         router.push('/');
         return;
       }
       setIsSuperAdmin(true);
       setAuthReady(true);
+    };
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') router.push('/login');
     });
-    return () => unsub();
+    return () => subscription.unsubscribe();
   }, [router]);
 
-  // ── 유저 목록 구독 ──
+  // ── 유저 목록 초기 로드 + Realtime ──
   useEffect(() => {
     if (!authReady) return;
-    const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      const list: UserDoc[] = snap.docs.map((d) => {
-        const data = d.data();
-        const sub = data.subscription || {};
-        return {
-          uid: d.id,
-          name: data.name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          role: data.role || 'user',
-          team: data.team || '',
-          companyId: data.companyId || '',
-          companyDisplayName: data.companyDisplayName || '',
-          superAdmin: data.superAdmin || false,
-          status: data.status || 'approved',
-          createdAt: toDate(data.createdAt),
-          createdFrom: data.createdFrom || 'app',
-          subscription: {
-            plan: sub.plan || 'trial',
-            status: sub.status || 'active',
-            isPro: sub.isPro || false,
-            endDate: toDate(sub.endDate),
-            startDate: toDate(sub.startDate),
-            maxMembers: sub.maxMembers || 1,
-          },
-        };
-      });
-      setUsers(list);
-    });
-    return () => unsub();
+    loadUsers();
+
+    const channel = supabase
+      .channel('admin-users')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'users',
+      }, () => { loadUsers(); })
+      .subscribe();
+
+    usersChannelRef.current = channel;
+    return () => { supabase.removeChannel(channel); };
   }, [authReady]);
 
-  // ── Q&A 목록 구독 ──
+  // ── Q&A 목록 초기 로드 + Realtime ──
   useEffect(() => {
     if (!authReady) return;
-    const q = query(collection(db, 'qna'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      const list: QnaDoc[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title || '',
-          content: data.content || '',
-          tag: data.tag || '',
-          brand: data.brand || '',
-          brandLabel: data.brandLabel || '',
-          modelName: data.modelName || '',
-          authorName: data.authorName || '',
-          authorUid: data.authorUid || '',
-          companyName: data.companyName || '',
-          isPublic: data.isPublic ?? true,
-          answerCount: data.answerCount || 0,
-          createdAt: toDate(data.createdAt),
-        };
-      });
-      setQnaList(list);
-    });
-    return () => unsub();
+    loadQna();
+
+    const channel = supabase
+      .channel('admin-qna')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'qna',
+      }, () => { loadQna(); })
+      .subscribe();
+
+    qnaChannelRef.current = channel;
+    return () => { supabase.removeChannel(channel); };
   }, [authReady]);
 
   // ── 필터된 유저 ──
   const filteredUsers = users.filter((u) => {
     const matchPlan =
-      planFilter === '전체' || u.subscription?.plan === planFilter;
+      planFilter === '전체' || u.subscription_plan === planFilter;
     const matchSearch =
       !searchText ||
       u.name.includes(searchText) ||
       u.email.includes(searchText) ||
-      (u.companyDisplayName || '').includes(searchText);
+      (u.company_display_name || '').includes(searchText);
     return matchPlan && matchSearch;
   });
 
   // ── Company 목록 ──
   const companies = Object.values(
     users
-      .filter((u) => u.companyId && u.subscription?.plan === 'company')
-      .reduce<Record<string, { companyId: string; companyName: string; members: UserDoc[]; admin?: UserDoc }>>((acc, u) => {
-        const cid = u.companyId!;
+      .filter((u) => u.company_id && u.subscription_plan === 'company')
+      .reduce<Record<string, { company_id: string; companyName: string; members: UserDoc[]; admin?: UserDoc }>>((acc, u) => {
+        const cid = u.company_id!;
         if (!acc[cid]) {
           acc[cid] = {
-            companyId: cid,
-            companyName: u.companyDisplayName || cid,
+            company_id: cid,
+            companyName: u.company_display_name || cid,
             members: [],
           };
         }
@@ -240,26 +256,22 @@ export default function AdminPage() {
   // ── 통계 ──
   const stats = {
     total: users.length,
-    trial: users.filter((u) => u.subscription?.plan === 'trial').length,
-    pro: users.filter((u) => u.subscription?.plan === 'pro').length,
-    company: users.filter((u) => u.subscription?.plan === 'company').length,
-    expired: users.filter((u) => u.subscription?.plan === 'expired').length,
-    fromWeb: users.filter((u) => u.createdFrom === 'web').length,
-    fromApp: users.filter((u) => u.createdFrom === 'app' || !u.createdFrom).length,
-    superAdmins: users.filter((u) => u.superAdmin).length,
+    trial: users.filter((u) => u.subscription_plan === 'trial').length,
+    pro: users.filter((u) => u.subscription_plan === 'pro').length,
+    company: users.filter((u) => u.subscription_plan === 'company').length,
+    expired: users.filter((u) => u.subscription_plan === 'expired').length,
+    fromWeb: users.filter((u) => u.created_from === 'web').length,
+    fromApp: users.filter((u) => u.created_from === 'app' || !u.created_from).length,
+    superAdmins: users.filter((u) => u.super_admin).length,
   };
 
   // ── 구독 수정 열기 ──
   const openEditUser = (u: UserDoc) => {
     setEditUser(u);
-    setEditPlan(u.subscription?.plan || 'trial');
-    setEditStatus(u.subscription?.status || 'active');
-    setEditEndDate(
-      u.subscription?.endDate
-        ? u.subscription.endDate.toISOString().split('T')[0]
-        : ''
-    );
-    setEditMaxMembers(u.subscription?.maxMembers || 5);
+    setEditPlan(u.subscription_plan || 'trial');
+    setEditStatus(u.subscription_status || 'active');
+    setEditEndDate(u.subscription_end_date ? u.subscription_end_date.split('T')[0] : '');
+    setEditMaxMembers(u.max_members || 5);
   };
 
   // ── 구독 저장 ──
@@ -267,17 +279,14 @@ export default function AdminPage() {
     if (!editUser) return;
     setEditLoading(true);
     try {
-      const endDate = editEndDate ? new Date(editEndDate) : null;
-      await updateDoc(doc(db, 'users', editUser.uid), {
-        subscription: {
-          plan: editPlan,
-          status: editStatus,
-          isPro: editPlan === 'pro' || editPlan === 'company',
-          endDate: endDate,
-          maxMembers: editPlan === 'company' ? editMaxMembers : 1,
-          updatedAt: serverTimestamp(),
-        },
-      });
+      const { error } = await supabase.from('users').update({
+        subscription_plan: editPlan,
+        subscription_status: editStatus,
+        subscription_end_date: editEndDate ? new Date(editEndDate).toISOString() : null,
+        max_members: editPlan === 'company' ? editMaxMembers : 1,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editUser.uid);
+      if (error) throw error;
       setEditUser(null);
     } catch (e) {
       alert('저장 실패: ' + e);
@@ -291,7 +300,8 @@ export default function AdminPage() {
     if (!confirm(`정말 "${u.name}" 계정을 삭제할까요?\n이 작업은 되돌릴 수 없어요.`)) return;
     setManageLoading(true);
     try {
-      await deleteDoc(doc(db, 'users', u.uid));
+      const { error } = await supabase.from('users').delete().eq('id', u.uid);
+      if (error) throw error;
       setManageUser(null);
     } catch (e) {
       alert('삭제 실패: ' + e);
@@ -302,22 +312,22 @@ export default function AdminPage() {
 
   // ── 권한 변경 ──
   const handleToggleSuperAdmin = async (u: UserDoc) => {
-    if (!confirm(`"${u.name}"의 SuperAdmin 권한을 ${u.superAdmin ? '해제' : '부여'}할까요?`)) return;
-    await updateDoc(doc(db, 'users', u.uid), {
-      superAdmin: !u.superAdmin,
-    });
+    if (!confirm(`"${u.name}"의 SuperAdmin 권한을 ${u.super_admin ? '해제' : '부여'}할까요?`)) return;
+    await supabase.from('users').update({ super_admin: !u.super_admin }).eq('id', u.uid);
   };
 
   const handleToggleStatus = async (u: UserDoc) => {
     const newStatus = u.status === 'approved' ? 'suspended' : 'approved';
     if (!confirm(`"${u.name}" 계정을 ${newStatus === 'suspended' ? '정지' : '복구'}할까요?`)) return;
-    await updateDoc(doc(db, 'users', u.uid), { status: newStatus });
+    await supabase.from('users').update({ status: newStatus }).eq('id', u.uid);
   };
 
   // ── Q&A 삭제 ──
   const handleDeleteQna = async (id: string) => {
     if (!confirm('이 질문을 삭제할까요?')) return;
-    await deleteDoc(doc(db, 'qna', id));
+    await supabase.from('qna_answers').delete().eq('qna_id', id);
+    await supabase.from('qna').delete().eq('id', id);
+    setQnaList(prev => prev.filter(q => q.id !== id));
   };
 
   // ───────────────────────────────────────────
@@ -364,7 +374,7 @@ export default function AdminPage() {
             </span>
           </div>
           <button
-            onClick={() => signOut(auth).then(() => router.push('/login'))}
+            onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
             className="text-sm text-gray-400 hover:text-gray-600 transition"
           >
             로그아웃
@@ -411,7 +421,6 @@ export default function AdminPage() {
         ════════════════════════════════ */}
         {activeTab === 'users' && (
           <div className="space-y-4">
-            {/* 검색 + 필터 */}
             <div className="flex flex-col sm:flex-row gap-3">
               <input
                 type="text"
@@ -441,7 +450,6 @@ export default function AdminPage() {
               총 <span className="font-bold text-gray-800">{filteredUsers.length}</span>명
             </p>
 
-            {/* 유저 테이블 */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -456,10 +464,10 @@ export default function AdminPage() {
                   </thead>
                   <tbody>
                     {filteredUsers.map((u) => {
-                      const plan = u.subscription?.plan || 'trial';
+                      const plan = u.subscription_plan || 'trial';
                       const planInfo = PLAN_LABELS[plan] || PLAN_LABELS.trial;
                       const isExpired =
-                        u.subscription?.endDate && u.subscription.endDate < new Date();
+                        u.subscription_end_date && new Date(u.subscription_end_date) < new Date();
                       return (
                         <tr
                           key={u.uid}
@@ -468,14 +476,14 @@ export default function AdminPage() {
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                                u.superAdmin ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
+                                u.super_admin ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
                               }`}>
-                                {u.superAdmin ? '👑' : u.name.charAt(0)}
+                                {u.super_admin ? '👑' : u.name.charAt(0)}
                               </div>
                               <div>
                                 <p className="font-semibold text-gray-800">{u.name}</p>
-                                {u.companyDisplayName && (
-                                  <p className="text-xs text-gray-400">{u.companyDisplayName}</p>
+                                {u.company_display_name && (
+                                  <p className="text-xs text-gray-400">{u.company_display_name}</p>
                                 )}
                               </div>
                             </div>
@@ -499,19 +507,19 @@ export default function AdminPage() {
                           </td>
                           <td className="px-4 py-3">
                             <span className={`text-xs px-2 py-1 rounded-full ${
-                              u.createdFrom === 'web'
+                              u.created_from === 'web'
                                 ? 'bg-indigo-100 text-indigo-600'
                                 : 'bg-gray-100 text-gray-500'
                             }`}>
-                              {u.createdFrom === 'web' ? '🌐 웹' : '📱 앱'}
+                              {u.created_from === 'web' ? '🌐 웹' : '📱 앱'}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-gray-500 text-xs">
-                            {formatDate(u.createdAt)}
+                            {formatDate(u.created_at)}
                           </td>
                           <td className="px-4 py-3 text-xs">
                             <span className={isExpired ? 'text-red-500 font-semibold' : 'text-gray-500'}>
-                              {formatDate(u.subscription?.endDate)}
+                              {formatDate(u.subscription_end_date)}
                             </span>
                           </td>
                         </tr>
@@ -552,10 +560,10 @@ export default function AdminPage() {
                   </thead>
                   <tbody>
                     {users.map((u) => {
-                      const plan = u.subscription?.plan || 'trial';
+                      const plan = u.subscription_plan || 'trial';
                       const planInfo = PLAN_LABELS[plan] || PLAN_LABELS.trial;
                       const isExpired =
-                        u.subscription?.endDate && u.subscription.endDate < new Date();
+                        u.subscription_end_date && new Date(u.subscription_end_date) < new Date();
                       return (
                         <tr
                           key={u.uid}
@@ -570,20 +578,20 @@ export default function AdminPage() {
                           </td>
                           <td className="px-4 py-3">
                             <span className={`text-xs px-2 py-1 rounded-full font-semibold ${
-                              u.subscription?.status === 'active' && !isExpired
+                              u.subscription_status === 'active' && !isExpired
                                 ? 'bg-green-100 text-green-600'
                                 : 'bg-red-100 text-red-600'
                             }`}>
-                              {u.subscription?.status === 'active' && !isExpired ? '활성' : '비활성'}
+                              {u.subscription_status === 'active' && !isExpired ? '활성' : '비활성'}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-xs">
                             <span className={isExpired ? 'text-red-500 font-bold' : 'text-gray-500'}>
-                              {formatDate(u.subscription?.endDate)}
+                              {formatDate(u.subscription_end_date)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-xs text-gray-500">
-                            {plan === 'company' ? `${u.subscription?.maxMembers || 1}명` : '-'}
+                            {plan === 'company' ? `${u.max_members || 1}명` : '-'}
                           </td>
                           <td className="px-4 py-3">
                             <button
@@ -621,13 +629,13 @@ export default function AdminPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {companies.map((c) => (
                   <div
-                    key={c.companyId}
+                    key={c.company_id}
                     className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div>
                         <h3 className="font-black text-gray-800 text-base">{c.companyName}</h3>
-                        <p className="text-xs text-gray-400 mt-0.5">ID: {c.companyId}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">ID: {c.company_id}</p>
                       </div>
                       <span className="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-full font-semibold">
                         Company
@@ -646,11 +654,10 @@ export default function AdminPage() {
                       </span>
                       <span className="text-gray-500">
                         최대 <span className="font-bold text-gray-800">
-                          {c.admin?.subscription?.maxMembers || '-'}
+                          {c.admin?.max_members || '-'}
                         </span>명
                       </span>
                     </div>
-                    {/* 팀 목록 */}
                     <div className="mt-3 flex flex-wrap gap-1">
                       {Array.from(new Set(c.members.map((m) => m.team).filter(Boolean))).map((t) => (
                         <span key={t} className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">
@@ -670,8 +677,6 @@ export default function AdminPage() {
         ════════════════════════════════ */}
         {activeTab === 'stats' && (
           <div className="space-y-6">
-
-            {/* 요약 카드 */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 { label: '전체 가입자', value: stats.total, color: 'blue', icon: '👤' },
@@ -693,7 +698,6 @@ export default function AdminPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* 가입 경로 */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                 <h3 className="font-bold text-gray-800 mb-4">📱 가입 경로</h3>
                 <div className="space-y-3">
@@ -717,7 +721,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* 플랜별 비율 */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                 <h3 className="font-bold text-gray-800 mb-4">💳 플랜 현황</h3>
                 <div className="space-y-3">
@@ -746,7 +749,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 추가 통계 */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
                 { label: '만료된 계정', value: stats.expired, icon: '⚠️', color: 'text-red-500' },
@@ -810,7 +812,7 @@ export default function AdminPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          {u.superAdmin ? (
+                          {u.super_admin ? (
                             <span className="text-yellow-500 font-bold">👑 Yes</span>
                           ) : (
                             <span className="text-gray-300 text-xs">-</span>
@@ -857,9 +859,9 @@ export default function AdminPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                          {q.brandLabel && (
+                          {q.brand_label && (
                             <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-semibold">
-                              {q.brandLabel}
+                              {q.brand_label}
                             </span>
                           )}
                           {q.tag && (
@@ -867,7 +869,7 @@ export default function AdminPage() {
                               {q.tag}
                             </span>
                           )}
-                          {!q.isPublic && (
+                          {!q.is_public && (
                             <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-0.5 rounded-full">
                               🔒 비공개
                             </span>
@@ -876,10 +878,10 @@ export default function AdminPage() {
                         <h4 className="font-semibold text-gray-800 truncate">{q.title}</h4>
                         <p className="text-xs text-gray-500 mt-1 line-clamp-1">{q.content}</p>
                         <div className="flex gap-3 mt-2 text-xs text-gray-400">
-                          <span>✍️ {q.authorName}</span>
-                          {q.companyName && <span>🏢 {q.companyName}</span>}
-                          <span>💬 답변 {q.answerCount || 0}개</span>
-                          <span>📅 {formatDateTime(q.createdAt)}</span>
+                          <span>✍️ {q.author_name}</span>
+                          {q.company_name && <span>🏢 {q.company_name}</span>}
+                          <span>💬 답변 {q.answer_count || 0}개</span>
+                          <span>📅 {formatDateTime(q.created_at)}</span>
                         </div>
                       </div>
                       <button
@@ -905,15 +907,8 @@ export default function AdminPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-800">
-                💳 구독 수정
-              </h3>
-              <button
-                onClick={() => setEditUser(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ✕
-              </button>
+              <h3 className="text-lg font-bold text-gray-800">💳 구독 수정</h3>
+              <button onClick={() => setEditUser(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-3 text-sm">
@@ -971,9 +966,7 @@ export default function AdminPage() {
 
             {editPlan === 'company' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  최대 인원
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">최대 인원</label>
                 <div className="grid grid-cols-4 gap-2">
                   {[5, 10, 15, 20, 30, 50, 100].map((n) => (
                     <button
@@ -1019,25 +1012,19 @@ export default function AdminPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-gray-800">🔧 계정 관리</h3>
-              <button
-                onClick={() => setManageUser(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ✕
-              </button>
+              <button onClick={() => setManageUser(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-3">
               <p className="font-semibold text-gray-800">{manageUser.name}</p>
               <p className="text-gray-500 text-xs">{manageUser.email}</p>
               <p className="text-gray-400 text-xs mt-1">
-                {PLAN_LABELS[manageUser.subscription?.plan || 'trial']?.label} ·{' '}
+                {PLAN_LABELS[manageUser.subscription_plan || 'trial']?.label} ·{' '}
                 {manageUser.role === 'admin' ? '관리자' : '멤버'}
               </p>
             </div>
 
             <div className="space-y-2">
-              {/* 계정 정지/복구 */}
               <button
                 onClick={() => handleToggleStatus(manageUser)}
                 disabled={manageLoading}
@@ -1050,20 +1037,18 @@ export default function AdminPage() {
                 {manageUser.status === 'suspended' ? '✅ 계정 복구' : '⏸️ 계정 정지'}
               </button>
 
-              {/* SuperAdmin 토글 */}
               <button
                 onClick={() => handleToggleSuperAdmin(manageUser)}
                 disabled={manageLoading}
                 className={`w-full py-3 rounded-xl font-semibold text-sm transition ${
-                  manageUser.superAdmin
+                  manageUser.super_admin
                     ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {manageUser.superAdmin ? '👑 SuperAdmin 해제' : '👑 SuperAdmin 부여'}
+                {manageUser.super_admin ? '👑 SuperAdmin 해제' : '👑 SuperAdmin 부여'}
               </button>
 
-              {/* 강제 탈퇴 */}
               <button
                 onClick={() => handleDeleteUser(manageUser)}
                 disabled={manageLoading}

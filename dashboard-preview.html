@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LiftField 운영 대시보드</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+    background: #0f172a; color: #1e293b; font-size: 13px;
+  }
+
+  /* ── 헤더 ── */
+  .header {
+    height: 50px; background: #0f172a;
+    border-bottom: 1px solid #1e293b;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; flex-shrink: 0;
+  }
+  .logo { display: flex; align-items: center; gap: 8px; }
+  .logo-mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .logo-name { color: #f8fafc; font-weight: 800; font-size: 14px; letter-spacing: -.4px; }
+  .hd { width: 1px; height: 16px; background: #1e293b; }
+  .page-title { color: #64748b; font-size: 11px; font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .online { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #22c55e; font-weight: 600; }
+  .online::before { content:''; width:6px; height:6px; border-radius:50%; background:#22c55e; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .user-chip {
+    display: flex; align-items: center; gap: 7px;
+    background: #1e293b; border-radius: 20px; padding: 3px 10px 3px 3px;
+  }
+  .avatar {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800; color: #fff;
+  }
+  .user-name { font-size: 11px; color: #cbd5e1; font-weight: 600; }
+  .logout-btn {
+    background: none; border: 1px solid #334155; border-radius: 6px;
+    color: #64748b; font-size: 10px; padding: 4px 10px; cursor: pointer;
+    font-family: inherit; transition: all .15s;
+  }
+  .logout-btn:hover { border-color:#ef4444; color:#ef4444; }
+
+  /* ── 바디 레이아웃 ── */
+  .body-wrap { display: flex; height: calc(100vh - 50px); }
+
+  /* ── 사이드바 ── */
+  .sidebar {
+    width: 188px; background: #0f172a;
+    border-right: 1px solid #1e293b;
+    display: flex; flex-direction: column;
+    padding: 12px 0; flex-shrink: 0;
+  }
+  .sb-section {
+    padding: 0 10px 6px;
+    font-size: 8px; font-weight: 700;
+    color: #334155; text-transform: uppercase; letter-spacing: 1.2px;
+  }
+  .nav-btn {
+    width: 100%; display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border: none; background: none; cursor: pointer;
+    text-align: left; border-left: 2px solid transparent;
+    transition: all .15s; font-family: inherit;
+  }
+  .nav-btn:hover { background: #1e293b; }
+  .nav-btn.active { background: #1e3a5f; border-left-color: #3b82f6; }
+  .nav-ic {
+    width: 26px; height: 26px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0; background: #1e293b;
+  }
+  .nav-btn.active .nav-ic { background: #1d4ed820; }
+  .nav-lbl { font-size: 11px; font-weight: 500; color: #64748b; flex: 1; }
+  .nav-btn.active .nav-lbl { color: #93c5fd; font-weight: 700; }
+  .nav-cnt {
+    font-size: 9px; font-weight: 800; color: #fff;
+    padding: 1px 6px; border-radius: 10px; flex-shrink: 0;
+  }
+  .sb-spacer { flex: 1; }
+  .sb-bottom { padding: 10px; border-top: 1px solid #1e293b; }
+  .home-link {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: #475569;
+    background: none; border: none; cursor: pointer; font-family: inherit; padding: 4px;
+  }
+  .home-link:hover { color: #94a3b8; }
+
+  /* ── 메인 ── */
+  .main {
+    flex: 1; background: #f1f5f9;
+    display: flex; flex-direction: column;
+    padding: 16px 20px 12px; gap: 12px; overflow: hidden;
+  }
+
+  /* 상단 바 */
+  .topbar { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .greeting h1 { font-size: 16px; font-weight: 800; color: #0f172a; letter-spacing: -.4px; }
+  .greeting p  { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+  .date-pill {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 16px;
+    padding: 5px 12px; font-size: 10px; color: #64748b; font-weight: 600;
+  }
+  .alert-pill {
+    display: flex; align-items: center; gap: 5px;
+    background: #fef3c7; border: 1px solid #fde68a; border-radius: 16px;
+    padding: 5px 12px; font-size: 10px; color: #92400e; font-weight: 700; cursor: pointer;
+  }
+
+  /* ── KPI 행 ── */
+  .kpi-row {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; flex-shrink: 0;
+  }
+  .kpi {
+    background: #fff; border-radius: 12px; padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px;
+    cursor: pointer; transition: all .2s;
+    border-top: 3px solid transparent;
+    position: relative; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  .kpi:hover { transform: translateY(-2px); }
+  .kpi-ic {
+    width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0;
+  }
+  .kpi-info { flex: 1; min-width: 0; }
+  .kpi-val { font-size: 24px; font-weight: 900; letter-spacing: -1px; line-height: 1; color: #0f172a; }
+  .kpi-lbl { font-size: 10px; color: #94a3b8; font-weight: 600; margin-top: 3px; }
+  .kpi-tag {
+    font-size: 9px; font-weight: 700;
+    padding: 2px 7px; border-radius: 16px; flex-shrink: 0; align-self: flex-start;
+  }
+  .kpi-deco {
+    position: absolute; right: -6px; bottom: -8px;
+    font-size: 50px; opacity: .04; pointer-events: none; line-height: 1;
+  }
+
+  /* ── 하단 3열 ── */
+  .bottom-row {
+    display: grid;
+    grid-template-columns: 220px 1fr 240px;
+    gap: 12px; flex: 1; min-height: 0;
+  }
+
+  /* 패널 공통 */
+  .panel {
+    background: #fff; border-radius: 14px;
+    display: flex; flex-direction: column;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05); overflow: hidden;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 7px;
+    padding: 12px 14px 10px; flex-shrink: 0;
+    border-bottom: 1px solid #f8fafc;
+  }
+  .panel-bar { width: 3px; height: 14px; border-radius: 2px; flex-shrink: 0; }
+  .panel-title { font-size: 12px; font-weight: 700; color: #334155; flex: 1; }
+  .panel-badge {
+    font-size: 9px; font-weight: 800; color: #fff;
+    padding: 2px 7px; border-radius: 10px;
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 10px 12px; }
+
+  /* ── 왼쪽: 계약 현황 요약 ── */
+  .contract-summary { display: flex; flex-direction: column; gap: 6px; }
+  .cs-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 10px; border-radius: 9px; cursor: pointer;
+    transition: background .15s; background: #f8fafc;
+    border-left: 3px solid transparent;
+  }
+  .cs-item:hover { background: #f1f5f9; }
+  .cs-item.expired  { background: #fef2f2; border-left-color: #ef4444; }
+  .cs-item.urgent   { background: #fff7ed; border-left-color: #f97316; }
+  .cs-item.warning  { background: #fefce8; border-left-color: #eab308; }
+  .cs-item.safe     { background: #f0fdf4; border-left-color: #22c55e; }
+  .cs-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .cs-label { flex: 1; font-size: 11px; font-weight: 600; }
+  .cs-item.expired .cs-label  { color: #dc2626; }
+  .cs-item.urgent  .cs-label  { color: #ea580c; }
+  .cs-item.warning .cs-label  { color: #ca8a04; }
+  .cs-item.safe    .cs-label  { color: #16a34a; }
+  .cs-count { font-size: 16px; font-weight: 900; }
+  .cs-item.expired .cs-count  { color: #dc2626; }
+  .cs-item.urgent  .cs-count  { color: #ea580c; }
+  .cs-item.warning .cs-count  { color: #ca8a04; }
+  .cs-item.safe    .cs-count  { color: #16a34a; }
+  .cs-unit { font-size: 9px; color: #94a3b8; margin-left: 1px; }
+
+  /* 계약 만료 상위 리스트 */
+  .expiry-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .exp-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 8px; border-radius: 7px; background: #f8fafc;
+    cursor: pointer; transition: background .15s;
+  }
+  .exp-item:hover { background: #f1f5f9; }
+  .exp-dday {
+    font-size: 10px; font-weight: 800;
+    padding: 1px 7px; border-radius: 8px; flex-shrink: 0; min-width: 46px; text-align: center;
+  }
+  .exp-name { flex: 1; font-size: 11px; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .exp-type { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 6px; flex-shrink: 0; }
+  .exp-fee  { font-size: 10px; color: #94a3b8; flex-shrink: 0; }
+
+  /* ── 가운데: 현장 테이블 ── */
+  .site-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .site-table thead tr { background: #f8fafc; }
+  .site-table th {
+    padding: 8px 10px; text-align: left; font-weight: 700;
+    color: #64748b; white-space: nowrap; font-size: 10px;
+    border-bottom: 1px solid #f1f5f9; cursor: pointer;
+  }
+  .site-table th:hover { color: #3b82f6; }
+  .site-table td {
+    padding: 7px 10px; border-bottom: 1px solid #f8fafc;
+    white-space: nowrap; color: #334155;
+  }
+  .site-table tbody tr { cursor: pointer; transition: background .12s; }
+  .site-table tbody tr:hover { background: #eff6ff; }
+  .site-table tbody tr.expired { background: #fef2f2; }
+  .site-table tbody tr.urgent  { background: #fff7ed; }
+  .site-table tbody tr.warning { background: #fefce8; }
+  .badge-type {
+    font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 6px;
+  }
+  .tbl-footer {
+    padding: 7px 10px; background: #f8fafc; border-top: 1px solid #f1f5f9;
+    display: flex; gap: 14px; font-size: 10px; color: #64748b; flex-shrink: 0;
+  }
+  .tbl-footer strong { color: #334155; font-weight: 700; }
+
+  /* ── 오른쪽: 알림 + 처리 현황 ── */
+  .right-col { display: flex; flex-direction: column; gap: 10px; }
+  .notif-list { display: flex; flex-direction: column; gap: 5px; }
+  .notif-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 10px; border-radius: 8px; background: #f8fafc;
+    border-left: 2px solid transparent; cursor: pointer; transition: background .12s;
+  }
+  .notif-item:hover { background: #f1f5f9; }
+  .n-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 2px; }
+  .n-body { flex: 1; min-width: 0; }
+  .n-title { font-size: 11px; font-weight: 700; color: #1e293b; }
+  .n-sub   { font-size: 9px; color: #94a3b8; margin-top: 1px; }
+  .n-time  { font-size: 9px; color: #cbd5e1; flex-shrink: 0; white-space: nowrap; }
+
+  .prog-panel {
+    background: #0f172a; border-radius: 12px;
+    padding: 14px; flex-shrink: 0;
+  }
+  .prog-title { font-size: 10px; font-weight: 700; color: #64748b; margin-bottom: 10px; letter-spacing: .2px; }
+  .prog-item  { margin-bottom: 9px; }
+  .prog-item:last-child { margin-bottom: 0; }
+  .prog-row   { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .prog-name  { font-size: 10px; font-weight: 600; color: #94a3b8; }
+  .prog-pct   { font-size: 10px; font-weight: 800; color: #f1f5f9; }
+  .prog-bar   { height: 5px; background: #1e293b; border-radius: 3px; overflow: hidden; }
+  .prog-fill  { height: 100%; border-radius: 3px; }
+
+  /* 검색 필터 */
+  .filter-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px 0; flex-shrink: 0;
+  }
+  .filter-input {
+    flex: 1; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 5px 10px; font-size: 11px; font-family: inherit;
+    background: #f8fafc; color: #334155; outline: none;
+  }
+  .filter-input:focus { border-color: #3b82f6; background: #fff; }
+  .filter-tab {
+    font-size: 10px; font-weight: 700;
+    padding: 5px 10px; border-radius: 8px; border: 1px solid #e2e8f0;
+    background: #f8fafc; color: #64748b; cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+  }
+  .filter-tab.on { background: #ef4444; color: #fff; border-color: #ef4444; }
+  .filter-tab.on2 { background: #f97316; color: #fff; border-color: #f97316; }
+  .filter-tab.on3 { background: #eab308; color: #fff; border-color: #eab308; }
+</style>
+</head>
+<body>
+
+<!-- ── 헤더 ── -->
+<header class="header">
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="logo">
+      <div class="logo-mark">🛗</div>
+      <span class="logo-name">LiftField</span>
+    </div>
+    <div class="hd"></div>
+    <span class="page-title">운영 대시보드</span>
+  </div>
+  <div class="header-right">
+    <span class="online">실시간 연동</span>
+    <div class="user-chip">
+      <div class="avatar">김</div>
+      <span class="user-name">김현장 · 한국승강기</span>
+    </div>
+    <button class="logout-btn">로그아웃</button>
+  </div>
+</header>
+
+<div class="body-wrap">
+
+  <!-- ── 사이드바 ── -->
+  <aside class="sidebar">
+    <div class="sb-section">Menu</div>
+    <button class="nav-btn active" onclick="activate(this)">
+      <div class="nav-ic">🏢</div><span class="nav-lbl">현장관리</span>
+    </button>
+    <button class="nav-btn" onclick="activate(this)">
+      <div class="nav-ic">🔧</div><span class="nav-lbl">고장접수</span>
+      <span class="nav-cnt" style="background:#ef4444">3</span>
+    </button>
+    <button class="nav-btn" onclick="activate(this)">
+      <div class="nav-ic">📋</div><span class="nav-lbl">점검관리</span>
+    </button>
+    <button class="nav-btn" onclick="activate(this)">
+      <div class="nav-ic">📦</div><span class="nav-lbl">자재신청</span>
+      <span class="nav-cnt" style="background:#f59e0b">5</span>
+    </button>
+    <button class="nav-btn" onclick="activate(this)">
+      <div class="nav-ic">👥</div><span class="nav-lbl">직원관리</span>
+      <span class="nav-cnt" style="background:#8b5cf6">12</span>
+    </button>
+    <button class="nav-btn" onclick="activate(this)">
+      <div class="nav-ic">📊</div><span class="nav-lbl">통계</span>
+    </button>
+    <button class="nav-btn" onclick="activate(this)">
+      <div class="nav-ic">🔗</div><span class="nav-lbl">팀 초대</span>
+    </button>
+    <div class="sb-spacer"></div>
+    <div class="sb-bottom">
+      <button class="home-link">← 홈으로</button>
+    </div>
+  </aside>
+
+  <!-- ── 메인 ── -->
+  <main class="main">
+
+    <!-- 상단 바 -->
+    <div class="topbar">
+      <div class="greeting">
+        <h1>안녕하세요, 김현장 님 👋</h1>
+        <p>한국승강기 주식회사 · 전체 24개 현장 관리 중</p>
+      </div>
+      <div class="topbar-right">
+        <div class="alert-pill">⚡ 만료·위험 현장 6개</div>
+        <div class="date-pill" id="today"></div>
+      </div>
+    </div>
+
+    <!-- KPI -->
+    <div class="kpi-row">
+      <div class="kpi" style="border-top-color:#10b981"
+        onmouseenter="this.style.boxShadow='0 6px 18px #10b98120'"
+        onmouseleave="this.style.boxShadow='0 1px 3px rgba(0,0,0,.05)'">
+        <div class="kpi-ic" style="background:#f0fdf4">🏢</div>
+        <div class="kpi-info">
+          <div class="kpi-val">24</div>
+          <div class="kpi-lbl">등록 현장</div>
+        </div>
+        <div class="kpi-tag" style="background:#f0fdf4;color:#10b981">+2 이번달</div>
+        <div class="kpi-deco">🏢</div>
+      </div>
+      <div class="kpi" style="border-top-color:#ef4444"
+        onmouseenter="this.style.boxShadow='0 6px 18px #ef444420'"
+        onmouseleave="this.style.boxShadow='0 1px 3px rgba(0,0,0,.05)'">
+        <div class="kpi-ic" style="background:#fef2f2">⚠️</div>
+        <div class="kpi-info">
+          <div class="kpi-val" style="color:#ef4444">2</div>
+          <div class="kpi-lbl">계약 만료</div>
+        </div>
+        <div class="kpi-tag" style="background:#fef2f2;color:#ef4444">즉시 갱신</div>
+        <div class="kpi-deco">⚠️</div>
+      </div>
+      <div class="kpi" style="border-top-color:#f59e0b"
+        onmouseenter="this.style.boxShadow='0 6px 18px #f59e0b20'"
+        onmouseleave="this.style.boxShadow='0 1px 3px rgba(0,0,0,.05)'">
+        <div class="kpi-ic" style="background:#fffbeb">🔧</div>
+        <div class="kpi-info">
+          <div class="kpi-val" style="color:#f59e0b">3</div>
+          <div class="kpi-lbl">고장 접수대기</div>
+        </div>
+        <div class="kpi-tag" style="background:#fffbeb;color:#f59e0b">처리 필요</div>
+        <div class="kpi-deco">🔧</div>
+      </div>
+      <div class="kpi" style="border-top-color:#3b82f6"
+        onmouseenter="this.style.boxShadow='0 6px 18px #3b82f620'"
+        onmouseleave="this.style.boxShadow='0 1px 3px rgba(0,0,0,.05)'">
+        <div class="kpi-ic" style="background:#eff6ff">📋</div>
+        <div class="kpi-info">
+          <div class="kpi-val">156</div>
+          <div class="kpi-lbl">전체 승강기</div>
+        </div>
+        <div class="kpi-tag" style="background:#eff6ff;color:#3b82f6">전체 현장</div>
+        <div class="kpi-deco">📋</div>
+      </div>
+    </div>
+
+    <!-- 하단 3열 -->
+    <div class="bottom-row">
+
+      <!-- 왼쪽: 계약 현황 요약 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-bar" style="background:linear-gradient(to bottom,#ef4444,#f97316)"></div>
+          <span class="panel-title">계약 만료 현황</span>
+        </div>
+        <div class="panel-body">
+          <div class="contract-summary">
+            <div class="cs-item expired">
+              <div class="cs-dot" style="background:#ef4444"></div>
+              <span class="cs-label">만료됨</span>
+              <span class="cs-count">2</span><span class="cs-unit">개</span>
+            </div>
+            <div class="cs-item urgent">
+              <div class="cs-dot" style="background:#f97316"></div>
+              <span class="cs-label">30일 이내</span>
+              <span class="cs-count">4</span><span class="cs-unit">개</span>
+            </div>
+            <div class="cs-item warning">
+              <div class="cs-dot" style="background:#eab308"></div>
+              <span class="cs-label">60일 이내</span>
+              <span class="cs-count">7</span><span class="cs-unit">개</span>
+            </div>
+            <div class="cs-item safe">
+              <div class="cs-dot" style="background:#22c55e"></div>
+              <span class="cs-label">60일 초과</span>
+              <span class="cs-count">11</span><span class="cs-unit">개</span>
+            </div>
+          </div>
+
+          <!-- 만료 임박 상위 리스트 -->
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9;">
+            <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:7px;">⏰ 만료 임박 순위</div>
+            <div class="expiry-list">
+
+              <div class="exp-item">
+                <span class="exp-dday" style="background:#fef2f2;color:#ef4444">만료</span>
+                <span class="exp-name">강남타워빌딩</span>
+                <span class="exp-type" style="background:#eff6ff;color:#3b82f6">종합</span>
+              </div>
+
+              <div class="exp-item">
+                <span class="exp-dday" style="background:#fef2f2;color:#ef4444">만료</span>
+                <span class="exp-name">목동 현대아파트</span>
+                <span class="exp-type" style="background:#f5f3ff;color:#7c3aed">일반</span>
+              </div>
+
+              <div class="exp-item">
+                <span class="exp-dday" style="background:#fff7ed;color:#f97316">D-8</span>
+                <span class="exp-name">서초 삼성빌딩</span>
+                <span class="exp-type" style="background:#eff6ff;color:#3b82f6">종합</span>
+              </div>
+
+              <div class="exp-item">
+                <span class="exp-dday" style="background:#fff7ed;color:#f97316">D-15</span>
+                <span class="exp-name">마포 공덕오피스텔</span>
+                <span class="exp-type" style="background:#f5f3ff;color:#7c3aed">일반</span>
+              </div>
+
+              <div class="exp-item">
+                <span class="exp-dday" style="background:#fefce8;color:#ca8a04">D-32</span>
+                <span class="exp-name">종로 광화문빌딩</span>
+                <span class="exp-type" style="background:#eff6ff;color:#3b82f6">종합</span>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 가운데: 현장 테이블 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-bar" style="background:linear-gradient(to bottom,#3b82f6,#6366f1)"></div>
+          <span class="panel-title">현장 목록</span>
+          <span style="font-size:10px;color:#94a3b8">전체 24개</span>
+        </div>
+
+        <!-- 필터 -->
+        <div class="filter-row">
+          <input class="filter-input" placeholder="🔍  현장명, 업체명, 지역 검색..." />
+          <button class="filter-tab on" onclick="toggleTab(this,'on')">🔴 만료 2</button>
+          <button class="filter-tab" onclick="toggleTab(this,'on2')" style="">🟠 30일 4</button>
+          <button class="filter-tab" onclick="toggleTab(this,'on3')">🟡 60일 7</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;padding:0 0 0 0;">
+          <table class="site-table">
+            <thead>
+              <tr>
+                <th>현장명 ↕</th>
+                <th>계약업체</th>
+                <th>유형</th>
+                <th>대수</th>
+                <th>보수료(원)</th>
+                <th>계약 시작</th>
+                <th>계약 만료 ↑</th>
+                <th>D-day</th>
+                <th>팀</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="expired">
+                <td><strong>강남타워빌딩</strong></td>
+                <td>한국승강기</td>
+                <td><span class="badge-type" style="background:#eff6ff;color:#3b82f6">종합</span></td>
+                <td>8대</td>
+                <td>320,000</td>
+                <td>2023-01-01</td>
+                <td style="color:#ef4444;font-weight:700">2024-12-31</td>
+                <td><span style="background:#fef2f2;color:#ef4444;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">만료</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">강남팀</span></td>
+              </tr>
+              <tr class="expired">
+                <td><strong>목동 현대아파트</strong></td>
+                <td>현대엘리베이터</td>
+                <td><span class="badge-type" style="background:#f5f3ff;color:#7c3aed">일반</span></td>
+                <td>12대</td>
+                <td>480,000</td>
+                <td>2022-06-01</td>
+                <td style="color:#ef4444;font-weight:700">2024-12-15</td>
+                <td><span style="background:#fef2f2;color:#ef4444;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">만료</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">목동팀</span></td>
+              </tr>
+              <tr class="urgent">
+                <td><strong>서초 삼성빌딩</strong></td>
+                <td>삼성물산</td>
+                <td><span class="badge-type" style="background:#eff6ff;color:#3b82f6">종합</span></td>
+                <td>6대</td>
+                <td>240,000</td>
+                <td>2024-01-10</td>
+                <td style="color:#f97316;font-weight:700">2025-06-28</td>
+                <td><span style="background:#fff7ed;color:#f97316;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">D-8</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">서초팀</span></td>
+              </tr>
+              <tr class="urgent">
+                <td><strong>마포 공덕오피스텔</strong></td>
+                <td>오티스엘리베이터</td>
+                <td><span class="badge-type" style="background:#f5f3ff;color:#7c3aed">일반</span></td>
+                <td>4대</td>
+                <td>160,000</td>
+                <td>2024-07-05</td>
+                <td style="color:#f97316;font-weight:700">2025-07-05</td>
+                <td><span style="background:#fff7ed;color:#f97316;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">D-15</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">마포팀</span></td>
+              </tr>
+              <tr class="warning">
+                <td><strong>종로 광화문빌딩</strong></td>
+                <td>티케이엘리베이터</td>
+                <td><span class="badge-type" style="background:#eff6ff;color:#3b82f6">종합</span></td>
+                <td>10대</td>
+                <td>400,000</td>
+                <td>2024-08-01</td>
+                <td style="color:#ca8a04;font-weight:700">2025-07-22</td>
+                <td><span style="background:#fefce8;color:#ca8a04;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">D-32</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">종로팀</span></td>
+              </tr>
+              <tr>
+                <td><strong>송파 잠실타워</strong></td>
+                <td>현대엘리베이터</td>
+                <td><span class="badge-type" style="background:#eff6ff;color:#3b82f6">종합</span></td>
+                <td>14대</td>
+                <td>560,000</td>
+                <td>2024-09-01</td>
+                <td>2025-09-01</td>
+                <td><span style="background:#f0fdf4;color:#16a34a;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">D-73</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">송파팀</span></td>
+              </tr>
+              <tr>
+                <td><strong>영등포 타임스퀘어</strong></td>
+                <td>오티스엘리베이터</td>
+                <td><span class="badge-type" style="background:#f5f3ff;color:#7c3aed">일반</span></td>
+                <td>20대</td>
+                <td>800,000</td>
+                <td>2024-10-01</td>
+                <td>2025-10-01</td>
+                <td><span style="background:#f0fdf4;color:#16a34a;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">D-103</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">영등포팀</span></td>
+              </tr>
+              <tr>
+                <td><strong>노원 롯데캐슬</strong></td>
+                <td>한국승강기</td>
+                <td><span class="badge-type" style="background:#eff6ff;color:#3b82f6">종합</span></td>
+                <td>16대</td>
+                <td>640,000</td>
+                <td>2024-11-01</td>
+                <td>2025-11-01</td>
+                <td><span style="background:#f0fdf4;color:#16a34a;font-size:9px;font-weight:800;padding:2px 7px;border-radius:8px">D-134</span></td>
+                <td><span style="background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:9px">노원팀</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tbl-footer">
+          <span>총 <strong>24</strong>개 현장</span>
+          <span>승강기 <strong>156</strong>대</span>
+          <span>월 보수료 합계 <strong>8,320,000</strong>원</span>
+        </div>
+      </div>
+
+      <!-- 오른쪽: 알림 + 처리 현황 -->
+      <div class="right-col">
+
+        <!-- 최근 알림 -->
+        <div class="panel" style="flex:1">
+          <div class="panel-head">
+            <div class="panel-bar" style="background:linear-gradient(to bottom,#ef4444,#f97316)"></div>
+            <span class="panel-title">최근 알림</span>
+            <span class="panel-badge" style="background:#ef4444">8</span>
+          </div>
+          <div class="panel-body">
+            <div class="notif-list">
+              <div class="notif-item" style="border-left-color:#ef4444">
+                <div class="n-dot" style="background:#ef4444"></div>
+                <div class="n-body">
+                  <div class="n-title">🔴 계약 만료 — 강남타워빌딩</div>
+                  <div class="n-sub">즉시 갱신 필요 · 종합계약</div>
+                </div>
+                <span class="n-time">오늘</span>
+              </div>
+              <div class="notif-item" style="border-left-color:#ef4444">
+                <div class="n-dot" style="background:#ef4444"></div>
+                <div class="n-body">
+                  <div class="n-title">🔧 고장신고 — 강남타워 2호기</div>
+                  <div class="n-sub">문 열림 불량 · 접수대기</div>
+                </div>
+                <span class="n-time">방금</span>
+              </div>
+              <div class="notif-item" style="border-left-color:#f97316">
+                <div class="n-dot" style="background:#f97316"></div>
+                <div class="n-body">
+                  <div class="n-title">⏰ D-8 — 서초 삼성빌딩</div>
+                  <div class="n-sub">계약 만료 8일 전</div>
+                </div>
+                <span class="n-time">오늘</span>
+              </div>
+              <div class="notif-item" style="border-left-color:#f59e0b">
+                <div class="n-dot" style="background:#f59e0b"></div>
+                <div class="n-body">
+                  <div class="n-title">📦 자재신청 — 와이어로프 2set</div>
+                  <div class="n-sub">이민수 · 신청중</div>
+                </div>
+                <span class="n-time">12분 전</span>
+              </div>
+              <div class="notif-item" style="border-left-color:#3b82f6">
+                <div class="n-dot" style="background:#3b82f6"></div>
+                <div class="n-body">
+                  <div class="n-title">📋 점검 완료 — 서초빌딩</div>
+                  <div class="n-sub">박철수 · 6대 완료</div>
+                </div>
+                <span class="n-time">43분 전</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 이번달 처리 현황 -->
+        <div class="prog-panel">
+          <div class="prog-title">이번달 처리 현황</div>
+          <div class="prog-item">
+            <div class="prog-row">
+              <span class="prog-name">🔴 계약 갱신율</span>
+              <span class="prog-pct">33%</span>
+            </div>
+            <div class="prog-bar">
+              <div class="prog-fill" style="width:33%;background:linear-gradient(90deg,#ef4444,#f97316)"></div>
+            </div>
+          </div>
+          <div class="prog-item">
+            <div class="prog-row">
+              <span class="prog-name">🔧 고장 처리율</span>
+              <span class="prog-pct">87%</span>
+            </div>
+            <div class="prog-bar">
+              <div class="prog-fill" style="width:87%;background:linear-gradient(90deg,#f59e0b,#fbbf24)"></div>
+            </div>
+          </div>
+          <div class="prog-item">
+            <div class="prog-row">
+              <span class="prog-name">📋 점검 완료율</span>
+              <span class="prog-pct">74%</span>
+            </div>
+            <div class="prog-bar">
+              <div class="prog-fill" style="width:74%;background:linear-gradient(90deg,#3b82f6,#6366f1)"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  // 날짜
+  const d = new Date();
+  document.getElementById('today').textContent =
+    d.toLocaleDateString('ko-KR',{month:'long',day:'numeric',weekday:'short'});
+
+  // 사이드바
+  function activate(el) {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  // 필터 탭
+  function toggleTab(el, cls) {
+    if (el.classList.contains(cls)) {
+      el.className = 'filter-tab';
+    } else {
+      el.className = 'filter-tab ' + cls;
+    }
+  }
+</script>
+</body>
+</html>

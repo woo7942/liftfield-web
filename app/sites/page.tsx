@@ -2,13 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  collection, query, onSnapshot,
-  addDoc, updateDoc, deleteDoc, doc,
-  serverTimestamp, orderBy, getDocs
-} from 'firebase/firestore';
+import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 
 // ─── 타입 정의 ───
@@ -16,40 +10,40 @@ interface UserInfo {
   uid: string;
   name: string;
   email: string;
-  companyId: string;
-  companyDisplayName: string;
+  company_id: string;
+  company_display_name: string;
   team: string;
   role: string;
-  superAdmin?: boolean;
+  super_admin?: boolean;
 }
 
 interface SiteItem {
   id: string;
   name: string;
   address?: string;
-  contractNumber?: string;
-  maintenanceFee?: number;
-  elevatorCount?: number;
-  contractStart?: string;
-  contractEnd?: string;
-  contractType?: string;
-  contractPerson?: string;
-  companyName?: string;
+  contract_number?: string;
+  maintenance_fee?: number;
+  elevator_count?: number;
+  contract_start?: string;
+  contract_end?: string;
+  contract_type?: string;
+  contract_person?: string;
+  company_name?: string;
   phone?: string;
   email?: string;
   region?: string;
-  teamName?: string;
+  team_name?: string;
   source?: 'admin' | 'member';
-  createdAt?: unknown;
+  created_at?: string;
 }
 
 interface ElevatorItem {
   id: string;
-  hogiNo?: string;
+  hogi_no?: string;
   type?: string;
   status?: string;
-  installDate?: string;
-  inspectionDate?: string;
+  install_date?: string;
+  inspection_date?: string;
 }
 
 // ─── 유틸 ───
@@ -71,30 +65,30 @@ function getExpiryInfo(dateStr?: string) {
   return { label: `D-${d}`, color: 'bg-green-100 text-green-600', rowColor: '', dot: '🟢', priority: 3 };
 }
 
-// ─── 헤더 매핑 ───
+// ─── 헤더 매핑 (XLSX용 — camelCase 매핑 후 snake_case로 저장) ───
 const HEADER_MAP: Record<string, keyof SiteItem> = {
   '현장명': 'name',
-  '원장번호': 'contractNumber',
-  '원장변호': 'contractNumber',
-  '보수료': 'maintenanceFee',
-  '대수': 'elevatorCount',
-  '계약일자': 'contractStart',
-  '만료일자': 'contractEnd',
-  '생활유통': 'contractType',
-  '계약종류': 'contractType',
-  '계약 종류': 'contractType',
+  '원장번호': 'contract_number',
+  '원장변호': 'contract_number',
+  '보수료': 'maintenance_fee',
+  '대수': 'elevator_count',
+  '계약일자': 'contract_start',
+  '만료일자': 'contract_end',
+  '생활유통': 'contract_type',
+  '계약종류': 'contract_type',
+  '계약 종류': 'contract_type',
   '전화번호': 'phone',
-  '계약자': 'contractPerson',
-  '제약자': 'contractPerson',
-  '업체명': 'companyName',
-  '계약업체': 'companyName',
+  '계약자': 'contract_person',
+  '제약자': 'contract_person',
+  '업체명': 'company_name',
+  '계약업체': 'company_name',
   '지역': 'region',
   '주소': 'address',
   '메일주소': 'email',
   '이메일': 'email',
 };
 
-type SortKey = 'name' | 'contractEnd' | 'maintenanceFee' | 'elevatorCount' | 'companyName';
+type SortKey = 'name' | 'contract_end' | 'maintenance_fee' | 'elevator_count' | 'company_name';
 type ExpiryFilter = 'all' | 'expired' | 'urgent' | 'warning';
 
 export default function SitesPage() {
@@ -116,7 +110,7 @@ export default function SitesPage() {
   const [selectedTeam, setSelectedTeam] = useState('전체');
   const [selectedType, setSelectedType] = useState('전체');
   const [searchText, setSearchText] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('contractEnd');
+  const [sortKey, setSortKey] = useState<SortKey>('contract_end');
   const [sortAsc, setSortAsc] = useState(true);
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
 
@@ -139,72 +133,74 @@ export default function SitesPage() {
   const [editForm, setEditForm] = useState<Partial<SiteItem>>({});
 
   const isAdmin = userInfo?.role === 'admin';
-  const isSuperAdmin = userInfo?.superAdmin === true;
+  const isSuperAdmin = userInfo?.super_admin === true;
   const canEdit = isAdmin || isSuperAdmin;
 
   // ─── 인증 ───
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
+    const init = async () => {
       try {
-        const { getDoc } = await import('firebase/firestore');
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (!snap.exists()) { router.push('/login'); return; }
-        const data = snap.data();
-        if (!data.companyId) { router.push('/'); return; }
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { router.push('/login'); return; }
+
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (!userData || !userData.company_id) { router.push('/'); return; }
+
         setUserInfo({
-          uid: user.uid,
-          name: data.name || '',
+          uid: user.id,
+          name: userData.name || '',
           email: user.email || '',
-          companyId: data.companyId,
-          companyDisplayName: data.companyDisplayName || '',
-          team: data.team || '',
-          role: data.role || 'member',
-          superAdmin: data.superAdmin || false,
+          company_id: userData.company_id,
+          company_display_name: userData.company_display_name || '',
+          team: userData.team || '',
+          role: userData.role || 'member',
+          super_admin: userData.super_admin || false,
         });
       } catch (e) {
         console.error(e);
       } finally {
         setLoading(false);
       }
+    };
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') router.push('/login');
     });
-    return () => unsub();
+    return () => subscription.unsubscribe();
   }, [router]);
 
-  // ─── 현장 구독 ───
+  // ─── 현장 로드 ───
   useEffect(() => {
-    if (!userInfo?.companyId) return;
-    const q = query(
-      collection(db, 'companies', userInfo.companyId, 'sites'),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, async (snap) => {
-      const list: SiteItem[] = snap.docs.map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          name: data.name || data.siteName || '',
-          teamName: data.teamName || data.team || '',
-        } as SiteItem;
-      });
+    if (!userInfo?.company_id) return;
+    const loadSites = async () => {
+      const { data, error } = await supabase
+        .from('sites')
+        .select('*')
+        .eq('company_id', userInfo.company_id)
+        .order('created_at', { ascending: false });
+
+      if (error) { console.error(error); return; }
+      const list = (data || []) as SiteItem[];
       setSites(list);
-      const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
+
+      const teamSet = new Set(list.map(s => s.team_name).filter(Boolean) as string[]);
       setTeams(Array.from(teamSet));
 
       // 전체 호기 수 합산
-      let total = 0;
-      for (const siteDoc of snap.docs) {
-        const elevsSnap = await getDocs(
-          collection(db, 'companies', userInfo.companyId, 'sites', siteDoc.id, 'elevators')
-        );
-        total += elevsSnap.size;
-      }
-      setTotalElevatorCount(total);
-    });
-    return () => unsub();
-  }, [userInfo?.companyId]);
-
+      const { count } = await supabase
+        .from('elevators')
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', userInfo.company_id);
+      setTotalElevatorCount(count ?? 0);
+    };
+    loadSites();
+  }, [userInfo?.company_id]);
 
   // ─── 현장 클릭 시 호기 로드 ───
   async function handleSiteClick(site: SiteItem) {
@@ -214,10 +210,12 @@ export default function SitesPage() {
     setSiteElevators([]);
     setElevatorsLoading(true);
     try {
-      const snap = await getDocs(
-        collection(db, 'companies', userInfo!.companyId, 'sites', site.id, 'elevators')
-      );
-      setSiteElevators(snap.docs.map(d => ({ id: d.id, ...d.data() } as ElevatorItem)));
+      const { data, error } = await supabase
+        .from('elevators')
+        .select('*')
+        .eq('site_id', site.id);
+      if (error) throw error;
+      setSiteElevators((data || []) as ElevatorItem[]);
     } catch (e) {
       console.error(e);
     } finally {
@@ -230,25 +228,25 @@ export default function SitesPage() {
     .filter(s => {
       if (activeTab === 'contract' && s.source === 'member') return false;
       if (activeTab === 'team' && s.source === 'admin') return false;
-      if (!canEdit && s.teamName !== userInfo?.team) return false;
-      if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
-      if (selectedType !== '전체' && s.contractType !== selectedType) return false;
+      if (!canEdit && s.team_name !== userInfo?.team) return false;
+      if (canEdit && selectedTeam !== '전체' && s.team_name !== selectedTeam) return false;
+      if (selectedType !== '전체' && s.contract_type !== selectedType) return false;
       if (expiryFilter === 'expired') {
-        const d = getDday(s.contractEnd);
+        const d = getDday(s.contract_end);
         if (d === null || d > 0) return false;
       }
       if (expiryFilter === 'urgent') {
-        const d = getDday(s.contractEnd);
+        const d = getDday(s.contract_end);
         if (d === null || d <= 0 || d > 30) return false;
       }
       if (expiryFilter === 'warning') {
-        const d = getDday(s.contractEnd);
+        const d = getDday(s.contract_end);
         if (d === null || d <= 30 || d > 60) return false;
       }
       if (searchText) {
         const q = searchText.toLowerCase();
         return s.name?.toLowerCase().includes(q) ||
-          s.companyName?.toLowerCase().includes(q) ||
+          s.company_name?.toLowerCase().includes(q) ||
           s.region?.toLowerCase().includes(q);
       }
       return true;
@@ -256,21 +254,21 @@ export default function SitesPage() {
     .sort((a, b) => {
       let valA: string | number = '';
       let valB: string | number = '';
-      if (sortKey === 'contractEnd') {
-        valA = a.contractEnd || '9999';
-        valB = b.contractEnd || '9999';
-      } else if (sortKey === 'maintenanceFee') {
-        valA = a.maintenanceFee || 0;
-        valB = b.maintenanceFee || 0;
-      } else if (sortKey === 'elevatorCount') {
-        valA = a.elevatorCount || 0;
-        valB = b.elevatorCount || 0;
+      if (sortKey === 'contract_end') {
+        valA = a.contract_end || '9999';
+        valB = b.contract_end || '9999';
+      } else if (sortKey === 'maintenance_fee') {
+        valA = a.maintenance_fee || 0;
+        valB = b.maintenance_fee || 0;
+      } else if (sortKey === 'elevator_count') {
+        valA = a.elevator_count || 0;
+        valB = b.elevator_count || 0;
       } else if (sortKey === 'name') {
         valA = a.name || '';
         valB = b.name || '';
-      } else if (sortKey === 'companyName') {
-        valA = a.companyName || '';
-        valB = b.companyName || '';
+      } else if (sortKey === 'company_name') {
+        valA = a.company_name || '';
+        valB = b.company_name || '';
       }
       if (valA < valB) return sortAsc ? -1 : 1;
       if (valA > valB) return sortAsc ? 1 : -1;
@@ -282,9 +280,9 @@ export default function SitesPage() {
     if (activeTab === 'contract') return s.source !== 'member';
     return s.source === 'member';
   });
-  const expiredCount = tabSites.filter(s => (getDday(s.contractEnd) ?? 999) <= 0).length;
-  const urgentCount = tabSites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; }).length;
-  const warningCount = tabSites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; }).length;
+  const expiredCount = tabSites.filter(s => (getDday(s.contract_end) ?? 999) <= 0).length;
+  const urgentCount = tabSites.filter(s => { const d = getDday(s.contract_end); return d !== null && d > 0 && d <= 30; }).length;
+  const warningCount = tabSites.filter(s => { const d = getDday(s.contract_end); return d !== null && d > 30 && d <= 60; }).length;
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -326,10 +324,10 @@ export default function SitesPage() {
       headers.forEach((h, idx) => {
         const field = HEADER_MAP[h];
         if (field && row[idx] !== '') {
-          if (field === 'contractStart' || field === 'contractEnd') {
+          if (field === 'contract_start' || field === 'contract_end') {
             const val = row[idx];
             (item as Record<string, unknown>)[field] = val instanceof Date ? val.toISOString().split('T')[0] : String(val);
-          } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
+          } else if (field === 'maintenance_fee' || field === 'elevator_count') {
             (item as Record<string, unknown>)[field] = Number(row[idx]) || 0;
           } else {
             (item as Record<string, unknown>)[field] = String(row[idx]);
@@ -348,7 +346,7 @@ export default function SitesPage() {
 
   // ─── 엑셀 가져오기 ───
   async function handleImport() {
-    if (!excelWorkbook || !userInfo?.companyId) return;
+    if (!excelWorkbook || !userInfo?.company_id) return;
     setImporting(true);
     setImportResult('');
     try {
@@ -356,28 +354,34 @@ export default function SitesPage() {
       const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
       if (rows.length < 2) { setImportResult('데이터가 없어요.'); return; }
       const headers = (rows[0] as string[]).map(h => String(h).trim());
-      const existingSnap = await getDocs(collection(db, 'companies', userInfo.companyId, 'sites'));
+
+      // 기존 현장 목록 (이름 기준 매핑)
+      const { data: existingData } = await supabase
+        .from('sites')
+        .select('id, name')
+        .eq('company_id', userInfo.company_id);
       const existingMap = new Map<string, string>();
-      existingSnap.docs.forEach(d => {
-        const name = d.data().name;
-        if (name) existingMap.set(name, d.id);
+      (existingData || []).forEach(d => {
+        if (d.name) existingMap.set(d.name, d.id);
       });
+
       let addCount = 0;
       let updateCount = 0;
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i] as unknown[];
         const item: Record<string, unknown> = {
+          company_id: userInfo.company_id,
           source: 'admin',
-          teamName: importTeam || '',
-          updatedAt: serverTimestamp(),
+          team_name: importTeam || '',
+          updated_at: new Date().toISOString(),
         };
         headers.forEach((h, idx) => {
           const field = HEADER_MAP[h];
           if (field && row[idx] !== '') {
-            if (field === 'contractStart' || field === 'contractEnd') {
+            if (field === 'contract_start' || field === 'contract_end') {
               const val = row[idx];
               item[field] = val instanceof Date ? val.toISOString().split('T')[0] : String(val);
-            } else if (field === 'maintenanceFee' || field === 'elevatorCount') {
+            } else if (field === 'maintenance_fee' || field === 'elevator_count') {
               item[field] = Number(row[idx]) || 0;
             } else {
               item[field] = String(row[idx]);
@@ -387,15 +391,25 @@ export default function SitesPage() {
         if (!item.name) continue;
         const existingId = existingMap.get(item.name as string);
         if (existingId) {
-          await updateDoc(doc(db, 'companies', userInfo.companyId, 'sites', existingId), item);
+          await supabase.from('sites').update(item).eq('id', existingId);
           updateCount++;
         } else {
-          await addDoc(collection(db, 'companies', userInfo.companyId, 'sites'),
-            { ...item, createdAt: serverTimestamp(), createdBy: userInfo.uid });
+          await supabase.from('sites').insert({
+            ...item,
+            created_at: new Date().toISOString(),
+            created_by: userInfo.uid,
+          });
           addCount++;
         }
       }
       setImportResult(`✅ 신규 ${addCount}개 추가 · 기존 ${updateCount}개 업데이트 완료!`);
+      // 목록 갱신
+      const { data: refreshed } = await supabase
+        .from('sites')
+        .select('*')
+        .eq('company_id', userInfo.company_id)
+        .order('created_at', { ascending: false });
+      setSites((refreshed || []) as SiteItem[]);
     } catch (e) {
       console.error(e);
       setImportResult('❌ 가져오기 중 오류가 발생했어요.');
@@ -406,15 +420,18 @@ export default function SitesPage() {
 
   // ─── 현장 추가 ───
   async function handleAddSite() {
-    if (!addForm.name?.trim() || !userInfo?.companyId) return;
+    if (!addForm.name?.trim() || !userInfo?.company_id) return;
     setAddLoading(true);
     try {
-      await addDoc(collection(db, 'companies', userInfo.companyId, 'sites'), {
+      const { data: newSite, error } = await supabase.from('sites').insert({
         ...addForm,
+        company_id: userInfo.company_id,
         source: 'admin',
-        createdAt: serverTimestamp(),
-        createdBy: userInfo.uid,
-      });
+        created_at: new Date().toISOString(),
+        created_by: userInfo.uid,
+      }).select().single();
+      if (error) throw error;
+      if (newSite) setSites(prev => [newSite as SiteItem, ...prev]);
       setShowAddModal(false);
       setAddForm({});
     } catch (e) {
@@ -426,14 +443,17 @@ export default function SitesPage() {
 
   // ─── 현장 수정 ───
   async function handleEditSave() {
-    if (!selectedSite || !userInfo?.companyId) return;
+    if (!selectedSite || !userInfo?.company_id) return;
     try {
-      await updateDoc(doc(db, 'companies', userInfo.companyId, 'sites', selectedSite.id), {
-        ...editForm,
-        updatedAt: serverTimestamp(),
-      });
+      const { error } = await supabase
+        .from('sites')
+        .update({ ...editForm, updated_at: new Date().toISOString() })
+        .eq('id', selectedSite.id);
+      if (error) throw error;
+      const updated = { ...selectedSite, ...editForm };
+      setSelectedSite(updated);
+      setSites(prev => prev.map(s => s.id === selectedSite.id ? updated : s));
       setEditMode(false);
-      setSelectedSite({ ...selectedSite, ...editForm });
     } catch (e) {
       console.error(e);
     }
@@ -441,15 +461,15 @@ export default function SitesPage() {
 
   // ─── 현장 삭제 ───
   async function handleDeleteSite(siteId: string) {
-    if (!userInfo?.companyId) return;
     if (!confirm('현장을 삭제할까요?')) return;
-    await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', siteId));
+    await supabase.from('sites').delete().eq('id', siteId);
+    setSites(prev => prev.filter(s => s.id !== siteId));
     setSelectedSite(null);
   }
 
   // ─── 전체 삭제 ───
   async function handleDeleteAll() {
-    if (!userInfo?.companyId) return;
+    if (!userInfo?.company_id) return;
     const confirm1 = confirm('⚠️ 현재 탭의 현장을 전부 삭제할까요?\n이 작업은 되돌릴 수 없어요!');
     if (!confirm1) return;
     const input = prompt('확인을 위해 "전체삭제" 를 입력해주세요:');
@@ -462,8 +482,10 @@ export default function SitesPage() {
         if (activeTab === 'contract') return s.source !== 'member';
         return s.source === 'member';
       });
-      for (const site of targetSites) {
-        await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', site.id));
+      const ids = targetSites.map(s => s.id);
+      if (ids.length > 0) {
+        await supabase.from('sites').delete().in('id', ids);
+        setSites(prev => prev.filter(s => !ids.includes(s.id)));
       }
       alert(`✅ ${targetSites.length}개 현장이 삭제됐어요.`);
     } catch (e) {
@@ -575,13 +597,12 @@ export default function SitesPage() {
             className="border rounded-xl px-3 py-2 text-sm bg-white"
           >
             <option value="전체">계약 유형 전체</option>
-<option value="일반계약">일반계약</option>
-<option value="종합계약">종합계약</option>
-<option value="분담일반계약">분담일반계약</option>
-<option value="분담종합계약">분담종합계약</option>
-<option value="일반SMART계약">일반SMART계약</option>
-<option value="종합SMART계약">종합SMART계약</option>
-
+            <option value="일반계약">일반계약</option>
+            <option value="종합계약">종합계약</option>
+            <option value="분담일반계약">분담일반계약</option>
+            <option value="분담종합계약">분담종합계약</option>
+            <option value="일반SMART계약">일반SMART계약</option>
+            <option value="종합SMART계약">종합SMART계약</option>
           </select>
         </div>
 
@@ -597,24 +618,24 @@ export default function SitesPage() {
                     </button>
                   </th>
                   <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('companyName')} className="flex items-center hover:text-blue-600">
-                      계약업체 <SortIcon k="companyName" />
+                    <button onClick={() => handleSort('company_name')} className="flex items-center hover:text-blue-600">
+                      계약업체 <SortIcon k="company_name" />
                     </button>
                   </th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">유형</th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
-                      대수 <SortIcon k="elevatorCount" />
+                    <button onClick={() => handleSort('elevator_count')} className="flex items-center justify-center hover:text-blue-600">
+                      대수 <SortIcon k="elevator_count" />
                     </button>
                   </th>
                   <th className="text-right px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('maintenanceFee')} className="flex items-center justify-end hover:text-blue-600">
-                      보수료 <SortIcon k="maintenanceFee" />
+                    <button onClick={() => handleSort('maintenance_fee')} className="flex items-center justify-end hover:text-blue-600">
+                      보수료 <SortIcon k="maintenance_fee" />
                     </button>
                   </th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('contractEnd')} className="flex items-center justify-center hover:text-blue-600">
-                      계약만료 <SortIcon k="contractEnd" />
+                    <button onClick={() => handleSort('contract_end')} className="flex items-center justify-center hover:text-blue-600">
+                      계약만료 <SortIcon k="contract_end" />
                     </button>
                   </th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">D-day</th>
@@ -633,7 +654,7 @@ export default function SitesPage() {
                   </tr>
                 ) : (
                   filteredSites.map((site, idx) => {
-                    const expiry = getExpiryInfo(site.contractEnd);
+                    const expiry = getExpiryInfo(site.contract_end);
                     return (
                       <tr
                         key={site.id}
@@ -641,27 +662,26 @@ export default function SitesPage() {
                         className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${expiry?.rowColor || (idx % 2 === 0 ? '' : 'bg-gray-50/50')}`}
                       >
                         <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{site.name}</td>
-                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{site.companyName || '-'}</td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{site.company_name || '-'}</td>
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                          {site.contractType ? (
-  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-    site.contractType.includes('종합') ? 'bg-blue-100 text-blue-600' :
-    site.contractType.includes('일반') ? 'bg-purple-100 text-purple-600' :
-    'bg-gray-100 text-gray-600'
-  }`}>
-    {site.contractType}
-  </span>
-) : '-'}
-
+                          {site.contract_type ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              site.contract_type.includes('종합') ? 'bg-blue-100 text-blue-600' :
+                              site.contract_type.includes('일반') ? 'bg-purple-100 text-purple-600' :
+                              'bg-gray-100 text-gray-600'
+                            }`}>
+                              {site.contract_type}
+                            </span>
+                          ) : '-'}
                         </td>
                         <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                          {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
+                          {site.elevator_count ? `${site.elevator_count}대` : '-'}
                         </td>
                         <td className="px-3 py-2.5 text-right text-gray-600 whitespace-nowrap">
-                          {site.maintenanceFee ? `${site.maintenanceFee.toLocaleString()}` : '-'}
+                          {site.maintenance_fee ? `${site.maintenance_fee.toLocaleString()}` : '-'}
                         </td>
                         <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                          {site.contractEnd || '-'}
+                          {site.contract_end || '-'}
                         </td>
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           {expiry ? (
@@ -675,8 +695,8 @@ export default function SitesPage() {
                         </td>
                         {canEdit && (
                           <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                            {site.teamName ? (
-                              <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full">{site.teamName}</span>
+                            {site.team_name ? (
+                              <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full">{site.team_name}</span>
                             ) : '-'}
                           </td>
                         )}
@@ -693,8 +713,7 @@ export default function SitesPage() {
             <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
               <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
               <span>승강기 <strong className="text-gray-700">{totalElevatorCount}</strong>대</span>
-
-              <span>보수료 합계 <strong className="text-gray-700">{filteredSites.reduce((s, i) => s + (i.maintenanceFee || 0), 0).toLocaleString()}</strong>원</span>
+              <span>보수료 합계 <strong className="text-gray-700">{filteredSites.reduce((s, i) => s + (i.maintenance_fee || 0), 0).toLocaleString()}</strong>원</span>
             </div>
           )}
         </div>
@@ -741,9 +760,9 @@ export default function SitesPage() {
                       {excelPreview.map((item, i) => (
                         <tr key={i} className="border-t">
                           <td className="px-2 py-1.5 font-medium">{item.name}</td>
-                          <td className="px-2 py-1.5 text-gray-500">{item.companyName || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-gray-500">{item.contractEnd || '-'}</td>
-                          <td className="px-2 py-1.5 text-center text-gray-500">{item.elevatorCount || '-'}</td>
+                          <td className="px-2 py-1.5 text-gray-500">{item.company_name || '-'}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500">{item.contract_end || '-'}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500">{item.elevator_count || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -778,13 +797,13 @@ export default function SitesPage() {
               {[
                 { label: '현장명 *', field: 'name', type: 'text' },
                 { label: '주소', field: 'address', type: 'text' },
-                { label: '계약업체', field: 'companyName', type: 'text' },
+                { label: '계약업체', field: 'company_name', type: 'text' },
                 { label: '전화번호', field: 'phone', type: 'text' },
-                { label: '계약자', field: 'contractPerson', type: 'text' },
-                { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
-                { label: '보수료', field: 'maintenanceFee', type: 'number' },
-                { label: '계약 시작일', field: 'contractStart', type: 'date' },
-                { label: '계약 만료일', field: 'contractEnd', type: 'date' },
+                { label: '계약자', field: 'contract_person', type: 'text' },
+                { label: '승강기 대수', field: 'elevator_count', type: 'number' },
+                { label: '보수료', field: 'maintenance_fee', type: 'number' },
+                { label: '계약 시작일', field: 'contract_start', type: 'date' },
+                { label: '계약 만료일', field: 'contract_end', type: 'date' },
                 { label: '지역', field: 'region', type: 'text' },
                 { label: '이메일', field: 'email', type: 'text' },
               ].map(({ label, field, type }) => (
@@ -798,8 +817,8 @@ export default function SitesPage() {
               ))}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">계약 유형</label>
-                <select value={addForm.contractType || ''}
-                  onChange={e => setAddForm(prev => ({ ...prev, contractType: e.target.value }))}
+                <select value={addForm.contract_type || ''}
+                  onChange={e => setAddForm(prev => ({ ...prev, contract_type: e.target.value }))}
                   className="w-full border rounded-xl px-3 py-2 text-sm">
                   <option value="">선택</option>
                   <option value="FM">FM (종합)</option>
@@ -808,8 +827,8 @@ export default function SitesPage() {
               </div>
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                <select value={addForm.teamName || ''}
-                  onChange={e => setAddForm(prev => ({ ...prev, teamName: e.target.value }))}
+                <select value={addForm.team_name || ''}
+                  onChange={e => setAddForm(prev => ({ ...prev, team_name: e.target.value }))}
                   className="w-full border rounded-xl px-3 py-2 text-sm">
                   <option value="">팀 미배정</option>
                   {teams.map(t => <option key={t} value={t}>{t}</option>)}
@@ -837,8 +856,8 @@ export default function SitesPage() {
             </div>
             {!editMode ? (
               <>
-                {selectedSite.contractEnd && (() => {
-                  const expiry = getExpiryInfo(selectedSite.contractEnd);
+                {selectedSite.contract_end && (() => {
+                  const expiry = getExpiryInfo(selectedSite.contract_end);
                   return expiry ? (
                     <div className={`mb-3 text-center py-2 rounded-xl text-sm font-medium ${expiry.color}`}>
                       {expiry.dot} 계약 만료 {expiry.label}
@@ -847,18 +866,18 @@ export default function SitesPage() {
                 })()}
                 <div className="space-y-1.5 text-sm">
                   {[
-                    { label: '계약업체', value: selectedSite.companyName },
-                    { label: '계약 유형', value: selectedSite.contractType === 'FM' ? 'FM (종합)' : selectedSite.contractType === 'POG' ? 'POG (일반)' : selectedSite.contractType },
-                    { label: '승강기 대수', value: selectedSite.elevatorCount ? `${selectedSite.elevatorCount}대` : undefined },
-                    { label: '보수료', value: selectedSite.maintenanceFee ? `${selectedSite.maintenanceFee.toLocaleString()}원` : undefined },
-                    { label: '계약 시작일', value: selectedSite.contractStart },
-                    { label: '계약 만료일', value: selectedSite.contractEnd },
-                    { label: '계약자', value: selectedSite.contractPerson },
+                    { label: '계약업체', value: selectedSite.company_name },
+                    { label: '계약 유형', value: selectedSite.contract_type === 'FM' ? 'FM (종합)' : selectedSite.contract_type === 'POG' ? 'POG (일반)' : selectedSite.contract_type },
+                    { label: '승강기 대수', value: selectedSite.elevator_count ? `${selectedSite.elevator_count}대` : undefined },
+                    { label: '보수료', value: selectedSite.maintenance_fee ? `${selectedSite.maintenance_fee.toLocaleString()}원` : undefined },
+                    { label: '계약 시작일', value: selectedSite.contract_start },
+                    { label: '계약 만료일', value: selectedSite.contract_end },
+                    { label: '계약자', value: selectedSite.contract_person },
                     { label: '전화번호', value: selectedSite.phone },
                     { label: '이메일', value: selectedSite.email },
                     { label: '지역', value: selectedSite.region },
                     { label: '주소', value: selectedSite.address },
-                    { label: '배정 팀', value: selectedSite.teamName },
+                    { label: '배정 팀', value: selectedSite.team_name },
                   ].filter(i => i.value).map(({ label, value }) => (
                     <div key={label} className="flex justify-between py-1.5 border-b last:border-0">
                       <span className="text-gray-500">{label}</span>
@@ -880,7 +899,7 @@ export default function SitesPage() {
                     <div className="space-y-1.5">
                       {siteElevators.map(elev => (
                         <div key={elev.id} className="bg-gray-50 rounded-xl px-3 py-2 text-sm flex justify-between items-center">
-                          <span className="font-medium">{elev.hogiNo || elev.id}</span>
+                          <span className="font-medium">{elev.hogi_no || elev.id}</span>
                           <span className="text-gray-500">{elev.type || '-'}</span>
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
                             elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
@@ -908,13 +927,13 @@ export default function SitesPage() {
                   {[
                     { label: '현장명', field: 'name', type: 'text' },
                     { label: '주소', field: 'address', type: 'text' },
-                    { label: '계약업체', field: 'companyName', type: 'text' },
+                    { label: '계약업체', field: 'company_name', type: 'text' },
                     { label: '전화번호', field: 'phone', type: 'text' },
-                    { label: '계약자', field: 'contractPerson', type: 'text' },
-                    { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
-                    { label: '보수료', field: 'maintenanceFee', type: 'number' },
-                    { label: '계약 시작일', field: 'contractStart', type: 'date' },
-                    { label: '계약 만료일', field: 'contractEnd', type: 'date' },
+                    { label: '계약자', field: 'contract_person', type: 'text' },
+                    { label: '승강기 대수', field: 'elevator_count', type: 'number' },
+                    { label: '보수료', field: 'maintenance_fee', type: 'number' },
+                    { label: '계약 시작일', field: 'contract_start', type: 'date' },
+                    { label: '계약 만료일', field: 'contract_end', type: 'date' },
                     { label: '지역', field: 'region', type: 'text' },
                     { label: '이메일', field: 'email', type: 'text' },
                   ].map(({ label, field, type }) => (
@@ -928,8 +947,8 @@ export default function SitesPage() {
                   ))}
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">계약 유형</label>
-                    <select value={editForm.contractType || ''}
-                      onChange={e => setEditForm(prev => ({ ...prev, contractType: e.target.value }))}
+                    <select value={editForm.contract_type || ''}
+                      onChange={e => setEditForm(prev => ({ ...prev, contract_type: e.target.value }))}
                       className="w-full border rounded-xl px-3 py-2 text-sm">
                       <option value="">선택</option>
                       <option value="FM">FM (종합)</option>
@@ -938,8 +957,8 @@ export default function SitesPage() {
                   </div>
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                    <select value={editForm.teamName || ''}
-                      onChange={e => setEditForm(prev => ({ ...prev, teamName: e.target.value }))}
+                    <select value={editForm.team_name || ''}
+                      onChange={e => setEditForm(prev => ({ ...prev, team_name: e.target.value }))}
                       className="w-full border rounded-xl px-3 py-2 text-sm">
                       <option value="">팀 미배정</option>
                       {teams.map(t => <option key={t} value={t}>{t}</option>)}
