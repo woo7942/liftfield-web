@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 export default function HomePage() {
   const router = useRouter();
@@ -12,36 +10,59 @@ export default function HomePage() {
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-  const unsub = onAuthStateChanged(auth, async (user) => {
-    if (user) {
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (snap.exists()) {
-        const data = snap.data();
-        setUserInfo(data);
-
-        // ✅ pro/company인데 companyId 없으면 setup으로
-        const subPlan = data.subscription?.plan || 'trial';
-        const hasCompany = data.companyId && data.companyId.trim() !== '';
-        if (!hasCompany && (subPlan === 'pro' || subPlan === 'company')) {
-          router.push('/setup');
-          return;
+    // 현재 세션 확인
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const { data } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        if (data) {
+          setUserInfo(data);
+          // company_id 없는 pro/company 플랜이면 setup으로
+          const subPlan = data.subscription_plan || data.subscription?.plan || 'trial';
+          const hasCompany = (data.company_id || data.companyId || '').trim() !== '';
+          if (!hasCompany && (subPlan === 'pro' || subPlan === 'company')) {
+            router.push('/setup');
+            return;
+          }
         }
       }
-    }
-    setAuthLoading(false);
-  });
-  return () => unsub();
-}, []);
+      setAuthLoading(false);
+    });
 
+    // Auth 상태 변화 구독
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUserInfo(null);
+        setAuthLoading(false);
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        const { data } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        if (data) setUserInfo(data);
+        setAuthLoading(false);
+      }
+    });
 
-  const isPro = userInfo?.subscription?.plan === 'pro';
-  const isCompany = userInfo?.subscription?.plan === 'company';
-  const isSuperAdmin = userInfo?.superAdmin === true;
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // snake_case 우선, camelCase 폴백
+  const subPlan = userInfo?.subscription_plan || userInfo?.subscription?.plan;
+  const subStatus = userInfo?.subscription_status || userInfo?.subscription?.status;
+  const isPro = subPlan === 'pro';
+  const isCompany = subPlan === 'company';
+  const isSuperAdmin = userInfo?.super_admin || userInfo?.superAdmin || false;
   const isAdmin = userInfo?.role === 'admin';
   const canQna = isPro || isCompany || isSuperAdmin;
+  const companyDisplayName = userInfo?.company_display_name || userInfo?.companyDisplayName || '';
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
     setUserInfo(null);
   };
 
@@ -95,12 +116,12 @@ export default function HomePage() {
                 <div className="flex flex-col items-end leading-tight mr-1">
                   <span className="text-sm font-semibold text-gray-800">{userInfo.name} 님</span>
                   <span className="text-xs font-bold text-blue-500">
-  {isSuperAdmin ? '👑 SuperAdmin' 
-    : isCompany && userInfo?.companyDisplayName 
-      ? `🏢 ${userInfo.companyDisplayName}${userInfo.team ? ` · ${userInfo.team}` : ''}` 
-      : isPro ? '⭐ Pro' 
-      : '체험판'}
-</span>
+                    {isSuperAdmin ? '👑 SuperAdmin'
+                      : isCompany && companyDisplayName
+                        ? `🏢 ${companyDisplayName}${userInfo.team ? ` · ${userInfo.team}` : ''}`
+                        : isPro ? '⭐ Pro'
+                        : '체험판'}
+                  </span>
                 </div>
 
                 {/* 기술 Q&A */}
@@ -113,8 +134,6 @@ export default function HomePage() {
                   </button>
                 )}
 
-
-
                 {/* 팀 관리 — Company 관리자 또는 SuperAdmin만 표시 */}
                 {(isCompany && isAdmin || isSuperAdmin) && (
                   <button
@@ -125,44 +144,43 @@ export default function HomePage() {
                   </button>
                 )}
 
-                {/* 👇 여기에 추가 ↓↓↓ */}
-{(isPro || isCompany) && !userInfo?.companyId && (
-  <button
-    onClick={() => router.push('/join')}
-    className="px-3 py-2 text-sm font-semibold bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition-colors animate-pulse"
-  >
-    🏢 팀 합류하기
-  </button>
-)}
+                {/* 팀 합류하기 */}
+                {(isPro || isCompany) && !(userInfo?.company_id || userInfo?.companyId) && (
+                  <button
+                    onClick={() => router.push('/join')}
+                    className="px-3 py-2 text-sm font-semibold bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl transition-colors animate-pulse"
+                  >
+                    🏢 팀 합류하기
+                  </button>
+                )}
 
                 {/* 대시보드 */}
-{(isCompany && isAdmin || isSuperAdmin) && (
-  <button
-    onClick={() => router.push('/dashboard')}
-    className="text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl transition-colors"
-  >
-    🖥️ 운영 페이지
-  </button>
-)}
+                {(isCompany && isAdmin || isSuperAdmin) && (
+                  <button
+                    onClick={() => router.push('/dashboard')}
+                    className="text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl transition-colors"
+                  >
+                    🖥️ 운영 페이지
+                  </button>
+                )}
 
                 {/* 슈퍼어드민 전용 */}
-{isSuperAdmin && (
-  <button
-    onClick={() => router.push('/admin')}
-    className="text-sm font-bold bg-yellow-400 hover:bg-yellow-500 text-yellow-900 px-3 py-2 rounded-xl transition-colors"
-  >
-    👑 관리자
-  </button>
-)}
+                {isSuperAdmin && (
+                  <button
+                    onClick={() => router.push('/admin')}
+                    className="text-sm font-bold bg-yellow-400 hover:bg-yellow-500 text-yellow-900 px-3 py-2 rounded-xl transition-colors"
+                  >
+                    👑 관리자
+                  </button>
+                )}
 
-{/* 로그아웃 */}
-<button
-  onClick={handleLogout}
-  className="text-sm text-gray-400 hover:text-gray-700 transition-colors ml-1"
->
-  로그아웃
-</button>
-
+                {/* 로그아웃 */}
+                <button
+                  onClick={handleLogout}
+                  className="text-sm text-gray-400 hover:text-gray-700 transition-colors ml-1"
+                >
+                  로그아웃
+                </button>
               </>
             ) : (
               <>
@@ -352,8 +370,6 @@ export default function HomePage() {
             App Store와 Google Play에서 LiftField를 무료로 다운로드하세요
           </p>
           <div className="flex justify-center gap-5 flex-wrap">
-
-            {/* App Store */}
             <a
               href="https://apps.apple.com"
               target="_blank"
@@ -366,8 +382,6 @@ export default function HomePage() {
                 <div className="text-xl font-black tracking-tight">App Store</div>
               </div>
             </a>
-
-            {/* Google Play */}
             <a
               href="https://play.google.com"
               target="_blank"
@@ -380,7 +394,6 @@ export default function HomePage() {
                 <div className="text-xl font-black tracking-tight">Google Play</div>
               </div>
             </a>
-
           </div>
         </div>
       </section>
