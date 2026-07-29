@@ -2,14 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  collection, query,
-  addDoc, updateDoc, deleteDoc, doc,
-  serverTimestamp, orderBy, getDocs
-} from 'firebase/firestore';
-import { invalidateSitesCache } from '@/app/dashboard/page';
+import { supabase } from '@/lib/supabase';
 
 // ─── 타입 정의 ───
 interface UserInfo {
@@ -32,10 +25,9 @@ interface SiteItem {
   region?: string;
   teamName?: string;
   source?: 'admin' | 'member';
-  createdAt?: unknown;
-  // 팀별현장 추가 필드
-  managerName?: string;   // 담당자
-  memo?: string;          // 메모
+  createdAt?: string;
+  managerName?: string;
+  memo?: string;
 }
 
 interface ElevatorItem {
@@ -82,73 +74,92 @@ export default function TeamSitesPage() {
 
   // ─── 인증 ───
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
-      try {
-        const { getDoc } = await import('firebase/firestore');
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (!snap.exists()) { router.push('/login'); return; }
-        const data = snap.data();
-        if (!data.companyId) { router.push('/'); return; }
-        setUserInfo({
-          uid: user.uid,
-          name: data.name || '',
-          email: user.email || '',
-          companyId: data.companyId,
-          companyDisplayName: data.companyDisplayName || '',
-          team: data.team || '',
-          role: data.role || 'member',
-          superAdmin: data.superAdmin || false,
-        });
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.push('/login'); return; }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('name, email, company_id, company_display_name, team, role, super_admin')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error || !userData) { router.push('/login'); return; }
+      if (!userData.company_id) { router.push('/'); return; }
+
+      setUserInfo({
+        uid: session.user.id,
+        name: userData.name || '',
+        email: userData.email || session.user.email || '',
+        companyId: userData.company_id,
+        companyDisplayName: userData.company_display_name || '',
+        team: userData.team || '',
+        role: userData.role || 'member',
+        superAdmin: userData.super_admin || false,
+      });
+      setLoading(false);
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) router.push('/login');
     });
-    return () => unsub();
+
+    return () => subscription.unsubscribe();
   }, [router]);
 
-  // ─── 현장 목록 로드 (팀별현장만 — source==='member') ───
+  // ─── 현장 목록 로드 (source === 'member' 인 팀별현장만) ───
   const reloadSites = async (companyId?: string) => {
     const cid = companyId ?? userInfo?.companyId;
     if (!cid) return;
-    invalidateSitesCache(cid);
-    const q = query(
-      collection(db, 'companies', cid, 'sites'),
-      orderBy('createdAt', 'desc')
-    );
-    const snap = await getDocs(q);
-    // 팀별현장 필터: source === 'member'
-    const list: SiteItem[] = snap.docs
-      .map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          name: data.name || data.siteName || '',
-          teamName: data.teamName || data.team || '',
-        } as SiteItem;
-      })
-      .filter(s => s.source === 'member');
+
+    const { data: sitesData, error } = await supabase
+      .from('sites')
+      .select('id, name, address, elevator_count, phone, region, team_name, source, created_at, manager_name, memo')
+      .eq('company_id', cid)
+      .eq('source', 'member')
+      .order('created_at', { ascending: false });
+
+    if (error) { console.error(error); return; }
+
+    const list: SiteItem[] = (sitesData || []).map(d => ({
+      id: d.id,
+      name: d.name || '',
+      address: d.address || '',
+      elevatorCount: d.elevator_count || 0,
+      phone: d.phone || '',
+      region: d.region || '',
+      teamName: d.team_name || '',
+      source: d.source as 'admin' | 'member',
+      createdAt: d.created_at,
+      managerName: d.manager_name || '',
+      memo: d.memo || '',
+    }));
+
     setSites(list);
+
     const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
     setTeams(Array.from(teamSet));
-    // 전체 호기 수 (팀별현장 소속만)
-    let total = 0;
-    for (const siteDoc of snap.docs.filter(d => (d.data() as SiteItem).source === 'member')) {
-      const elevsSnap = await getDocs(
-        collection(db, 'companies', cid, 'sites', siteDoc.id, 'elevators')
-      );
-      total += elevsSnap.size;
+
+    // 전체 호기 수 집계
+    const siteIds = list.map(s => s.id);
+    if (siteIds.length > 0) {
+      const { count, error: elevError } = await supabase
+        .from('elevators')
+        .select('id', { count: 'exact', head: true })
+        .in('site_id', siteIds);
+
+      if (!elevError) setTotalElevatorCount(count || 0);
+    } else {
+      setTotalElevatorCount(0);
     }
-    setTotalElevatorCount(total);
   };
 
   useEffect(() => {
     if (!userInfo?.companyId) return;
     reloadSites(userInfo.companyId).catch(console.error);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userInfo?.companyId]);
 
   // ─── 현장 클릭 시 호기 로드 ───
@@ -158,11 +169,23 @@ export default function TeamSitesPage() {
     setEditMode(false);
     setSiteElevators([]);
     setElevatorsLoading(true);
+
     try {
-      const snap = await getDocs(
-        collection(db, 'companies', userInfo!.companyId, 'sites', site.id, 'elevators')
-      );
-      setSiteElevators(snap.docs.map(d => ({ id: d.id, ...d.data() } as ElevatorItem)));
+      const { data, error } = await supabase
+        .from('elevators')
+        .select('id, hogi_no, type, status, install_date, inspection_date')
+        .eq('site_id', site.id);
+
+      if (error) throw error;
+
+      setSiteElevators((data || []).map(d => ({
+        id: d.id,
+        hogiNo: d.hogi_no || '',
+        type: d.type || '',
+        status: d.status || '',
+        installDate: d.install_date || '',
+        inspectionDate: d.inspection_date || '',
+      })));
     } catch (e) {
       console.error(e);
     } finally {
@@ -177,10 +200,12 @@ export default function TeamSitesPage() {
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (searchText) {
         const q = searchText.toLowerCase();
-        return s.name?.toLowerCase().includes(q) ||
+        return (
+          s.name?.toLowerCase().includes(q) ||
           s.teamName?.toLowerCase().includes(q) ||
           s.region?.toLowerCase().includes(q) ||
-          s.managerName?.toLowerCase().includes(q);
+          s.managerName?.toLowerCase().includes(q)
+        );
       }
       return true;
     })
@@ -211,12 +236,23 @@ export default function TeamSitesPage() {
     if (!addForm.name?.trim() || !userInfo?.companyId) return;
     setAddLoading(true);
     try {
-      await addDoc(collection(db, 'companies', userInfo.companyId, 'sites'), {
-        ...addForm,
-        source: 'member',   // 팀별현장
-        createdAt: serverTimestamp(),
-        createdBy: userInfo.uid,
+      const { error } = await supabase.from('sites').insert({
+        name: addForm.name,
+        address: addForm.address || '',
+        phone: addForm.phone || '',
+        region: addForm.region || '',
+        elevator_count: addForm.elevatorCount || 0,
+        team_name: addForm.teamName || '',
+        manager_name: addForm.managerName || '',
+        memo: addForm.memo || '',
+        source: 'member',
+        company_id: userInfo.companyId,
+        created_by: userInfo.uid,
+        created_at: new Date().toISOString(),
       });
+
+      if (error) throw error;
+
       setShowAddModal(false);
       setAddForm({});
       await reloadSites();
@@ -231,13 +267,27 @@ export default function TeamSitesPage() {
   async function handleEditSave() {
     if (!selectedSite || !userInfo?.companyId) return;
     try {
-      await updateDoc(doc(db, 'companies', userInfo.companyId, 'sites', selectedSite.id), {
-        ...editForm,
-        updatedAt: serverTimestamp(),
-      });
+      const { error } = await supabase
+        .from('sites')
+        .update({
+          name: editForm.name,
+          address: editForm.address || '',
+          phone: editForm.phone || '',
+          region: editForm.region || '',
+          elevator_count: editForm.elevatorCount || 0,
+          team_name: editForm.teamName || '',
+          manager_name: editForm.managerName || '',
+          memo: editForm.memo || '',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', selectedSite.id);
+
+      if (error) throw error;
+
+      const updated = { ...selectedSite, ...editForm };
       setEditMode(false);
-      setSelectedSite({ ...selectedSite, ...editForm });
-      setSites(prev => prev.map(s => s.id === selectedSite.id ? { ...s, ...editForm } : s));
+      setSelectedSite(updated);
+      setSites(prev => prev.map(s => s.id === selectedSite.id ? updated : s));
     } catch (e) {
       console.error(e);
     }
@@ -248,10 +298,15 @@ export default function TeamSitesPage() {
     if (!userInfo?.companyId) return;
     if (!confirm('현장을 삭제할까요?')) return;
     try {
-      await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', siteId));
+      const { error } = await supabase
+        .from('sites')
+        .delete()
+        .eq('id', siteId);
+
+      if (error) throw error;
+
       setSelectedSite(null);
       setSites(prev => prev.filter(s => s.id !== siteId));
-      invalidateSitesCache(userInfo.companyId);
     } catch (e) {
       console.error(e);
       alert('❌ 삭제 중 오류가 발생했어요.');
@@ -265,12 +320,20 @@ export default function TeamSitesPage() {
     if (!confirm1) return;
     const input = prompt('확인을 위해 "전체삭제" 를 입력해주세요:');
     if (input !== '전체삭제') { alert('취소됐어요.'); return; }
+
     try {
-      for (const site of sites) {
-        await deleteDoc(doc(db, 'companies', userInfo.companyId, 'sites', site.id));
-      }
+      const siteIds = sites.map(s => s.id);
+      if (siteIds.length === 0) return;
+
+      const { error } = await supabase
+        .from('sites')
+        .delete()
+        .in('id', siteIds);
+
+      if (error) throw error;
+
       await reloadSites();
-      alert(`✅ ${sites.length}개 현장이 삭제됐어요.`);
+      alert(`✅ ${siteIds.length}개 현장이 삭제됐어요.`);
     } catch (e) {
       console.error(e);
       alert('❌ 삭제 중 오류가 발생했어요.');
@@ -445,17 +508,24 @@ export default function TeamSitesPage() {
               ].map(({ label, field, type }) => (
                 <div key={field}>
                   <label className="text-sm text-gray-600 mb-0.5 block">{label}</label>
-                  <input type={type}
+                  <input
+                    type={type}
                     value={(addForm as Record<string, unknown>)[field] as string || ''}
-                    onChange={e => setAddForm(prev => ({ ...prev, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))}
-                    className="w-full border rounded-xl px-3 py-2 text-sm" />
+                    onChange={e => setAddForm(prev => ({
+                      ...prev,
+                      [field]: type === 'number' ? Number(e.target.value) : e.target.value,
+                    }))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  />
                 </div>
               ))}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                <select value={addForm.teamName || ''}
+                <select
+                  value={addForm.teamName || ''}
                   onChange={e => setAddForm(prev => ({ ...prev, teamName: e.target.value }))}
-                  className="w-full border rounded-xl px-3 py-2 text-sm">
+                  className="w-full border rounded-xl px-3 py-2 text-sm"
+                >
                   <option value="">팀 미배정</option>
                   {teams.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
@@ -480,6 +550,7 @@ export default function TeamSitesPage() {
               <h2 className="font-bold text-lg">{selectedSite.name}</h2>
               <button onClick={() => setSelectedSite(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
+
             {!editMode ? (
               <>
                 <div className="space-y-1.5 text-sm">
@@ -548,17 +619,24 @@ export default function TeamSitesPage() {
                   ].map(({ label, field, type }) => (
                     <div key={field}>
                       <label className="text-sm text-gray-600 mb-0.5 block">{label}</label>
-                      <input type={type}
+                      <input
+                        type={type}
                         value={(editForm as Record<string, unknown>)[field] as string || ''}
-                        onChange={e => setEditForm(prev => ({ ...prev, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))}
-                        className="w-full border rounded-xl px-3 py-2 text-sm" />
+                        onChange={e => setEditForm(prev => ({
+                          ...prev,
+                          [field]: type === 'number' ? Number(e.target.value) : e.target.value,
+                        }))}
+                        className="w-full border rounded-xl px-3 py-2 text-sm"
+                      />
                     </div>
                   ))}
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                    <select value={editForm.teamName || ''}
+                    <select
+                      value={editForm.teamName || ''}
                       onChange={e => setEditForm(prev => ({ ...prev, teamName: e.target.value }))}
-                      className="w-full border rounded-xl px-3 py-2 text-sm">
+                      className="w-full border rounded-xl px-3 py-2 text-sm"
+                    >
                       <option value="">팀 미배정</option>
                       {teams.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>

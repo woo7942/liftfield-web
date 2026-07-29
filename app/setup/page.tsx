@@ -2,81 +2,103 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 export default function SetupPage() {
   const router = useRouter();
-  const [uid, setUid] = useState('');
-  const [userName, setUserName] = useState('');
-  const [plan, setPlan] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [uid, setUid]               = useState('');
+  const [userName, setUserName]     = useState('');
+  const [plan, setPlan]             = useState('');
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState('');
   const [companyName, setCompanyName] = useState('');
 
+  // ── 인증 확인 ──
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.push('/login'); return; }
 
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('name, company_id, subscription')
+        .eq('id', session.user.id)
+        .single();
 
-      const data = snap.data();
+      if (userError || !userData) { router.push('/login'); return; }
 
       // companyId 이미 있으면 홈으로
-      if (data.companyId && data.companyId.trim() !== '') {
+      if (userData.company_id && userData.company_id.trim() !== '') {
         router.push('/');
         return;
       }
 
       // trial이면 홈으로
-      const subPlan = data.subscription?.plan || 'trial';
+      const subPlan = userData.subscription?.plan || 'trial';
       if (subPlan === 'trial') {
         router.push('/');
         return;
       }
 
-      setUid(user.uid);
-      setUserName(data.name || '');
+      setUid(session.user.id);
+      setUserName(userData.name || '');
       setPlan(subPlan);
       setLoading(false);
-    });
-    return () => unsub();
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => { if (!session) router.push('/login'); }
+    );
+    return () => subscription.unsubscribe();
   }, [router]);
 
+  // ── 회사 설정 저장 ──
   const handleSave = async () => {
     if (!companyName.trim()) {
       setError('회사명을 입력해주세요.');
       return;
     }
-
     setSaving(true);
     setError('');
 
     try {
-      // ✅ companies 컬렉션에 문서 생성 후 실제 문서 ID 사용
-      const companyRef = await addDoc(collection(db, 'companies'), {
-        companyName: companyName.trim(),
-        ownerUid: uid,
-        ownerName: userName,
-        plan,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      const now = new Date().toISOString();
 
-      // ✅ 실제 companies 문서 ID를 companyId로 저장
-      await updateDoc(doc(db, 'users', uid), {
-        companyId: companyRef.id,
-        companyDisplayName: companyName.trim(),
-        useNewStructure: true,
-        updatedAt: serverTimestamp(),
-      });
+      // companies 테이블에 새 회사 생성
+      const { data: newCompany, error: companyError } = await supabase
+        .from('companies')
+        .insert({
+          company_name: companyName.trim(),
+          owner_uid:    uid,
+          owner_name:   userName,
+          plan,
+          created_at:   now,
+          updated_at:   now,
+        })
+        .select('id')
+        .single();
+
+      if (companyError) throw companyError;
+
+      // users 테이블에 company_id 저장
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          company_id:           newCompany.id,
+          company_display_name: companyName.trim(),
+          updated_at:           now,
+        })
+        .eq('id', uid);
+
+      if (updateError) throw updateError;
 
       // Company 플랜이면 팀 관리로, Pro면 홈으로
       router.push(plan === 'company' ? '/team' : '/');
-    } catch {
+    } catch (e: any) {
+      console.error(e);
       setError('저장 중 오류가 발생했어요. 다시 시도해주세요.');
     } finally {
       setSaving(false);
@@ -127,8 +149,8 @@ export default function SetupPage() {
             <input
               type="text"
               value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+              onChange={e => setCompanyName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
               placeholder="예: (주)한국엘리베이터"
               className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
               autoFocus
@@ -165,7 +187,9 @@ export default function SetupPage() {
             disabled={saving || !companyName.trim()}
             className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-black hover:bg-blue-700 transition disabled:opacity-40 text-base"
           >
-            {saving ? '저장 중...' : plan === 'company' ? '저장 후 팀 관리로 →' : '시작하기 →'}
+            {saving
+              ? '저장 중...'
+              : plan === 'company' ? '저장 후 팀 관리로 →' : '시작하기 →'}
           </button>
 
           {/* 초대코드로 합류 옵션 */}

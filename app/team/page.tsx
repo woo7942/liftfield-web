@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import {
-  collection, query, where, onSnapshot,
-  addDoc, updateDoc, doc, serverTimestamp,
-  getDocs, getDoc,
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 interface UserInfo {
   uid: string;
@@ -20,7 +14,7 @@ interface UserInfo {
   companyDisplayName: string;
   superAdmin: boolean;
   maxMembers?: number;
-  subscription?: { plan: string; status: string; endDate?: Date };
+  subscription?: { plan: string; status: string };
 }
 
 interface TeamMember {
@@ -30,14 +24,14 @@ interface TeamMember {
   phone?: string;
   role: string;
   team: string;
-  createdAt?: Date;
+  createdAt?: string;
 }
 
 interface TeamItem {
   id: string;
   name: string;
   companyId: string;
-  createdAt?: Date;
+  createdAt?: string;
 }
 
 interface InviteInfo {
@@ -49,17 +43,10 @@ interface InviteInfo {
   maxMembers: number;
 }
 
-function toDate(v: unknown): Date | undefined {
-  if (!v) return undefined;
-  if (v instanceof Date) return v;
-  if (typeof v === 'object' && 'toDate' in (v as object))
-    return (v as { toDate: () => Date }).toDate();
-  return undefined;
-}
-
-function formatDate(d?: Date) {
+function formatDate(d?: string | Date) {
   if (!d) return '-';
-  return d.toLocaleDateString('ko-KR', {
+  const date = typeof d === 'string' ? new Date(d) : d;
+  return date.toLocaleDateString('ko-KR', {
     year: 'numeric', month: '2-digit', day: '2-digit',
   });
 }
@@ -70,152 +57,178 @@ function generateCode() {
 
 export default function TeamPage() {
   const router = useRouter();
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const [teams, setTeams] = useState<TeamItem[]>([]);
-  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [userInfo, setUserInfo]   = useState<UserInfo | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [teams, setTeams]         = useState<TeamItem[]>([]);
+  const [members, setMembers]     = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<Record<string, InviteInfo>>({});
-
   const [selectedTeam, setSelectedTeam] = useState<TeamItem | null>(null);
 
+  // 모달 상태
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTeamName, setNewTeamName] = useState('');
-  const [createLoading, setCreateLoading] = useState(false);
-  const [createError, setCreateError] = useState('');
-
+  const [newTeamName, setNewTeamName]         = useState('');
+  const [createLoading, setCreateLoading]     = useState(false);
+  const [createError, setCreateError]         = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteTeam, setInviteTeam] = useState<TeamItem | null>(null);
+  const [inviteTeam, setInviteTeam]           = useState<TeamItem | null>(null);
   const [inviteMaxMembers, setInviteMaxMembers] = useState(5);
-  const [inviteLoading, setInviteLoading] = useState(false);
-
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [inviteLoading, setInviteLoading]     = useState(false);
+  const [selectedMember, setSelectedMember]   = useState<TeamMember | null>(null);
 
   // ── 인증 ──
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.push('/login'); return; }
 
-      const data = snap.data();
-      const sub = data.subscription || {};
-      const endDate = toDate(sub.endDate);
-      const now = new Date();
-      const isSuperAdmin = data.superAdmin === true;
-      // 변경 후 - admin 역할이면 플랜 상관없이 접근 가능
-const isAdmin = data.role === 'admin';
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('name, email, role, team, company_id, company_display_name, super_admin, max_members, subscription')
+        .eq('id', session.user.id)
+        .single();
 
-if (!isSuperAdmin && !isAdmin) {
-  router.push('/');
-  return;
-}
+      if (userError || !userData) { router.push('/login'); return; }
 
+      const isSuperAdmin = userData.super_admin === true;
+      const isAdmin      = userData.role === 'admin';
+      if (!isSuperAdmin && !isAdmin) { router.push('/'); return; }
 
       setUserInfo({
-        uid: user.uid,
-        name: data.name || '',
-        email: data.email || '',
-        role: data.role || 'user',
-        team: data.team || '',
-        companyId: data.companyId || '',
-        companyDisplayName: data.companyDisplayName || '',
-        superAdmin: isSuperAdmin,
-        maxMembers: data.maxMembers || 1,
-        subscription: { plan: sub.plan, status: sub.status, endDate },
+        uid:                session.user.id,
+        name:               userData.name                || '',
+        email:              userData.email               || '',
+        role:               userData.role                || 'user',
+        team:               userData.team                || '',
+        companyId:          userData.company_id          || '',
+        companyDisplayName: userData.company_display_name || '',
+        superAdmin:         isSuperAdmin,
+        maxMembers:         userData.max_members         || 1,
+        subscription:       userData.subscription        || { plan: 'trial', status: 'active' },
       });
       setLoading(false);
-    });
-    return () => unsub();
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => { if (!session) router.push('/login'); }
+    );
+    return () => subscription.unsubscribe();
   }, [router]);
 
-  // ── 팀 목록 실시간 구독 ──
+  // ── 팀 목록 로드 ──
   useEffect(() => {
     if (!userInfo) return;
-    const q = query(collection(db, 'companies', userInfo.companyId, 'teams'));
-    getDocs(q).then(snap => {
-      const list: TeamItem[] = snap.docs.map((d) => ({
-        id: d.id,
-        name: d.data().name || '',
-        companyId: d.data().companyId || '',
-        createdAt: toDate(d.data().createdAt),
-      }));
-      list.sort((a, b) => (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0));
-      setTeams(list);
-    }).catch(console.error);
+    const loadTeams = async () => {
+      const { data, error } = await supabase
+        .from('teams')
+        .select('id, name, company_id, created_at')
+        .eq('company_id', userInfo.companyId)
+        .order('created_at', { ascending: true });
+
+      if (error) { console.error(error); return; }
+      setTeams(
+        (data || []).map((t: any) => ({
+          id:        t.id,
+          name:      t.name      || '',
+          companyId: t.company_id || '',
+          createdAt: t.created_at,
+        }))
+      );
+    };
+    loadTeams();
   }, [userInfo]);
 
-  // ── 초대코드 실시간 구독 ──
+  // ── 초대코드 로드 ──
   useEffect(() => {
     if (!userInfo) return;
-    const q = query(
-      collection(db, 'invitations'),
-      where('companyId', '==', userInfo.companyId)
-    );
-    getDocs(q).then(snap => {
+    const loadInvitations = async () => {
+      const { data, error } = await supabase
+        .from('invitations')
+        .select('*')
+        .eq('company_id', userInfo.companyId);
+
+      if (error) { console.error(error); return; }
+
       const map: Record<string, InviteInfo> = {};
-      snap.docs.forEach((d) => {
-        const data = d.data();
-        const expireAt = toDate(data.expireAt);
-        const isExpired =
-          data.status !== 'active' || (expireAt && expireAt < new Date());
+      (data || []).forEach((d: any) => {
+        const expireAt = d.expire_at ? new Date(d.expire_at) : undefined;
+        const isExpired = d.status !== 'active' || (expireAt && expireAt < new Date());
         if (!isExpired) {
-          map[data.teamName] = {
-            docId: d.id,
-            code: data.code,
-            status: data.status,
+          map[d.team_name] = {
+            docId:      d.id,
+            code:       d.code,
+            status:     d.status,
             expireAt,
-            usedCount: data.usedCount || 0,
-            maxMembers: data.maxMembers || 0,
+            usedCount:  d.used_count  || 0,
+            maxMembers: d.max_members || 0,
           };
         }
       });
       setInvitations(map);
-    }).catch(console.error);
+    };
+    loadInvitations();
   }, [userInfo]);
 
-  // ── 멤버 실시간 구독 ──
+  // ── 멤버 로드 ──
   useEffect(() => {
     if (!userInfo) return;
-    const q = query(
-  collection(db, 'users'),
-  where('companyId', '==', userInfo.companyId)
-);
-    getDocs(q).then(snap => {
-      const list: TeamMember[] = snap.docs.map((d) => ({
-        uid: d.id,
-        name: d.data().name || '',
-        email: d.data().email || '',
-        phone: d.data().phone || '',
-        role: d.data().role || 'member',
-        team: d.data().team || '',
-        createdAt: toDate(d.data().createdAt),
-      }));
-      setMembers(list);
-    }).catch(console.error);
+    const loadMembers = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, name, email, phone, role, team, created_at')
+        .eq('company_id', userInfo.companyId);
+
+      if (error) { console.error(error); return; }
+      setMembers(
+        (data || []).map((d: any) => ({
+          uid:       d.id,
+          name:      d.name  || '',
+          email:     d.email || '',
+          phone:     d.phone || '',
+          role:      d.role  || 'member',
+          team:      d.team  || '',
+          createdAt: d.created_at,
+        }))
+      );
+    };
+    loadMembers();
   }, [userInfo]);
 
   // ── 팀 생성 ──
   const handleCreateTeam = async () => {
     if (!newTeamName.trim()) { setCreateError('팀 이름을 입력해주세요.'); return; }
     if (!userInfo) return;
-    if (teams.find((t) => t.name === newTeamName.trim())) {
+    if (teams.find(t => t.name === newTeamName.trim())) {
       setCreateError('이미 존재하는 팀 이름이에요.');
       return;
     }
     setCreateLoading(true);
     setCreateError('');
     try {
-      await addDoc(collection(db, 'companies', userInfo.companyId, 'teams'), {
-        name: newTeamName.trim(),
-        companyId: userInfo.companyId,
-        createdBy: userInfo.uid,
-        createdAt: serverTimestamp(),
-      });
+      const { data: newTeam, error } = await supabase
+        .from('teams')
+        .insert({
+          name:       newTeamName.trim(),
+          company_id: userInfo.companyId,
+          created_by: userInfo.uid,
+          created_at: new Date().toISOString(),
+        })
+        .select('id, name, company_id, created_at')
+        .single();
+
+      if (error) throw error;
+
+      setTeams(prev => [...prev, {
+        id:        newTeam.id,
+        name:      newTeam.name,
+        companyId: newTeam.company_id,
+        createdAt: newTeam.created_at,
+      }]);
       setShowCreateModal(false);
       setNewTeamName('');
-    } catch {
-      setCreateError('팀 생성 중 오류가 발생했어요.');
+    } catch (e: any) {
+      setCreateError('팀 생성 중 오류가 발생했어요: ' + e.message);
     } finally {
       setCreateLoading(false);
     }
@@ -228,78 +241,72 @@ if (!isSuperAdmin && !isAdmin) {
     try {
       const expireAt = new Date();
       expireAt.setDate(expireAt.getDate() + 7);
-
-      // 기존 코드(active/used/expired 모두) 조회 → 갱신 or 신규 생성
-      const q = query(
-        collection(db, 'invitations'),
-        where('companyId', '==', userInfo.companyId),
-        where('teamName', '==', inviteTeam.name)
-      );
-      const snap = await getDocs(q);
       const newCode = generateCode();
 
-      if (!snap.empty) {
-        // 기존 문서 재활성화 (used/expired 포함)
-        await updateDoc(doc(db, 'invitations', snap.docs[0].id), {
-          code: newCode,
-          status: 'active',
-          expireAt,
-          maxMembers: inviteMaxMembers,
-          usedCount: 0,
-          ownerName: userInfo.name,
-          companyDisplayName: userInfo.companyDisplayName,
-        });
+      // 기존 초대코드 조회
+      const { data: existing } = await supabase
+        .from('invitations')
+        .select('id')
+        .eq('company_id', userInfo.companyId)
+        .eq('team_name', inviteTeam.name);
+
+      let docId = '';
+
+      if (existing && existing.length > 0) {
+        // 기존 문서 재활성화
+        docId = existing[0].id;
+        await supabase
+          .from('invitations')
+          .update({
+            code:                 newCode,
+            status:               'active',
+            expire_at:            expireAt.toISOString(),
+            max_members:          inviteMaxMembers,
+            used_count:           0,
+            owner_name:           userInfo.name,
+            company_display_name: userInfo.companyDisplayName,
+          })
+          .eq('id', docId);
       } else {
-        await addDoc(collection(db, 'invitations'), {
-          code: newCode,
-          companyId: userInfo.companyId,
-          companyDisplayName: userInfo.companyDisplayName,
-          teamName: inviteTeam.name,
-          ownerName: userInfo.name,
-          status: 'active',
-          maxMembers: inviteMaxMembers,
-          usedCount: 0,
-          createdAt: serverTimestamp(),
-          expireAt,
-        });
+        // 신규 생성
+        const { data: newInv, error } = await supabase
+          .from('invitations')
+          .insert({
+            code:                 newCode,
+            company_id:           userInfo.companyId,
+            company_display_name: userInfo.companyDisplayName,
+            team_name:            inviteTeam.name,
+            owner_name:           userInfo.name,
+            status:               'active',
+            max_members:          inviteMaxMembers,
+            used_count:           0,
+            created_at:           new Date().toISOString(),
+            expire_at:            expireAt.toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (error) throw error;
+        docId = newInv.id;
       }
-      // 발급 후 invitations 상태 즉시 갱신
+
+      // 로컬 상태 업데이트
       setInvitations(prev => ({
         ...prev,
         [inviteTeam.name]: {
-          docId: snap.empty ? '' : snap.docs[0].id,
-          code: newCode,
-          status: 'active',
+          docId,
+          code:       newCode,
+          status:     'active',
           expireAt,
-          usedCount: 0,
+          usedCount:  0,
           maxMembers: inviteMaxMembers,
         },
       }));
-      // Firestore에서 정확한 docId 포함해 재조회
-      const reloadQ = query(
-        collection(db, 'invitations'),
-        where('companyId', '==', userInfo.companyId)
-      );
-      getDocs(reloadQ).then(reSnap => {
-        const map: Record<string, InviteInfo> = {};
-        reSnap.docs.forEach(d => {
-          const data = d.data();
-          const expAt = toDate(data.expireAt);
-          const isExpired = data.status !== 'active' || (expAt && expAt < new Date());
-          if (!isExpired) {
-            map[data.teamName] = {
-              docId: d.id, code: data.code, status: data.status,
-              expireAt: expAt, usedCount: data.usedCount || 0, maxMembers: data.maxMembers || 0,
-            };
-          }
-        });
-        setInvitations(map);
-      }).catch(console.error);
 
       setShowInviteModal(false);
       setInviteTeam(null);
-    } catch (e) {
-      alert('초대코드 발급 중 오류: ' + e);
+    } catch (e: any) {
+      alert('초대코드 발급 중 오류: ' + e.message);
     } finally {
       setInviteLoading(false);
     }
@@ -308,10 +315,24 @@ if (!isSuperAdmin && !isAdmin) {
   // ── 초대코드 만료 ──
   const handleExpireInvite = async (inviteDocId: string) => {
     if (!confirm('이 초대코드를 만료시킬까요?')) return;
-    await updateDoc(doc(db, 'invitations', inviteDocId), { status: 'expired' });
+    const { error } = await supabase
+      .from('invitations')
+      .update({ status: 'expired' })
+      .eq('id', inviteDocId);
+
+    if (error) { alert(error.message); return; }
+
+    // 로컬 상태에서 해당 팀 초대코드 제거
+    setInvitations(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(key => {
+        if (next[key].docId === inviteDocId) delete next[key];
+      });
+      return next;
+    });
   };
 
-  // ── 코드만 복사 ──
+  // ── 코드 복사 ──
   const copyCode = async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
@@ -339,19 +360,12 @@ if (!isSuperAdmin && !isAdmin) {
     window.open(`sms:?body=${encodeURIComponent(text)}`);
   };
 
-  // ── 공유 API (카카오톡 포함) ──
+  // ── 공유 API ──
   const shareLink = async (code: string) => {
     const link = `${window.location.origin}/join?code=${code}`;
     if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'LiftField 팀 초대',
-          url: link,
-        });
-        return;
-      } catch {
-        return;
-      }
+      try { await navigator.share({ title: 'LiftField 팀 초대', url: link }); return; }
+      catch { return; }
     }
     try {
       await navigator.clipboard.writeText(link);
@@ -363,8 +377,14 @@ if (!isSuperAdmin && !isAdmin) {
 
   // ── 멤버 팀 변경 ──
   const handleChangeTeam = async (uid: string, newTeam: string) => {
-    await updateDoc(doc(db, 'users', uid), { team: newTeam });
-    setSelectedMember((prev) => prev ? { ...prev, team: newTeam } : null);
+    const { error } = await supabase
+      .from('users')
+      .update({ team: newTeam })
+      .eq('id', uid);
+
+    if (error) { alert(error.message); return; }
+    setMembers(prev => prev.map(m => m.uid === uid ? { ...m, team: newTeam } : m));
+    setSelectedMember(prev => prev ? { ...prev, team: newTeam } : null);
   };
 
   if (loading) {
@@ -375,11 +395,8 @@ if (!isSuperAdmin && !isAdmin) {
     );
   }
 
-  const teamMembers = selectedTeam
-    ? members.filter((m) => m.team === selectedTeam.name)
-    : [];
-
-  const unassignedMembers = members.filter((m) => !m.team);
+  const teamMembers       = selectedTeam ? members.filter(m => m.team === selectedTeam.name) : [];
+  const unassignedMembers = members.filter(m => !m.team);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -405,7 +422,7 @@ if (!isSuperAdmin && !isAdmin) {
               <span className="text-xs text-purple-500 font-semibold">🏢 Company</span>
             </div>
             <button
-              onClick={() => signOut(auth).then(() => router.push('/login'))}
+              onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
               className="text-xs text-gray-400 hover:text-gray-600"
             >
               로그아웃
@@ -419,16 +436,16 @@ if (!isSuperAdmin && !isAdmin) {
         {/* 요약 카드 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {[
-            { label: '전체 멤버', value: `${members.length}명`, sub: `최대 ${userInfo?.maxMembers || 0}명`, color: 'blue' },
-            { label: '팀 수', value: `${teams.length}개`, sub: '등록된 팀', color: 'green' },
-            { label: '활성 초대코드', value: `${Object.keys(invitations).length}개`, sub: '7일 유효', color: 'yellow' },
-            { label: '잔여 인원', value: `${(userInfo?.maxMembers || 0) - members.length}명`, sub: '초대 가능', color: 'purple' },
-          ].map((card) => (
+            { label: '전체 멤버',    value: `${members.length}명`,                         sub: `최대 ${userInfo?.maxMembers || 0}명`, color: 'blue'   },
+            { label: '팀 수',        value: `${teams.length}개`,                           sub: '등록된 팀',                           color: 'green'  },
+            { label: '활성 초대코드', value: `${Object.keys(invitations).length}개`,       sub: '7일 유효',                            color: 'yellow' },
+            { label: '잔여 인원',    value: `${(userInfo?.maxMembers || 0) - members.length}명`, sub: '초대 가능',                      color: 'purple' },
+          ].map(card => (
             <div key={card.label} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
               <p className="text-xs text-gray-500 mb-1">{card.label}</p>
               <p className={`text-2xl font-bold ${
-                card.color === 'blue' ? 'text-blue-600' :
-                card.color === 'green' ? 'text-green-600' :
+                card.color === 'blue'   ? 'text-blue-600'   :
+                card.color === 'green'  ? 'text-green-600'  :
                 card.color === 'yellow' ? 'text-yellow-600' : 'text-purple-600'
               }`}>{card.value}</p>
               <p className="text-xs text-gray-400 mt-1">{card.sub}</p>
@@ -455,19 +472,16 @@ if (!isSuperAdmin && !isAdmin) {
                 <div className="p-8 text-center text-gray-400">
                   <p className="text-3xl mb-2">👥</p>
                   <p className="text-sm mb-3">아직 팀이 없어요.</p>
-                  <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="text-blue-500 text-sm hover:underline"
-                  >
+                  <button onClick={() => setShowCreateModal(true)} className="text-blue-500 text-sm hover:underline">
                     첫 번째 팀 만들기 →
                   </button>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-50">
-                  {teams.map((team) => {
-                    const count = members.filter((m) => m.team === team.name).length;
+                  {teams.map(team => {
+                    const count      = members.filter(m => m.team === team.name).length;
                     const isSelected = selectedTeam?.id === team.id;
-                    const inv = invitations[team.name];
+                    const inv        = invitations[team.name];
                     return (
                       <button
                         key={team.id}
@@ -521,11 +535,11 @@ if (!isSuperAdmin && !isAdmin) {
                     </div>
                     <button
                       onClick={() => {
-  const currentMax = invitations[selectedTeam.name]?.maxMembers || 5;
-  setInviteMaxMembers(currentMax);
-  setInviteTeam(selectedTeam);
-  setShowInviteModal(true);
-}}
+                        const currentMax = invitations[selectedTeam.name]?.maxMembers || 5;
+                        setInviteMaxMembers(currentMax);
+                        setInviteTeam(selectedTeam);
+                        setShowInviteModal(true);
+                      }}
                       className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
                     >
                       🔗 초대코드 {invitations[selectedTeam.name] ? '갱신' : '발급'}
@@ -564,38 +578,31 @@ if (!isSuperAdmin && !isAdmin) {
                             </div>
                           </div>
 
-                          {/* 공유 버튼 그룹 */}
+                          {/* 공유 버튼 */}
                           <div className="mt-3 pt-3 border-t border-blue-200">
                             <p className="text-xs text-blue-400 mb-2">📤 초대링크 공유하기</p>
                             <div className="flex gap-2">
-
-                              {/* 🔗 링크 복사 */}
                               <button
                                 onClick={() => copyInviteLink(inv.code)}
                                 className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-white hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold rounded-xl transition-colors"
                               >
                                 🔗 링크 복사
                               </button>
-
-                              {/* 💬 문자 */}
                               <button
                                 onClick={() => shareViaSms(inv.code, selectedTeam.name)}
                                 className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-green-700 text-xs font-semibold rounded-xl transition-colors"
                               >
                                 💬 문자
                               </button>
-
-                              {/* 📤 공유 (카카오톡 포함) */}
                               <button
                                 onClick={() => shareLink(inv.code)}
                                 className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 text-yellow-700 text-xs font-semibold rounded-xl transition-colors"
                               >
                                 📤 공유
                               </button>
-
                             </div>
 
-                            {/* 링크 미리보기 — 직접 복사용 */}
+                            {/* 링크 미리보기 */}
                             <div className="mt-2 bg-white border border-blue-100 rounded-xl px-3 py-2 flex items-center gap-2">
                               <p className="text-xs text-gray-400 flex-1 truncate">
                                 {typeof window !== 'undefined'
@@ -609,7 +616,6 @@ if (!isSuperAdmin && !isAdmin) {
                                 복사
                               </button>
                             </div>
-
                           </div>
                         </div>
                       );
@@ -618,10 +624,7 @@ if (!isSuperAdmin && !isAdmin) {
                       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center">
                         <p className="text-sm text-gray-400 mb-2">발급된 초대코드가 없어요.</p>
                         <button
-                          onClick={() => {
-                            setInviteTeam(selectedTeam);
-                            setShowInviteModal(true);
-                          }}
+                          onClick={() => { setInviteTeam(selectedTeam); setShowInviteModal(true); }}
                           className="text-blue-500 text-sm hover:underline"
                         >
                           초대코드 발급하기 →
@@ -645,7 +648,7 @@ if (!isSuperAdmin && !isAdmin) {
                     </div>
                   ) : (
                     <div className="divide-y divide-gray-50">
-                      {teamMembers.map((m) => (
+                      {teamMembers.map(m => (
                         <div
                           key={m.uid}
                           onClick={() => setSelectedMember(m)}
@@ -689,7 +692,7 @@ if (!isSuperAdmin && !isAdmin) {
               ⚠️ 팀 미배정 멤버 {unassignedMembers.length}명
             </p>
             <div className="flex flex-wrap gap-2">
-              {unassignedMembers.map((m) => (
+              {unassignedMembers.map(m => (
                 <button
                   key={m.uid}
                   onClick={() => setSelectedMember(m)}
@@ -701,7 +704,6 @@ if (!isSuperAdmin && !isAdmin) {
             </div>
           </div>
         )}
-
       </main>
 
       {/* 팀 생성 모달 */}
@@ -717,8 +719,8 @@ if (!isSuperAdmin && !isAdmin) {
               <input
                 type="text"
                 value={newTeamName}
-                onChange={(e) => setNewTeamName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateTeam()}
+                onChange={e => setNewTeamName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleCreateTeam()}
                 placeholder="예: 서울팀, 경기팀, 1팀"
                 className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 autoFocus
@@ -759,7 +761,7 @@ if (!isSuperAdmin && !isAdmin) {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">초대할 인원</label>
               <div className="grid grid-cols-4 gap-2">
-                {[3, 5, 10, 15, 20, 30, 50].map((n) => (
+                {[3, 5, 10, 15, 20, 30, 50].map(n => (
                   <button
                     key={n}
                     onClick={() => setInviteMaxMembers(n)}
@@ -817,10 +819,10 @@ if (!isSuperAdmin && !isAdmin) {
             </div>
             <div className="space-y-2 text-sm">
               {[
-                { label: '휴대폰', value: selectedMember.phone || '-' },
-                { label: '가입일', value: formatDate(selectedMember.createdAt) },
-                { label: '현재 팀', value: selectedMember.team || '미배정' },
-              ].map((item) => (
+                { label: '휴대폰', value: selectedMember.phone || '-'                     },
+                { label: '가입일', value: formatDate(selectedMember.createdAt)             },
+                { label: '현재 팀', value: selectedMember.team || '미배정'                },
+              ].map(item => (
                 <div key={item.label} className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">{item.label}</span>
                   <span className="font-medium text-gray-800">{item.value}</span>
@@ -831,7 +833,7 @@ if (!isSuperAdmin && !isAdmin) {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">팀 변경</label>
                 <div className="flex gap-2 flex-wrap">
-                  {teams.map((t) => (
+                  {teams.map(t => (
                     <button
                       key={t.id}
                       onClick={() => handleChangeTeam(selectedMember.uid, t.name)}

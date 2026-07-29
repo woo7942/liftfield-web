@@ -1,10 +1,8 @@
 'use client';
 
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 function LoginContent() {
   const router = useRouter();
@@ -20,53 +18,55 @@ function LoginContent() {
     setError('');
 
     try {
-      const userCred = await signInWithEmailAndPassword(auth, email, password);
-      const uid = userCred.user.uid;
+      // Supabase 로그인
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      const userSnap = await getDoc(doc(db, 'users', uid));
-      if (!userSnap.exists()) {
-        setError('사용자 정보를 찾을 수 없습니다.');
-        setLoading(false);
+      if (authError) {
+        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
         return;
       }
 
-      const userData = userSnap.data();
+      const uid = data.user?.id;
+      if (!uid) { setError('로그인 정보를 확인할 수 없습니다.'); return; }
 
-            // ✅ 슈퍼어드민, 관리자, 멤버 모두 접근 가능 (trial 제외)
-      const plan = userData.subscription?.plan || 'trial';
-      const isSuperAdmin = userData.superAdmin === true;
+      // users 테이블에서 사용자 정보 조회
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', uid)
+        .single();
+
+      if (userError || !userData) {
+        setError('사용자 정보를 찾을 수 없습니다.');
+        await supabase.auth.signOut();
+        return;
+      }
+
+      const plan = userData.subscription_plan || 'trial';
+      const isSuperAdmin = userData.super_admin === true;
       const isAdmin = userData.role === 'admin';
       const isMember = userData.role === 'member';
-      const isPro = plan === 'pro' && userData.subscription?.status === 'active';
-      const isCompany = plan === 'company' && userData.subscription?.status === 'active';
 
-      // ✅ /join 으로 리다이렉트되는 경우 권한 체크 없이 통과
-      const redirectUrl = searchParams.get('redirect') || '/';
+      // join 페이지로 리다이렉트 예외 처리
+      const redirectUrl = searchParams.get('redirect') || '/dashboard';
       if (redirectUrl.startsWith('/join')) {
         router.push(redirectUrl);
         return;
       }
 
-      if (!isSuperAdmin && !isAdmin && !isMember && !isPro && !isCompany) {
+      if (!isSuperAdmin && !isAdmin && !isMember) {
         setError('접근 권한이 없습니다.');
-        await auth.signOut();
-        setLoading(false);
+        await supabase.auth.signOut();
         return;
       }
 
       router.push(redirectUrl);
 
-
     } catch (e: any) {
-      if (
-        e.code === 'auth/user-not-found' ||
-        e.code === 'auth/wrong-password' ||
-        e.code === 'auth/invalid-credential'
-      ) {
-        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
-      } else {
-        setError('로그인 중 오류가 발생했습니다.');
-      }
+      setError('로그인 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -80,14 +80,14 @@ function LoginContent() {
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🛗</div>
           <h1 className="text-2xl font-bold text-gray-900">LiftField</h1>
-          <p className="text-gray-500 text-sm mt-1">승강기 관리 시스템</p>
+          <p className="text-gray-500 text-sm mt-1">엘리베이터 관리 시스템</p>
         </div>
 
-        {/* redirect 안내 배너 */}
+        {/* redirect 안내 */}
         {searchParams.get('redirect') && (
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4">
             <p className="text-xs text-blue-700 text-center">
-              🔐 로그인 후 초대 페이지로 자동 이동돼요!
+              먼저 로그인 후 해당 페이지로 자동 이동합니다!
             </p>
           </div>
         )}
@@ -138,14 +138,13 @@ function LoginContent() {
         </form>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          LiftField 웹 대시보드
+          LiftField 관리자 전용
         </p>
       </div>
     </div>
   );
 }
 
-// ✅ Suspense 래핑 필수 (useSearchParams 때문)
 export default function LoginPage() {
   return (
     <Suspense fallback={

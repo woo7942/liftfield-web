@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "firebase": "^12.14.0",
+    "@supabase/supabase-js": "^2.111.0",
     "firebase-admin": "^14.0.0",
     "next": "16.2.7",
     "react": "19.2.4",

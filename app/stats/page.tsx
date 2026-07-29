@@ -2,12 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  collection, query, where, getDocs,
-  doc, getDoc, orderBy
-} from 'firebase/firestore';
+import { supabase } from '@/lib/supabase';
 
 interface UserInfo {
   uid: string;
@@ -15,7 +10,6 @@ interface UserInfo {
   companyId: string;
   role: string;
   superAdmin?: boolean;
-  useNewStructure?: boolean;
 }
 
 interface Inspection {
@@ -26,7 +20,6 @@ interface Inspection {
   teamName: string;
   totalCount: number;
   completedCount: number;
-  createdAt?: unknown;
 }
 
 interface FaultReport {
@@ -34,59 +27,70 @@ interface FaultReport {
   companyId: string;
   status: string;
   teamName?: string;
-  team?: string;
-  createdAt?: unknown;
 }
 
 export default function StatsPage() {
   const router = useRouter();
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [userInfo, setUserInfo]       = useState<UserInfo | null>(null);
+  const [loading, setLoading]         = useState(true);
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [faultReports, setFaultReports] = useState<FaultReport[]>([]);
 
   // ─── 인증 ───
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
-      try {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (!snap.exists()) { router.push('/login'); return; }
-        const data = snap.data();
-        if (!data.companyId) { router.push('/'); return; }
-        setUserInfo({
-          uid: user.uid,
-          name: data.name || '',
-          companyId: data.companyId,
-          role: data.role || 'member',
-          superAdmin: data.superAdmin || false,
-          useNewStructure: data.useNewStructure || false,
-        });
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    });
-    return () => unsub();
-  }, [router]);
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.push('/login'); return; }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('name, company_id, role, super_admin')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error || !userData) { router.push('/login'); return; }
+      if (!userData.company_id) { router.push('/'); return; }
+
+      setUserInfo({
+        uid:        session.user.id,
+        name:       userData.name       || '',
+        companyId:  userData.company_id,
+        role:       userData.role       || 'member',
+        superAdmin: userData.super_admin || false,
+      });
+      setLoading(false);
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => { if (!session) router.push('/login'); }
+    );
+    return () => subscription.unsubscribe();
+  }, []);
 
   // ─── 점검 데이터 로드 ───
   useEffect(() => {
     if (!userInfo?.companyId) return;
     const load = async () => {
-      try {
-        const snap = await getDocs(
-          query(
-            collection(db, 'inspections'),
-            where('companyId', '==', userInfo.companyId),
-            orderBy('scheduledDate', 'desc')
-          )
-        );
-        setInspections(snap.docs.map(d => ({ id: d.id, ...d.data() } as Inspection)));
-      } catch (e) {
-        console.error(e);
-      }
+      const { data, error } = await supabase
+        .from('inspections')
+        .select('id, company_id, scheduled_date, status, team_name, total_count, completed_count')
+        .eq('company_id', userInfo.companyId)
+        .order('scheduled_date', { ascending: false });
+
+      if (error) { console.error(error); return; }
+      setInspections(
+        (data || []).map((d: any) => ({
+          id:             d.id,
+          companyId:      d.company_id,
+          scheduledDate:  d.scheduled_date || '',
+          status:         d.status         || '',
+          teamName:       d.team_name      || '',
+          totalCount:     d.total_count    || 0,
+          completedCount: d.completed_count || 0,
+        }))
+      );
     };
     load();
   }, [userInfo?.companyId]);
@@ -95,34 +99,24 @@ export default function StatsPage() {
   useEffect(() => {
     if (!userInfo?.companyId) return;
     const load = async () => {
-      try {
-        const useNew = userInfo.useNewStructure && !!userInfo.companyId;
-        const cid = userInfo.companyId;
+      const { data, error } = await supabase
+        .from('fault_reports')
+        .select('id, company_id, status, team_name')
+        .eq('company_id', userInfo.companyId)
+        .order('created_at', { ascending: false });
 
-        let snap;
-        if (useNew) {
-          snap = await getDocs(
-            query(
-              collection(db, 'companies', cid, 'faultReports'),
-              orderBy('createdAt', 'desc')
-            )
-          );
-        } else {
-          snap = await getDocs(
-            query(
-              collection(db, 'faultReports'),
-              where('companyId', '==', cid),
-              orderBy('createdAt', 'desc')
-            )
-          );
-        }
-        setFaultReports(snap.docs.map(d => ({ id: d.id, ...d.data() } as FaultReport)));
-      } catch (e) {
-        console.error('고장접수 로드 실패:', e);
-      }
+      if (error) { console.error('고장접수 로드 실패:', error); return; }
+      setFaultReports(
+        (data || []).map((d: any) => ({
+          id:        d.id,
+          companyId: d.company_id,
+          status:    d.status    || '',
+          teamName:  d.team_name || '',
+        }))
+      );
     };
     load();
-  }, [userInfo]);
+  }, [userInfo?.companyId]);
 
   // ─── 점검 통계 ───
   const totalInspections      = inspections.length;
@@ -133,10 +127,16 @@ export default function StatsPage() {
     ? Math.round((completedInspections / totalInspections) * 100) : 0;
 
   // ─── 고장 통계 ───
-  const totalFaults     = faultReports.length;
-  const resolvedFaults  = faultReports.filter(f => f.status === '완료' || f.status === '처리완료').length;
-  const pendingFaults   = faultReports.filter(f => f.status === '접수' || f.status === '신규' || f.status === '신청중').length;
-  const progressFaults  = faultReports.filter(f => f.status === '진행중' || f.status === '처리중').length;
+  const totalFaults    = faultReports.length;
+  const resolvedFaults = faultReports.filter(f =>
+    f.status === '완료' || f.status === '처리완료'
+  ).length;
+  const pendingFaults  = faultReports.filter(f =>
+    f.status === '접수' || f.status === '신규' || f.status === '신청중'
+  ).length;
+  const progressFaults = faultReports.filter(f =>
+    f.status === '진행중' || f.status === '처리중'
+  ).length;
   const faultResolveRate = totalFaults > 0
     ? Math.round((resolvedFaults / totalFaults) * 100) : 0;
 
@@ -150,7 +150,9 @@ export default function StatsPage() {
       map[month].total++;
       if (i.status === '완료') map[month].completed++;
     });
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
+    return Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6);
   })();
 
   // ─── 팀별 점검 통계 ───
@@ -169,7 +171,7 @@ export default function StatsPage() {
   const teamFaultStats = (() => {
     const map: Record<string, { total: number; resolved: number; pending: number }> = {};
     faultReports.forEach(f => {
-      const team = f.teamName || f.team || '미배정';
+      const team = f.teamName || '미배정';
       if (!map[team]) map[team] = { total: 0, resolved: 0, pending: 0 };
       map[team].total++;
       if (f.status === '완료' || f.status === '처리완료') map[team].resolved++;
@@ -201,10 +203,10 @@ export default function StatsPage() {
           <h2 className="text-sm font-bold text-gray-500 mb-3">📋 점검 현황</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: '전체 점검', value: totalInspections,     color: 'blue',   icon: '📋' },
-              { label: '완료',      value: completedInspections,  color: 'green',  icon: '✅' },
-              { label: '예정',      value: pendingInspections,    color: 'yellow', icon: '📅' },
-              { label: '완료율',    value: `${completionRate}%`,  color: 'purple', icon: '📈' },
+              { label: '전체 점검', value: totalInspections,    color: 'blue',   icon: '📋' },
+              { label: '완료',      value: completedInspections, color: 'green',  icon: '✅' },
+              { label: '예정',      value: pendingInspections,   color: 'yellow', icon: '📅' },
+              { label: '완료율',    value: `${completionRate}%`, color: 'purple', icon: '📈' },
             ].map(card => (
               <div key={card.label} className="bg-white rounded-2xl border p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-1">
@@ -212,8 +214,8 @@ export default function StatsPage() {
                   <p className="text-xs text-gray-500">{card.label}</p>
                 </div>
                 <p className={`text-2xl font-bold ${
-                  card.color === 'blue' ? 'text-blue-600' :
-                  card.color === 'green' ? 'text-green-600' :
+                  card.color === 'blue'   ? 'text-blue-600'   :
+                  card.color === 'green'  ? 'text-green-600'  :
                   card.color === 'yellow' ? 'text-yellow-600' :
                   'text-purple-600'
                 }`}>{card.value}</p>
@@ -227,10 +229,10 @@ export default function StatsPage() {
           <h2 className="text-sm font-bold text-gray-500 mb-3">🔧 고장접수 현황</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: '전체 고장',  value: totalFaults,        color: 'gray',   icon: '🔧' },
-              { label: '처리완료',   value: resolvedFaults,     color: 'green',  icon: '✅' },
-              { label: '접수/대기',  value: pendingFaults,      color: 'red',    icon: '🚨' },
-              { label: '처리율',     value: `${faultResolveRate}%`, color: 'purple', icon: '📊' },
+              { label: '전체 고장', value: totalFaults,            color: 'gray',   icon: '🔧' },
+              { label: '처리완료',  value: resolvedFaults,         color: 'green',  icon: '✅' },
+              { label: '접수/대기', value: pendingFaults,          color: 'red',    icon: '🚨' },
+              { label: '처리율',    value: `${faultResolveRate}%`, color: 'purple', icon: '📊' },
             ].map(card => (
               <div key={card.label} className="bg-white rounded-2xl border p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-1">
@@ -258,8 +260,10 @@ export default function StatsPage() {
                 <span>전체 {totalInspections}건</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-4">
-                <div className="bg-green-500 h-4 rounded-full transition-all duration-500"
-                  style={{ width: `${completionRate}%` }} />
+                <div
+                  className="bg-green-500 h-4 rounded-full transition-all duration-500"
+                  style={{ width: `${completionRate}%` }}
+                />
               </div>
               <div className="flex justify-between text-xs text-gray-400 mt-1">
                 <span>0%</span>
@@ -270,15 +274,15 @@ export default function StatsPage() {
           </div>
           <div className="flex gap-4 mt-4 text-sm">
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500" />
               <span className="text-gray-600">완료 {completedInspections}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-400" />
               <span className="text-gray-600">예정 {pendingInspections}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-blue-400"></div>
+              <div className="w-3 h-3 rounded-full bg-blue-400" />
               <span className="text-gray-600">진행중 {inProgressInspections}</span>
             </div>
           </div>
@@ -298,10 +302,14 @@ export default function StatsPage() {
                     <span>{data.completed}/{data.total}건 완료</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-6 relative">
-                    <div className="bg-blue-200 h-6 rounded-full"
-                      style={{ width: `${(data.total / maxMonthly) * 100}%` }} />
-                    <div className="bg-blue-500 h-6 rounded-full absolute top-0 left-0"
-                      style={{ width: `${(data.completed / maxMonthly) * 100}%` }} />
+                    <div
+                      className="bg-blue-200 h-6 rounded-full"
+                      style={{ width: `${(data.total / maxMonthly) * 100}%` }}
+                    />
+                    <div
+                      className="bg-blue-500 h-6 rounded-full absolute top-0 left-0"
+                      style={{ width: `${(data.completed / maxMonthly) * 100}%` }}
+                    />
                     <span className="absolute right-2 top-0 h-6 flex items-center text-xs text-gray-600 font-medium">
                       {data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0}%
                     </span>
@@ -331,7 +339,8 @@ export default function StatsPage() {
                 </thead>
                 <tbody>
                   {teamStats.map(([team, data]) => {
-                    const rate = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0;
+                    const rate = data.total > 0
+                      ? Math.round((data.completed / data.total) * 100) : 0;
                     return (
                       <tr key={team} className="border-b last:border-0">
                         <td className="px-4 py-3 font-medium text-gray-800">{team}</td>
@@ -341,7 +350,7 @@ export default function StatsPage() {
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                             rate >= 80 ? 'bg-green-100 text-green-600' :
                             rate >= 50 ? 'bg-yellow-100 text-yellow-600' :
-                            'bg-red-100 text-red-600'
+                                         'bg-red-100 text-red-600'
                           }`}>{rate}%</span>
                         </td>
                         <td className="px-4 py-3">
@@ -378,7 +387,8 @@ export default function StatsPage() {
                 </thead>
                 <tbody>
                   {teamFaultStats.map(([team, data]) => {
-                    const rate = data.total > 0 ? Math.round((data.resolved / data.total) * 100) : 0;
+                    const rate = data.total > 0
+                      ? Math.round((data.resolved / data.total) * 100) : 0;
                     return (
                       <tr key={team} className="border-b last:border-0">
                         <td className="px-4 py-3 font-medium text-gray-800">{team}</td>
@@ -389,7 +399,7 @@ export default function StatsPage() {
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                             rate >= 80 ? 'bg-green-100 text-green-600' :
                             rate >= 50 ? 'bg-yellow-100 text-yellow-600' :
-                            'bg-red-100 text-red-600'
+                                         'bg-red-100 text-red-600'
                           }`}>{rate}%</span>
                         </td>
                         <td className="px-4 py-3">

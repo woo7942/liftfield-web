@@ -1,85 +1,71 @@
 'use client';
 
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  addDoc, collection, deleteDoc,
-  doc, getDoc, getDocs, onSnapshot, orderBy,
-  query, serverTimestamp, updateDoc, where
-} from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 // ── 타입 ──────────────────────────────────────────────────
 interface FaultReport {
   id: string;
-  siteId: string;
-  siteName: string;
-  hogiNo: string;
+  site_id: string;
+  site_name: string;
+  hogi_no: string;
   content: string;
-  reporterPhone: string;
+  reporter_phone: string;
   extra: string;
-  assignedTo: string;
-  assignedName: string;
+  assigned_to: string;
+  assigned_name: string;
   team: string;
-  companyId: string;
+  company_id: string;
   status: '접수대기' | '접수' | '처리중' | '완료';
-  createdAt: any;
-  receivedAt: any;
-  arrivedAt: any;
-  completedAt: any;
-  faultCause: string;
-  faultAction: string;
-  faultNote: string;
+  created_at: string | null;
+  received_at: string | null;
+  arrived_at: string | null;
+  completed_at: string | null;
+  fault_cause: string;
+  fault_action: string;
+  fault_note: string;
 }
 
 // ── 날짜 유틸 ─────────────────────────────────────────────
-const toDateStr = (v: any): string => {
+const toDateStr = (v: string | null): string => {
   if (!v) return '-';
-  if (typeof v === 'string') return v;
-  if (v?.seconds) {
-    const d = new Date(v.seconds * 1000);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}. ${pad(d.getMonth()+1)}. ${pad(d.getDate())}. ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  return '-';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '-';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}. ${pad(d.getMonth()+1)}. ${pad(d.getDate())}. ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const toDateObj = (v: any): Date => {
+const toDateObj = (v: string | null): Date => {
   if (!v) return new Date();
-  if (v?.seconds) return new Date(v.seconds * 1000);
-  if (typeof v === 'string') return new Date(v);
-  return new Date();
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? new Date() : d;
 };
 
 const formatKoDate = (d: Date) =>
   `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
 
-const formatShort = (v: any): string => {
+const formatShort = (v: string | null): string => {
   if (!v) return '-';
-  const d = toDateObj(v);
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '-';
   const pad = (n: number) => String(n).padStart(2, '0');
   const yy = String(d.getFullYear()).slice(2);
   return `${yy}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const toDatetimeLocal = (v: any): string => {
+const toDatetimeLocal = (v: string | null): string => {
   if (!v) return '';
-  const d = toDateObj(v);
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const getNowDatetimeLocal = (): string => {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-};
-
-const parseDatetimeInput = (s: string): Date | null => {
+const parseDatetimeInput = (s: string): string | null => {
   if (!s.trim()) return null;
   const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
+  return isNaN(d.getTime()) ? null : d.toISOString();
 };
 
 // ── 상태 스타일 ───────────────────────────────────────────
@@ -141,89 +127,79 @@ export default function FaultPage() {
   const [arrivedAtInput, setArrivedAtInput] = useState('');
   const [completedAtInput, setCompletedAtInput] = useState('');
 
-  // ── 인증 ──────────────────────────────────────────────
+  // ── 인증 + 데이터 로드 ────────────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
-      const data = snap.data();
-      const plan = data.subscription?.plan;
-      const status = data.subscription?.status;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!session) { router.push('/login'); return; }
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (userError || !userData) { router.push('/login'); return; }
+
+      const plan   = userData.subscription_plan;
+      const status = userData.subscription_status;
       const isCompany = plan === 'company' && status === 'active';
-      const isPro = plan === 'pro' && status === 'active';
-      if (!data.superAdmin && data.role !== 'admin' && data.role !== 'member' && !isPro && !isCompany) {
-        router.push('/login'); return;
+      const isPro     = plan === 'pro'     && status === 'active';
+
+      if (
+        !userData.super_admin &&
+        userData.role !== 'admin' &&
+        userData.role !== 'member' &&
+        !isPro && !isCompany
+      ) {
+        router.push('/login');
+        return;
       }
-      setUserInfo({ uid: user.uid, ...data });
+
+      setUserInfo({ uid: session.user.id, ...userData });
+      await loadData(userData);
     });
-    return () => unsub();
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // ── 데이터 구독 ────────────────────────────────────────
-  useEffect(() => {
-    if (!userInfo) return;
-    const cid = userInfo.companyId || '';
-    const useNew = !!(userInfo.useNewStructure && cid);
-    const unsubs: (() => void)[] = [];
+  const loadData = async (info: any) => {
+    const cid = info.company_id || '';
+    if (!cid) { setLoading(false); return; }
 
-    // faultReports
-    const faultCol = useNew
-      ? collection(db, 'companies', cid, 'faultReports')
-      : collection(db, 'faultReports');
-    const faultQ = useNew
-      ? query(faultCol, orderBy('createdAt', 'desc'))
-      : query(faultCol, where('companyId', '==', cid), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(faultQ, snap => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as FaultReport));
-      setFaults(data);
-      const teamSet = new Set(data.map(f => f.team).filter(Boolean));
+    try {
+      // fault_reports 로드
+      const { data: faultData } = await supabase
+        .from('fault_reports')
+        .select('*')
+        .eq('company_id', cid)
+        .order('created_at', { ascending: false });
+
+      const faultList = (faultData || []) as FaultReport[];
+      setFaults(faultList);
+
+      const teamSet = new Set(faultList.map(f => f.team).filter(Boolean));
       setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
+
+      // sites 로드
+      const { data: siteData } = await supabase
+        .from('sites')
+        .select('*')
+        .eq('company_id', cid)
+        .order('site_name');
+      setSites(siteData || []);
+
+      // users 로드
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('company_id', cid);
+      setUsers(userData || []);
+
+    } catch (e) {
+      console.error('loadData error:', e);
+    } finally {
       setLoading(false);
-    }));
-
-    // sites - 1회 로드
-    const siteCol = useNew
-      ? collection(db, 'companies', cid, 'sites')
-      : collection(db, 'sites');
-    const siteQ = useNew
-      ? query(siteCol, orderBy('siteName'))
-      : query(siteCol, where('companyId', '==', cid), orderBy('siteName'));
-    getDocs(siteQ).then(snap =>
-      setSites(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    ).catch(console.error);
-
-    // users는 항상 최상위 컬렉션에서 읽기
-const userQ = query(
-  collection(db, 'users'),
-  where('companyId', '==', cid)
-);
-getDocs(userQ).then(snap =>
-  setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-).catch(console.error);
-
-    getDocs(userQ).then(snap =>
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    ).catch(console.error);
-
-    return () => unsubs.forEach(u => u());
-  }, [userInfo]);
-
-  // ── Firestore 경로 헬퍼 ────────────────────────────────
-  const getFaultCol = () => {
-    const cid = userInfo?.companyId || '';
-    const useNew = !!(userInfo?.useNewStructure && cid);
-    return useNew
-      ? collection(db, 'companies', cid, 'faultReports')
-      : collection(db, 'faultReports');
-  };
-
-  const getFaultDoc = (id: string) => {
-    const cid = userInfo?.companyId || '';
-    const useNew = !!(userInfo?.useNewStructure && cid);
-    return useNew
-      ? doc(db, 'companies', cid, 'faultReports', id)
-      : doc(db, 'faultReports', id);
+    }
   };
 
   // ── 고장 신고 접수 ──────────────────────────────────────
@@ -237,19 +213,33 @@ getDocs(userQ).then(snap =>
     setIsSubmitting(true);
     try {
       const siteTeam = sites.find(s => s.id === form.siteId)?.team || '';
-      await addDoc(getFaultCol(), {
-        ...form,
-        team: siteTeam,
-        companyId: userInfo?.companyId || '',
-        status: '접수대기',
-        createdAt: serverTimestamp(),
-        receivedAt: null,
-        arrivedAt: null,
-        completedAt: null,
-        faultCause: '',
-        faultAction: '',
-        faultNote: '',
+      const now = new Date().toISOString();
+
+      const { error } = await supabase.from('fault_reports').insert({
+        site_id:        form.siteId,
+        site_name:      form.siteName,
+        hogi_no:        form.hogiNo,
+        content:        form.content,
+        reporter_phone: form.reporterPhone,
+        extra:          form.extra,
+        assigned_to:    form.assignedTo,
+        assigned_name:  form.assignedName,
+        team:           siteTeam,
+        company_id:     userInfo?.company_id || '',
+        status:         '접수대기',
+        created_at:     now,
+        received_at:    null,
+        arrived_at:     null,
+        completed_at:   null,
+        fault_cause:    '',
+        fault_action:   '',
+        fault_note:     '',
       });
+
+      if (error) throw error;
+
+      // 목록 새로고침
+      await loadData(userInfo);
       setReportModal(false);
       resetForm();
       alert('고장신고가 접수되었습니다!');
@@ -262,14 +252,20 @@ getDocs(userQ).then(snap =>
 
   // ── 접수 처리 ──────────────────────────────────────────
   const handleReceive = async (fault: FaultReport) => {
-    if (!confirm(`${fault.siteName} ${fault.hogiNo} 고장을 접수 처리하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
+    if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 접수 처리하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
     try {
-      await updateDoc(getFaultDoc(fault.id), {
-        status: '접수',
-        receivedAt: serverTimestamp(),
-        assignedTo: userInfo?.uid || '',
-        assignedName: userInfo?.name || '',
-      });
+      const { error } = await supabase
+        .from('fault_reports')
+        .update({
+          status:        '접수',
+          received_at:   new Date().toISOString(),
+          assigned_to:   userInfo?.uid || '',
+          assigned_name: userInfo?.name || '',
+        })
+        .eq('id', fault.id);
+
+      if (error) throw error;
+      await loadData(userInfo);
     } catch (e: any) {
       alert('오류: ' + e.message);
     }
@@ -278,8 +274,14 @@ getDocs(userQ).then(snap =>
   // ── 처리중 변경 ─────────────────────────────────────────
   const handleSetInProgress = async (fault: FaultReport) => {
     try {
-      await updateDoc(getFaultDoc(fault.id), { status: '처리중' });
+      const { error } = await supabase
+        .from('fault_reports')
+        .update({ status: '처리중' })
+        .eq('id', fault.id);
+
+      if (error) throw error;
       setSelectedFault(prev => prev ? { ...prev, status: '처리중' } : prev);
+      await loadData(userInfo);
     } catch (e: any) {
       alert('오류: ' + e.message);
     }
@@ -290,18 +292,25 @@ getDocs(userQ).then(snap =>
     if (!selectedFault) return;
     if (!faultAction.trim()) return alert('처리 내용을 입력하세요');
 
-    const arrivedDate = parseDatetimeInput(arrivedAtInput);
-    const completedDate = parseDatetimeInput(completedAtInput);
+    const arrivedDate   = parseDatetimeInput(arrivedAtInput)   ?? new Date().toISOString();
+    const completedDate = parseDatetimeInput(completedAtInput) ?? new Date().toISOString();
 
     try {
-      await updateDoc(getFaultDoc(selectedFault.id), {
-        faultCause,
-        faultAction,
-        faultNote,
-        arrivedAt:   arrivedDate   ?? serverTimestamp(),
-        completedAt: completedDate ?? serverTimestamp(),
-        status: '완료',
-      });
+      const { error } = await supabase
+        .from('fault_reports')
+        .update({
+          fault_cause:  faultCause,
+          fault_action: faultAction,
+          fault_note:   faultNote,
+          arrived_at:   arrivedDate,
+          completed_at: completedDate,
+          status:       '완료',
+        })
+        .eq('id', selectedFault.id);
+
+      if (error) throw error;
+
+      await loadData(userInfo);
       setDetailModal(false);
       resetDetailFields();
       alert('처리 완료가 저장되었습니다!');
@@ -312,10 +321,16 @@ getDocs(userQ).then(snap =>
 
   // ── 삭제 ───────────────────────────────────────────────
   const deleteFault = async (fault: FaultReport, closeModal = false) => {
-    if (!confirm(`정말 삭제하시겠습니까?\n현장: ${fault.siteName}\n호기: ${fault.hogiNo}`)) return;
+    if (!confirm(`정말 삭제하시겠습니까?\n현장: ${fault.site_name}\n호기: ${fault.hogi_no}`)) return;
     try {
-      await deleteDoc(getFaultDoc(fault.id));
+      const { error } = await supabase
+        .from('fault_reports')
+        .delete()
+        .eq('id', fault.id);
+
+      if (error) throw error;
       if (closeModal) setDetailModal(false);
+      await loadData(userInfo);
       alert('삭제되었습니다.');
     } catch (e: any) {
       alert('오류: ' + e.message);
@@ -325,12 +340,11 @@ getDocs(userQ).then(snap =>
   // ── 상세 모달 열기 ──────────────────────────────────────
   const openDetail = (fault: FaultReport) => {
     setSelectedFault(fault);
-    setFaultCause(fault.faultCause || '');
-    setFaultAction(fault.faultAction || '');
-    setFaultNote(fault.faultNote || '');
-    // ✅ 도착/완료시간이 있을 때만 입력값 채우기 (없으면 빈 문자열)
-    setArrivedAtInput(fault.arrivedAt ? toDatetimeLocal(fault.arrivedAt) : '');
-    setCompletedAtInput(fault.completedAt ? toDatetimeLocal(fault.completedAt) : '');
+    setFaultCause(fault.fault_cause || '');
+    setFaultAction(fault.fault_action || '');
+    setFaultNote(fault.fault_note || '');
+    setArrivedAtInput(fault.arrived_at ? toDatetimeLocal(fault.arrived_at) : '');
+    setCompletedAtInput(fault.completed_at ? toDatetimeLocal(fault.completed_at) : '');
     setDetailModal(true);
   };
 
@@ -346,10 +360,10 @@ getDocs(userQ).then(snap =>
 
   // ── 단건 처리내역서 PDF ─────────────────────────────────
   const exportSinglePDF = (fault: FaultReport) => {
-    const reportDate = toDateObj(fault.createdAt);
+    const reportDate = toDateObj(fault.created_at);
     const todayStr = formatKoDate(new Date());
-    const docNo = `LF-${reportDate.getFullYear()}${String(reportDate.getMonth()+1).padStart(2,'0')}${String(reportDate.getDate()).padStart(2,'0')}-${fault.id.slice(-4).toUpperCase()}`;
-    const site = sites.find(s => s.id === fault.siteId);
+    const docNo = `LF-${reportDate.getFullYear()}${String(reportDate.getMonth()+1).padStart(2,'0')}${String(reportDate.getDate()).padStart(2,'0')}-${fault.id.toString().slice(-4).toUpperCase()}`;
+    const site = sites.find(s => s.id === fault.site_id);
 
     printHtml(`<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"/>
@@ -384,29 +398,29 @@ getDocs(userQ).then(snap =>
     <div>출력일자: <strong>${todayStr}</strong></div>
   </div>
   <table class="main">
-    <tr><th>현장명</th><td>${fault.siteName||'-'}</td><th>호기</th><td>${fault.hogiNo||'-'}</td></tr>
+    <tr><th>현장명</th><td>${fault.site_name||'-'}</td><th>호기</th><td>${fault.hogi_no||'-'}</td></tr>
     <tr><th>주소</th><td colspan="3">${site?.address||'-'}</td></tr>
-    <tr><th>담당자</th><td>${fault.assignedName||'-'}</td><th>처리상태</th><td><span class="badge">${fault.status}</span></td></tr>
-    ${fault.reporterPhone?`<tr><th>신고자 연락처</th><td colspan="3">${fault.reporterPhone}</td></tr>`:''}
+    <tr><th>담당자</th><td>${fault.assigned_name||'-'}</td><th>처리상태</th><td><span class="badge">${fault.status}</span></td></tr>
+    ${fault.reporter_phone?`<tr><th>신고자 연락처</th><td colspan="3">${fault.reporter_phone}</td></tr>`:''}
   </table>
   <div class="section-title">📋 시간 내역</div>
   <table class="time-table">
     <thead><tr><th>고장 발생</th><th>접수</th><th>현장 도착</th><th>처리 완료</th></tr></thead>
     <tbody><tr>
-      <td>${toDateStr(fault.createdAt)}</td>
-      <td>${toDateStr(fault.receivedAt)}</td>
-      <td>${toDateStr(fault.arrivedAt)}</td>
-      <td>${toDateStr(fault.completedAt)}</td>
+      <td>${toDateStr(fault.created_at)}</td>
+      <td>${toDateStr(fault.received_at)}</td>
+      <td>${toDateStr(fault.arrived_at)}</td>
+      <td>${toDateStr(fault.completed_at)}</td>
     </tr></tbody>
   </table>
   <div class="section-title">1. 고장 내용</div>
   <div class="content-box">${(fault.content||'내용 없음').replace(/\n/g,'<br/>')}</div>
   <div class="section-title">2. 고장 원인</div>
-  <div class="content-box">${fault.faultCause?fault.faultCause.replace(/\n/g,'<br/>'):'<span style="color:#999">미입력</span>'}</div>
+  <div class="content-box">${fault.fault_cause?fault.fault_cause.replace(/\n/g,'<br/>'):'<span style="color:#999">미입력</span>'}</div>
   <div class="section-title">3. 처리 내용</div>
-  <div class="content-box">${fault.faultAction?fault.faultAction.replace(/\n/g,'<br/>'):'<span style="color:#999">미입력</span>'}</div>
+  <div class="content-box">${fault.fault_action?fault.fault_action.replace(/\n/g,'<br/>'):'<span style="color:#999">미입력</span>'}</div>
   <div class="section-title">4. 비고</div>
-  <div class="content-box">${fault.faultNote?fault.faultNote.replace(/\n/g,'<br/>'):'<span style="color:#999">-</span>'}</div>
+  <div class="content-box">${fault.fault_note?fault.fault_note.replace(/\n/g,'<br/>'):'<span style="color:#999">-</span>'}</div>
   <div class="signature">
     <div style="font-size:10pt;margin-bottom:20px;">${formatKoDate(reportDate)}</div>
     <div style="font-size:14pt;font-weight:bold;letter-spacing:6px;">리 프 트 필 드</div>
@@ -418,23 +432,23 @@ getDocs(userQ).then(snap =>
   // ── 목록 처리내역서 PDF ─────────────────────────────────
   const exportListPDF = (siteId?: string) => {
     let targetFaults = siteId
-      ? faults.filter(f => f.siteId === siteId && f.status === '완료')
+      ? faults.filter(f => f.site_id === siteId && f.status === '완료')
       : faults.filter(f => f.status === '완료');
 
     if (pdfDateFrom) {
       const from = new Date(pdfDateFrom);
       from.setHours(0, 0, 0, 0);
-      targetFaults = targetFaults.filter(f => toDateObj(f.createdAt) >= from);
+      targetFaults = targetFaults.filter(f => toDateObj(f.created_at) >= from);
     }
     if (pdfDateTo) {
       const to = new Date(pdfDateTo);
       to.setHours(23, 59, 59, 999);
-      targetFaults = targetFaults.filter(f => toDateObj(f.createdAt) <= to);
+      targetFaults = targetFaults.filter(f => toDateObj(f.created_at) <= to);
     }
 
     if (targetFaults.length === 0) return alert('해당 기간에 완료된 고장신고가 없습니다');
 
-    const siteName = siteId ? sites.find(s => s.id === siteId)?.siteName || '' : '전체 현장';
+    const siteName = siteId ? sites.find(s => s.id === siteId)?.site_name || '' : '전체 현장';
     const todayStr = formatKoDate(new Date());
     const now = new Date();
     const docNo = `LF-LIST-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
@@ -445,17 +459,17 @@ getDocs(userQ).then(snap =>
     const rows = targetFaults.map((f, idx) => `
       <tr>
         <td class="c">${idx+1}</td>
-        <td class="c nw">${formatShort(f.createdAt)}</td>
-        <td class="c nw">${formatShort(f.receivedAt)}</td>
-        <td class="c nw">${formatShort(f.arrivedAt)}</td>
-        <td class="c nw">${formatShort(f.completedAt)}</td>
-        <td class="l">${f.siteName||'-'}</td>
-        <td class="c">${f.hogiNo||'-'}</td>
+        <td class="c nw">${formatShort(f.created_at)}</td>
+        <td class="c nw">${formatShort(f.received_at)}</td>
+        <td class="c nw">${formatShort(f.arrived_at)}</td>
+        <td class="c nw">${formatShort(f.completed_at)}</td>
+        <td class="l">${f.site_name||'-'}</td>
+        <td class="c">${f.hogi_no||'-'}</td>
         <td class="l">${(f.content||'-').replace(/\n/g,'<br/>')}</td>
-        <td class="l">${(f.faultCause||'-').replace(/\n/g,'<br/>')}</td>
-        <td class="l">${(f.faultAction||'-').replace(/\n/g,'<br/>')}</td>
-        <td class="c">${f.assignedName||'-'}</td>
-        <td class="l">${(f.faultNote||'-').replace(/\n/g,'<br/>')}</td>
+        <td class="l">${(f.fault_cause||'-').replace(/\n/g,'<br/>')}</td>
+        <td class="l">${(f.fault_action||'-').replace(/\n/g,'<br/>')}</td>
+        <td class="c">${f.assigned_name||'-'}</td>
+        <td class="l">${(f.fault_note||'-').replace(/\n/g,'<br/>')}</td>
       </tr>`).join('');
 
     printHtml(`<!DOCTYPE html>
@@ -506,45 +520,48 @@ getDocs(userQ).then(snap =>
 
   // ── 필터 ───────────────────────────────────────────────
   const filteredFaults = faults.filter(f => {
-    const matchTeam = teamFilter === ALL_TEAMS || f.team === teamFilter;
-    const matchStatus = statusFilter === '전체' || f.status === statusFilter;
+    const matchTeam   = teamFilter === ALL_TEAMS || f.team === teamFilter;
+    const matchStatus = statusFilter === '전체'  || f.status === statusFilter;
     const matchSearch =
-      f.siteName?.includes(search) || f.hogiNo?.includes(search) ||
-      f.assignedName?.includes(search) || f.content?.includes(search);
+      f.site_name?.includes(search)     ||
+      f.hogi_no?.includes(search)       ||
+      f.assigned_name?.includes(search) ||
+      f.content?.includes(search);
     return matchTeam && matchStatus && matchSearch;
   });
 
   const filteredSites = siteSearch.trim()
     ? sites.filter(s =>
-        s.siteName?.toLowerCase().includes(siteSearch.toLowerCase()) ||
+        s.site_name?.toLowerCase().includes(siteSearch.toLowerCase()) ||
         s.address?.toLowerCase().includes(siteSearch.toLowerCase()))
     : sites;
 
   const selectedSite = sites.find(s => s.id === form.siteId);
   const teamUsers = selectedSite
-  ? users.filter(u =>
-      u.team === selectedSite.team ||
-      u.teamName === selectedSite.team ||
-      u.team === selectedSite.teamName
-    )
-  : [];
+    ? users.filter(u =>
+        u.team === selectedSite.team ||
+        u.team_name === selectedSite.team ||
+        u.team === selectedSite.team_name
+      )
+    : [];
 
   const getCompletedCount = (siteId: string) =>
-    faults.filter(f => f.siteId === siteId && f.status === '완료').length;
+    faults.filter(f => f.site_id === siteId && f.status === '완료').length;
 
   const sitesForPdf = sites
     .filter(s => getCompletedCount(s.id) > 0)
     .filter(s =>
       !pdfSiteSearch.trim() ||
-      s.siteName?.toLowerCase().includes(pdfSiteSearch.toLowerCase()));
+      s.site_name?.toLowerCase().includes(pdfSiteSearch.toLowerCase()));
+
   const totalCompleted = faults.filter(f => f.status === '완료').length;
 
   const stats = [
-    { label: '전체',    count: faults.length,                                      color: 'bg-gray-100 text-gray-700' },
-    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length, color: 'bg-yellow-100 text-yellow-700' },
-    { label: '접수',    count: faults.filter(f => f.status === '접수').length,      color: 'bg-red-100 text-red-600' },
-    { label: '처리중',  count: faults.filter(f => f.status === '처리중').length,    color: 'bg-orange-100 text-orange-600' },
-    { label: '완료',    count: faults.filter(f => f.status === '완료').length,      color: 'bg-green-100 text-green-700' },
+    { label: '전체',    count: faults.length,                                       color: 'bg-gray-100 text-gray-700' },
+    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length,  color: 'bg-yellow-100 text-yellow-700' },
+    { label: '접수',    count: faults.filter(f => f.status === '접수').length,       color: 'bg-red-100 text-red-600' },
+    { label: '처리중',  count: faults.filter(f => f.status === '처리중').length,     color: 'bg-orange-100 text-orange-600' },
+    { label: '완료',    count: faults.filter(f => f.status === '완료').length,       color: 'bg-green-100 text-green-700' },
   ];
 
   if (loading) return (
@@ -627,8 +644,8 @@ getDocs(userQ).then(snap =>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="font-bold text-gray-900 text-base">{fault.siteName}</span>
-                        <span className="text-gray-500 text-sm">{fault.hogiNo}</span>
+                        <span className="font-bold text-gray-900 text-base">{fault.site_name}</span>
+                        <span className="text-gray-500 text-sm">{fault.hogi_no}</span>
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${sc}`}>{fault.status}</span>
                         {fault.team && (
                           <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{fault.team}</span>
@@ -636,15 +653,15 @@ getDocs(userQ).then(snap =>
                       </div>
                       <p className="text-sm text-gray-600 truncate mb-2">{fault.content}</p>
                       <div className="flex items-center gap-1 text-xs text-gray-400 flex-wrap">
-                        <span>🔴 {formatShort(fault.createdAt)}</span>
+                        <span>🔴 {formatShort(fault.created_at)}</span>
                         <span>→</span>
-                        <span>📋 {formatShort(fault.receivedAt)}</span>
+                        <span>📋 {formatShort(fault.received_at)}</span>
                         <span>→</span>
-                        <span>🚗 {formatShort(fault.arrivedAt)}</span>
+                        <span>🚗 {formatShort(fault.arrived_at)}</span>
                         <span>→</span>
-                        <span>✅ {formatShort(fault.completedAt)}</span>
+                        <span>✅ {formatShort(fault.completed_at)}</span>
                       </div>
-                      <p className="text-xs text-gray-400 mt-1">담당: {fault.assignedName || '미배정'}</p>
+                      <p className="text-xs text-gray-400 mt-1">담당: {fault.assigned_name || '미배정'}</p>
                     </div>
                     <div className="flex flex-col gap-2 shrink-0" onClick={e => e.stopPropagation()}>
                       {fault.status === '접수대기' && (
@@ -701,9 +718,9 @@ getDocs(userQ).then(snap =>
                 <div className="space-y-1 mb-3 max-h-40 overflow-y-auto">
                   {filteredSites.slice(0, 5).map(s => (
                     <button key={s.id}
-                      onClick={() => { setForm(p => ({ ...p, siteId: s.id, siteName: s.siteName })); setSiteSearch(''); }}
+                      onClick={() => { setForm(p => ({ ...p, siteId: s.id, siteName: s.site_name })); setSiteSearch(''); }}
                       className="w-full text-left px-3 py-2.5 bg-gray-50 hover:bg-blue-50 rounded-lg border border-gray-100 transition-colors">
-                      <p className="text-sm font-semibold text-gray-900">{s.siteName}</p>
+                      <p className="text-sm font-semibold text-gray-900">{s.site_name}</p>
                       <p className="text-xs text-gray-400">{s.team || '팀 미지정'} {s.address ? `· ${s.address}` : ''}</p>
                     </button>
                   ))}
@@ -787,10 +804,10 @@ getDocs(userQ).then(snap =>
 
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 mb-4 space-y-2">
               {[
-                { label: '현장',    value: selectedFault.siteName },
-                { label: '호기',    value: selectedFault.hogiNo },
-                { label: '담당자',  value: selectedFault.assignedName || '미배정' },
-                { label: '신고자',  value: selectedFault.reporterPhone || '-' },
+                { label: '현장',    value: selectedFault.site_name },
+                { label: '호기',    value: selectedFault.hogi_no },
+                { label: '담당자',  value: selectedFault.assigned_name || '미배정' },
+                { label: '신고자',  value: selectedFault.reporter_phone || '-' },
                 { label: '고장내용', value: selectedFault.content },
                 ...(selectedFault.extra ? [{ label: '추가사항', value: selectedFault.extra }] : []),
               ].map(row => (
@@ -805,10 +822,10 @@ getDocs(userQ).then(snap =>
             <h3 className="font-bold text-gray-800 mb-2">⏱ 시간 내역</h3>
             <div className="grid grid-cols-2 gap-2 mb-4">
               {[
-                { label: '🔴 고장 발생', value: toDateStr(selectedFault.createdAt) },
-                { label: '📋 접수',      value: toDateStr(selectedFault.receivedAt) },
-                { label: '🚗 현장 도착', value: toDateStr(selectedFault.arrivedAt) },
-                { label: '✅ 처리 완료', value: toDateStr(selectedFault.completedAt) },
+                { label: '🔴 고장 발생', value: toDateStr(selectedFault.created_at) },
+                { label: '📋 접수',      value: toDateStr(selectedFault.received_at) },
+                { label: '🚗 현장 도착', value: toDateStr(selectedFault.arrived_at) },
+                { label: '✅ 처리 완료', value: toDateStr(selectedFault.completed_at) },
               ].map(row => (
                 <div key={row.label} className="bg-gray-50 rounded-xl border border-gray-100 p-3">
                   <p className="text-xs text-gray-500 font-semibold mb-1">{row.label}</p>
@@ -817,11 +834,9 @@ getDocs(userQ).then(snap =>
               ))}
             </div>
 
-            {/* 처리 입력 */}
             {selectedFault.status !== '완료' && (
               <>
                 <h3 className="font-bold text-gray-800 mb-3">📝 처리 내용 입력</h3>
-
                 {selectedFault.status === '접수' && (
                   <button onClick={() => handleSetInProgress(selectedFault)}
                     className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl mb-3 transition-colors">
@@ -865,9 +880,9 @@ getDocs(userQ).then(snap =>
               <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 space-y-2">
                 <h3 className="font-bold text-green-800 mb-2">✅ 처리 완료 내역</h3>
                 {[
-                  { label: '고장 원인', value: selectedFault.faultCause || '-' },
-                  { label: '처리 내용', value: selectedFault.faultAction || '-' },
-                  { label: '비고',      value: selectedFault.faultNote  || '-' },
+                  { label: '고장 원인', value: selectedFault.fault_cause  || '-' },
+                  { label: '처리 내용', value: selectedFault.fault_action || '-' },
+                  { label: '비고',      value: selectedFault.fault_note   || '-' },
                 ].map(row => (
                   <div key={row.label} className="flex gap-3">
                     <span className="text-sm text-gray-500 w-16 shrink-0">{row.label}</span>
@@ -883,7 +898,7 @@ getDocs(userQ).then(snap =>
                 📄 처리내역서 출력 (공문)
               </button>
               {selectedFault.status === '완료' && (
-                <button onClick={() => exportListPDF(selectedFault.siteId)}
+                <button onClick={() => exportListPDF(selectedFault.site_id)}
                   className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-xl transition-colors">
                   📋 이 현장 전체 내역서
                 </button>
@@ -968,7 +983,7 @@ getDocs(userQ).then(snap =>
                     onClick={() => { setPdfModal(false); exportListPDF(s.id); }}
                     className="w-full flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 hover:bg-gray-100 transition-colors">
                     <div className="text-left">
-                      <p className="font-semibold text-gray-900">📍 {s.siteName}</p>
+                      <p className="font-semibold text-gray-900">📍 {s.site_name}</p>
                       {s.address && <p className="text-xs text-gray-500 truncate">{s.address}</p>}
                     </div>
                     <span className="bg-green-100 text-green-700 text-xs font-bold px-2.5 py-1 rounded-full ml-2">

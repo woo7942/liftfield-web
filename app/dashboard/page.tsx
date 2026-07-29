@@ -2,16 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import {
-  doc, getDoc, collection, query, where,
-  getDocs, onSnapshot, orderBy, collectionGroup
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 // ── localStorage TTL 캐시 헬퍼 ──────────────────────
-// 저장: { data, ts } 형태로 저장 시각 포함
-// 읽기: TTL(ms) 이내면 캐시 반환, 초과 또는 없으면 null 반환
 const cache = {
   set(key: string, data: unknown) {
     try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); } catch {}
@@ -28,16 +21,8 @@ const cache = {
   invalidate(key: string) {
     try { localStorage.removeItem(key); } catch {}
   },
-  invalidatePrefix(prefix: string) {
-    try {
-      Object.keys(localStorage)
-        .filter(k => k.startsWith(prefix))
-        .forEach(k => localStorage.removeItem(k));
-    } catch {}
-  },
 };
 
-// 현장 캐시 무효화 헬퍼 — sites/page.tsx 등에서 CUD 후 호출 가능하도록 export
 export function invalidateSitesCache(companyId: string) {
   cache.invalidate(`sites_${companyId}`);
   cache.invalidate(`totalElevs_${companyId}`);
@@ -47,34 +32,48 @@ export function invalidateSitesCache(companyId: string) {
 interface SiteItem {
   id: string;
   name: string;
+  site_name?: string;
   companyName?: string;
+  company_name?: string;
   contractType?: string;
+  contract_type?: string;
   elevatorCount?: number;
+  elevator_count?: number;
   maintenanceFee?: number;
+  maintenance_fee?: number;
   contractStart?: string;
+  contract_start?: string;
   contractEnd?: string;
+  contract_end?: string;
   teamName?: string;
+  team_name?: string;
   region?: string;
   phone?: string;
 }
 
 interface FaultItem {
   id: string;
-  siteName: string;
-  hogiNo: string;
+  siteName?: string;
+  site_name?: string;
+  hogiNo?: string;
+  hogi_no?: string;
   content: string;
-  assignedName: string;
+  assignedName?: string;
+  assigned_name?: string;
   status: string;
-  createdAt: any;
+  created_at: any;
 }
 
 interface MaterialItem {
   id: string;
-  siteName: string;
-  itemName: string;
-  requesterName: string;
+  siteName?: string;
+  site_name?: string;
+  itemName?: string;
+  item_name?: string;
+  requesterName?: string;
+  requester_name?: string;
   status: string;
-  createdAt: any;
+  created_at: any;
 }
 
 // ── 유틸 ──────────────────────────────────────────
@@ -96,7 +95,7 @@ function getDdayInfo(dateStr?: string) {
 
 function timeAgo(v: any): string {
   if (!v) return '-';
-  const d = v?.seconds ? new Date(v.seconds * 1000) : new Date(v);
+  const d = new Date(v);
   const diff = Math.floor((Date.now() - d.getTime()) / 60000);
   if (diff < 1)  return '방금 전';
   if (diff < 60) return `${diff}분 전`;
@@ -104,19 +103,26 @@ function timeAgo(v: any): string {
   return `${Math.floor(diff / 1440)}일 전`;
 }
 
+// snake_case → camelCase 헬퍼
+const getSiteName = (s: SiteItem) => s.site_name || s.name || '';
+const getContractType = (s: SiteItem) => s.contract_type || s.contractType || '';
+const getElevatorCount = (s: SiteItem) => s.elevator_count || s.elevatorCount || 0;
+const getMaintenanceFee = (s: SiteItem) => s.maintenance_fee || s.maintenanceFee || 0;
+const getContractEnd = (s: SiteItem) => s.contract_end || s.contractEnd || '';
+const getTeamName = (s: SiteItem) => s.team_name || s.teamName || '';
+
 // ── 사이드바 메뉴 ──────────────────────────────────
 const MENUS = [
-  { icon: '📋', label: '계약현장',   path: '/sites',       badgeKey: '' },
-  { icon: '🏢', label: '팀별현장',   path: '/team-sites',  badgeKey: '' },
-  { icon: '🔧', label: '고장접수',   path: '/fault',       badgeKey: 'fault' },
-  { icon: '📋', label: '점검관리',   path: '/inspection',  badgeKey: '' },
-  { icon: '🔍', label: '검사지적',   path: '/inspect',     badgeKey: '' },
-  { icon: '📦', label: '자재신청',   path: '/material',    badgeKey: 'material' },
-  { icon: '👥', label: '직원관리',   path: '/members',     badgeKey: 'member' },
-  { icon: '📊', label: '통계',       path: '/stats',       badgeKey: '' },
-  { icon: '🔗', label: '팀 초대',    path: '/team',        badgeKey: '' },
+  { icon: '📋', label: '계약현장',  path: '/sites',      badgeKey: '' },
+  { icon: '🏢', label: '팀별현장',  path: '/team-sites', badgeKey: '' },
+  { icon: '🔧', label: '고장접수',  path: '/fault',      badgeKey: 'fault' },
+  { icon: '📋', label: '점검관리',  path: '/inspection', badgeKey: '' },
+  { icon: '🔍', label: '검사지적',  path: '/inspect',    badgeKey: '' },
+  { icon: '📦', label: '자재신청',  path: '/material',   badgeKey: 'material' },
+  { icon: '👥', label: '직원관리',  path: '/members',    badgeKey: 'member' },
+  { icon: '📊', label: '통계',      path: '/stats',      badgeKey: '' },
+  { icon: '🔗', label: '팀 초대',   path: '/team',       badgeKey: '' },
 ];
-
 
 const BADGE_COLORS: Record<string, string> = {
   fault: '#ef4444', material: '#f59e0b', member: '#8b5cf6',
@@ -138,8 +144,6 @@ const S = {
   }),
 };
 
-// ── 알림 탭 타입 ──────────────────────────────────
-
 export default function DashboardPage() {
   const router = useRouter();
   const [userInfo, setUserInfo]     = useState<any>(null);
@@ -151,8 +155,6 @@ export default function DashboardPage() {
   const [search, setSearch]         = useState('');
   const [activeNav, setActiveNav]   = useState('/dashboard');
   const [today, setToday]           = useState('');
-
-  // 알림 탭
   const [faultList, setFaultList]   = useState<FaultItem[]>([]);
   const [materialList, setMaterialList] = useState<MaterialItem[]>([]);
 
@@ -161,147 +163,156 @@ export default function DashboardPage() {
     setToday(d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' }));
   }, []);
 
-  // 인증
+  // ── 인증 ──────────────────────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
-      const data = snap.data();
-      const isCompany    = data.subscription?.plan === 'company';
-      const isAdmin      = data.role === 'admin';
-      const isSuperAdmin = data.superAdmin === true;
-      if (!isSuperAdmin && !(isCompany && isAdmin)) { router.push('/'); return; }
-      setUserInfo({ uid: user.uid, ...data });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!session?.user) { router.push('/login'); return; }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error || !userData) { router.push('/login'); return; }
+
+      const isSuperAdmin = userData.super_admin === true;
+      const isAdmin = userData.role === 'admin';
+
+      if (!isSuperAdmin && !isAdmin) { router.push('/'); return; }
+
+      setUserInfo({ id: session.user.id, ...userData });
       setLoading(false);
     });
-    return () => unsub();
+    return () => subscription.unsubscribe();
   }, []);
 
-  // 현장 — 계약현장(source==='admin' || !source)만 로드 (TTL 캐시 5분)
-useEffect(() => {
-  if (!userInfo) return;
-  const cid = userInfo.companyId;
-  const cacheKey = `sites_${cid}`;
-  const TTL = 5 * 60 * 1000; // 5분
-
-  const cached = cache.get<SiteItem[]>(cacheKey, TTL);
-  if (cached) {
-    // 캐시에서도 계약현장만 필터링
-    setSites(cached.filter((s: any) => s.source === 'admin' || !s.source));
-  } else {
-    getDocs(query(collection(db, 'companies', cid, 'sites'), orderBy('createdAt', 'desc')))
-      .then(snap => {
-        const allData = snap.docs.map(d => ({ id: d.id, ...d.data() } as SiteItem));
-        cache.set(cacheKey, allData); // 전체 캐시 저장 (무효화 공유 목적)
-        // 대시보드에는 계약현장만 표시
-        setSites(allData.filter((s: any) => s.source === 'admin' || !s.source));
-      }).catch(console.error);
-  }
-}, [userInfo]);
-
-
-  // 승강기 수 (TTL 캐시 10분)
-useEffect(() => {
-  if (!userInfo) return;
-  const cacheKey = `totalElevs_${userInfo.companyId}`;
-  const TTL = 10 * 60 * 1000; // 10분
-
-  const cached = cache.get<number>(cacheKey, TTL);
-  if (cached !== null) {
-    setTotalElevs(cached);
-  } else {
-    getDocs(query(collectionGroup(db, 'elevators'), where('companyId', '==', userInfo.companyId)))
-      .then(snap => {
-        setTotalElevs(snap.size);
-        cache.set(cacheKey, snap.size);
-      }).catch(console.error);
-  }
-}, [userInfo]);
-
-
-  // 카운트 + 알림 목록 구독
+  // ── 현장 로드 ──────────────────────────────────────
   useEffect(() => {
     if (!userInfo) return;
-    const cid    = userInfo.companyId;
-    const useNew = userInfo.useNewStructure;
-    const unsubs: (() => void)[] = [];
+    const cid = userInfo.company_id || userInfo.companyId;
+    const cacheKey = `sites_${cid}`;
+    const TTL = 5 * 60 * 1000;
 
-    // 24시간 이내만 구독
-const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cached = cache.get<SiteItem[]>(cacheKey, TTL);
+    if (cached) { setSites(cached); return; }
 
-// 고장접수
-const faultCol = useNew ? collection(db, 'companies', cid, 'faultReports') : collection(db, 'faultReports');
-const faultQ   = useNew
-  ? query(faultCol, where('status', '==', '접수대기'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'))
-  : query(faultCol, where('companyId', '==', cid), where('status', '==', '접수대기'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'));
-unsubs.push(onSnapshot(faultQ, s => {
-  setCounts(p => ({ ...p, fault: s.size }));
-  setFaultList(s.docs.map(d => ({ id: d.id, ...d.data() } as FaultItem)));
-}));
+    const fetchSites = async () => {
+      let query = supabase.from('sites').select('*').order('created_at', { ascending: false });
+      if (!userInfo.super_admin) query = query.eq('company_id', cid);
 
-// 자재신청
-const matCol = useNew ? collection(db, 'companies', cid, 'materialRequests') : collection(db, 'materialRequests');
-const matQ   = useNew
-  ? query(matCol, where('status', '==', '신청중'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'))
-  : query(matCol, where('companyId', '==', cid), where('status', '==', '신청중'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'));
-unsubs.push(onSnapshot(matQ, s => {
-  setCounts(p => ({ ...p, material: s.size }));
-  setMaterialList(s.docs.map(d => ({ id: d.id, ...d.data() } as MaterialItem)));
-}));
-
-
-    // 직원 수 (TTL 캐시 10분)
-const memberCacheKey = `memberCount_${cid}`;
-const TTL_member = 10 * 60 * 1000;
-const cachedMember = cache.get<number>(memberCacheKey, TTL_member);
-if (cachedMember !== null) {
-  setCounts(p => ({ ...p, member: cachedMember }));
-} else {
-  getDocs(query(collection(db, 'users'), where('companyId', '==', cid)))
-    .then(s => {
-      setCounts(p => ({ ...p, member: s.size }));
-      cache.set(memberCacheKey, s.size);
-    }).catch(console.error);
-}
-
-
-    return () => unsubs.forEach(u => u());
+      const { data, error } = await query;
+      if (error) { console.error(error); return; }
+      const allData = (data || []) as SiteItem[];
+      cache.set(cacheKey, allData);
+      setSites(allData);
+    };
+    fetchSites();
   }, [userInfo]);
 
-  const handleLogout = async () => { await signOut(auth); router.push('/'); };
+  // ── 승강기 수 ──────────────────────────────────────
+  useEffect(() => {
+    if (!userInfo) return;
+    const cid = userInfo.company_id || userInfo.companyId;
+    const cacheKey = `totalElevs_${cid}`;
+    const TTL = 10 * 60 * 1000;
+
+    const cached = cache.get<number>(cacheKey, TTL);
+    if (cached !== null) { setTotalElevs(cached); return; }
+
+    const fetchElevs = async () => {
+      let query = supabase.from('elevators').select('id', { count: 'exact' });
+      if (!userInfo.super_admin) query = query.eq('company_id', cid);
+      const { count } = await query;
+      setTotalElevs(count || 0);
+      cache.set(cacheKey, count || 0);
+    };
+    fetchElevs();
+  }, [userInfo]);
+
+  // ── 알림 (고장/자재/직원) ──────────────────────────
+  useEffect(() => {
+    if (!userInfo) return;
+    const cid = userInfo.company_id || userInfo.companyId;
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const fetchAlerts = async () => {
+      // 고장접수
+      let faultQ = supabase.from('fault_reports')
+        .select('*')
+        .eq('status', '접수대기')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false });
+      if (!userInfo.super_admin) faultQ = faultQ.eq('company_id', cid);
+      const { data: faultData } = await faultQ;
+      setFaultList((faultData || []) as FaultItem[]);
+      setCounts(p => ({ ...p, fault: faultData?.length || 0 }));
+
+      // 자재신청
+      let matQ = supabase.from('material_usages')
+        .select('*')
+        .eq('status', '신청중')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false });
+      if (!userInfo.super_admin) matQ = matQ.eq('company_id', cid);
+      const { data: matData } = await matQ;
+      setMaterialList((matData || []) as MaterialItem[]);
+      setCounts(p => ({ ...p, material: matData?.length || 0 }));
+
+      // 직원 수
+      const memberCacheKey = `memberCount_${cid}`;
+      const cachedMember = cache.get<number>(memberCacheKey, 10 * 60 * 1000);
+      if (cachedMember !== null) {
+        setCounts(p => ({ ...p, member: cachedMember }));
+      } else {
+        let memberQ = supabase.from('users').select('id', { count: 'exact' });
+        if (!userInfo.super_admin) memberQ = memberQ.eq('company_id', cid);
+        const { count } = await memberQ;
+        setCounts(p => ({ ...p, member: count || 0 }));
+        cache.set(memberCacheKey, count || 0);
+      }
+    };
+
+    fetchAlerts();
+    // 30초마다 알림 갱신
+    const interval = setInterval(fetchAlerts, 30000);
+    return () => clearInterval(interval);
+  }, [userInfo]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/');
+  };
 
   // ── 파생 데이터 ──────────────────────────────────
-  const expiredSites = sites.filter(s => (getDday(s.contractEnd) ?? 1) <= 0);
-  const urgentSites  = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; });
-  const warningSites = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; });
-  const safeSites    = sites.filter(s => { const d = getDday(s.contractEnd); return d !== null && d > 60; });
+  const expiredSites = sites.filter(s => (getDday(getContractEnd(s)) ?? 1) <= 0);
+  const urgentSites  = sites.filter(s => { const d = getDday(getContractEnd(s)); return d !== null && d > 0 && d <= 30; });
+  const warningSites = sites.filter(s => { const d = getDday(getContractEnd(s)); return d !== null && d > 30 && d <= 60; });
+  const safeSites    = sites.filter(s => { const d = getDday(getContractEnd(s)); return d !== null && d > 60; });
   const alertCount   = expiredSites.length + urgentSites.length + counts.fault + counts.material;
 
   const expiryTop = [...sites]
-    .filter(s => s.contractEnd)
-    .sort((a, b) => (getDday(a.contractEnd) ?? 9999) - (getDday(b.contractEnd) ?? 9999))
+    .filter(s => getContractEnd(s))
+    .sort((a, b) => (getDday(getContractEnd(a)) ?? 9999) - (getDday(getContractEnd(b)) ?? 9999))
     .slice(0, 5);
 
   const filtered = sites
     .filter(s => {
-      if (activeFilter === 'expired') return (getDday(s.contractEnd) ?? 1) <= 0;
-      if (activeFilter === 'urgent')  { const d = getDday(s.contractEnd); return d !== null && d > 0 && d <= 30; }
-      if (activeFilter === 'warning') { const d = getDday(s.contractEnd); return d !== null && d > 30 && d <= 60; }
+      if (activeFilter === 'expired') return (getDday(getContractEnd(s)) ?? 1) <= 0;
+      if (activeFilter === 'urgent')  { const d = getDday(getContractEnd(s)); return d !== null && d > 0 && d <= 30; }
+      if (activeFilter === 'warning') { const d = getDday(getContractEnd(s)); return d !== null && d > 30 && d <= 60; }
       return true;
     })
     .filter(s => {
       if (!search) return true;
       const q = search.toLowerCase();
-      return s.name?.toLowerCase().includes(q) ||
-             s.companyName?.toLowerCase().includes(q) ||
+      return getSiteName(s)?.toLowerCase().includes(q) ||
+             (s.company_name || s.companyName || '')?.toLowerCase().includes(q) ||
              s.region?.toLowerCase().includes(q);
     })
-    .sort((a, b) => (getDday(a.contractEnd) ?? 9999) - (getDday(b.contractEnd) ?? 9999));
+    .sort((a, b) => (getDday(getContractEnd(a)) ?? 9999) - (getDday(getContractEnd(b)) ?? 9999));
 
-  const totalFee = filtered.reduce((s, i) => s + (i.maintenanceFee || 0), 0);
-
-  // 알림 탭 카운트
+  const totalFee = filtered.reduce((s, i) => s + getMaintenanceFee(i), 0);
   const contractAlertCount = expiredSites.length + urgentSites.length;
 
   if (loading) return (
@@ -313,16 +324,15 @@ if (cachedMember !== null) {
     </div>
   );
 
-  const isSuperAdmin = userInfo?.superAdmin;
+  const isSuperAdmin = userInfo?.super_admin;
   const nameChar = (userInfo?.name || 'A').charAt(0);
 
   return (
     <div style={{
-  height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
-  background: '#0f172a', fontSize: 'clamp(12px, 1vw, 15px)',
-}}>
-
+      height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif',
+      background: '#0f172a', fontSize: 'clamp(12px, 1vw, 15px)',
+    }}>
 
       {/* ═══ 헤더 ═══════════════════════════════════ */}
       <header style={{
@@ -350,7 +360,7 @@ if (cachedMember !== null) {
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#1e293b', borderRadius: 20, padding: '3px 10px 3px 3px' }}>
             <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'linear-gradient(135deg,#3b82f6,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: '#fff' }}>{nameChar}</div>
-            <span style={{ fontSize: 13, color: '#cbd5e1', fontWeight: 600 }}>{userInfo?.name} · {userInfo?.companyDisplayName || '관리자'}</span>
+            <span style={{ fontSize: 13, color: '#cbd5e1', fontWeight: 600 }}>{userInfo?.name} · {userInfo?.company_display_name || userInfo?.companyDisplayName || '관리자'}</span>
           </div>
           <button onClick={handleLogout} style={{ background: 'none', border: '1px solid #334155', borderRadius: 6, color: '#64748b', fontSize: 12, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>
             로그아웃
@@ -413,7 +423,7 @@ if (cachedMember !== null) {
                 안녕하세요, {userInfo?.name}님 👋
               </h1>
               <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
-                {userInfo?.companyDisplayName || ''} · 계약현장 {sites.length}개 관리 중
+                {userInfo?.company_display_name || userInfo?.companyDisplayName || ''} · 계약현장 {sites.length}개 관리 중
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -457,11 +467,10 @@ if (cachedMember !== null) {
             ))}
           </div>
 
-          {/* ── 하단 3열: 왼쪽(만료현황) | 가운데(현장목록) | 오른쪽(알림) ── */}
-          {/* gridTemplateColumns 비율 조정: 현장목록 줄이고 알림 크게 */}
+          {/* ── 하단 3열 ── */}
           <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 520px', gap: 12, flex: 1, minHeight: 0 }}>
 
-            {/* ── 왼쪽: 계약 만료 현황 ── */}
+            {/* 왼쪽: 계약 만료 현황 */}
             <div style={S.panel()}>
               <div style={S.panelHead()}>
                 <div style={{ width: 3, height: 14, borderRadius: 2, background: 'linear-gradient(to bottom,#ef4444,#f97316)', flexShrink: 0 }} />
@@ -495,7 +504,7 @@ if (cachedMember !== null) {
                   {expiryTop.length === 0 ? (
                     <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '10px 0' }}>현장 데이터가 없어요</p>
                   ) : expiryTop.map(s => {
-                    const info = getDdayInfo(s.contractEnd);
+                    const info = getDdayInfo(getContractEnd(s));
                     if (!info) return null;
                     return (
                       <div key={s.id} onClick={() => router.push('/sites')} style={{
@@ -507,7 +516,7 @@ if (cachedMember !== null) {
                       onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = '#f8fafc'}
                       >
                         <span style={{ fontSize: 11, fontWeight: 800, padding: '1px 6px', borderRadius: 7, flexShrink: 0, background: info.ddayBg, color: info.ddayColor }}>{info.label}</span>
-                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
+                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSiteName(s)}</span>
                       </div>
                     );
                   })}
@@ -515,15 +524,13 @@ if (cachedMember !== null) {
               </div>
             </div>
 
-            {/* ── 가운데: 현장 테이블 ── */}
+            {/* 가운데: 현장 테이블 */}
             <div style={S.panel()}>
               <div style={S.panelHead()}>
                 <div style={{ width: 3, height: 14, borderRadius: 2, background: 'linear-gradient(to bottom,#3b82f6,#6366f1)', flexShrink: 0 }} />
                 <span style={{ fontSize: 13, fontWeight: 700, color: '#334155', flex: 1 }}>현장 목록</span>
                 <span style={{ fontSize: 11, color: '#94a3b8' }}>계약현장 {sites.length}개</span>
               </div>
-
-              {/* 검색 + 필터 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 10px 0', flexShrink: 0 }}>
                 <input
                   value={search} onChange={e => setSearch(e.target.value)}
@@ -544,8 +551,6 @@ if (cachedMember !== null) {
                   }}>{f.label}</button>
                 ))}
               </div>
-
-              {/* 테이블 */}
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
@@ -559,47 +564,42 @@ if (cachedMember !== null) {
                     {filtered.length === 0 ? (
                       <tr>
                         <td colSpan={8} style={{ textAlign: 'center', padding: '28px 0', color: '#94a3b8', fontSize: 12 }}>
-                          <div style={{ fontSize: 24, marginBottom: 6 }}>🏢</div>
-                          현장이 없어요
+                          <div style={{ fontSize: 24, marginBottom: 6 }}>🏢</div>현장이 없어요
                         </td>
                       </tr>
                     ) : filtered.map(s => {
-                      const info = getDdayInfo(s.contractEnd);
+                      const info = getDdayInfo(getContractEnd(s));
                       const rowBg =
                         info?.rowCls === 'expired' ? '#fef2f2' :
                         info?.rowCls === 'urgent'  ? '#fff7ed' :
                         info?.rowCls === 'warning' ? '#fefce8' : 'transparent';
-                      const typeColor = s.contractType?.includes('종합')
+                      const ct = getContractType(s);
+                      const typeColor = ct?.includes('종합')
                         ? { bg: '#eff6ff', color: '#3b82f6' }
-                        : s.contractType ? { bg: '#f5f3ff', color: '#7c3aed' } : null;
+                        : ct ? { bg: '#f5f3ff', color: '#7c3aed' } : null;
                       return (
-                        <tr key={s.id}
-                          onClick={() => router.push('/sites')}
+                        <tr key={s.id} onClick={() => router.push('/sites')}
                           style={{ background: rowBg, cursor: 'pointer', borderBottom: '1px solid #f8fafc', transition: 'filter .1s' }}
                           onMouseEnter={e => (e.currentTarget as HTMLTableRowElement).style.filter = 'brightness(.97)'}
                           onMouseLeave={e => (e.currentTarget as HTMLTableRowElement).style.filter = 'none'}
                         >
-                          <td style={{ padding: '6px 8px', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap', fontSize: 12 }}>{s.name}</td>
-                          <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 11 }}>{s.companyName || '-'}</td>
+                          <td style={{ padding: '6px 8px', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap', fontSize: 12 }}>{getSiteName(s)}</td>
+                          <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 11 }}>{s.company_name || s.companyName || '-'}</td>
                           <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
                             {typeColor ? (
                               <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 5, background: typeColor.bg, color: typeColor.color }}>
-                                {s.contractType?.includes('종합') ? '종합' : '일반'}
+                                {ct?.includes('종합') ? '종합' : '일반'}
                               </span>
                             ) : '-'}
                           </td>
-                          <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 11 }}>{s.elevatorCount ? `${s.elevatorCount}대` : '-'}</td>
-                          <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 11 }}>{s.maintenanceFee ? s.maintenanceFee.toLocaleString() : '-'}</td>
-                          <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', fontWeight: 700, color: info?.ddayColor || '#475569', fontSize: 11 }}>{s.contractEnd || '-'}</td>
+                          <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 11 }}>{getElevatorCount(s) ? `${getElevatorCount(s)}대` : '-'}</td>
+                          <td style={{ padding: '6px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 11 }}>{getMaintenanceFee(s) ? getMaintenanceFee(s).toLocaleString() : '-'}</td>
+                          <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', fontWeight: 700, color: info?.ddayColor || '#475569', fontSize: 11 }}>{getContractEnd(s) || '-'}</td>
                           <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                            {info ? (
-                              <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 6px', borderRadius: 7, background: info.ddayBg, color: info.ddayColor }}>{info.label}</span>
-                            ) : '-'}
+                            {info ? <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 6px', borderRadius: 7, background: info.ddayBg, color: info.ddayColor }}>{info.label}</span> : '-'}
                           </td>
                           <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                            {s.teamName ? (
-                              <span style={{ fontSize: 10, background: '#f1f5f9', padding: '1px 5px', borderRadius: 5, color: '#64748b' }}>{s.teamName}</span>
-                            ) : '-'}
+                            {getTeamName(s) ? <span style={{ fontSize: 10, background: '#f1f5f9', padding: '1px 5px', borderRadius: 5, color: '#64748b' }}>{getTeamName(s)}</span> : '-'}
                           </td>
                         </tr>
                       );
@@ -607,8 +607,6 @@ if (cachedMember !== null) {
                   </tbody>
                 </table>
               </div>
-
-              {/* 합계 */}
               <div style={{ padding: '6px 10px', background: '#f8fafc', borderTop: '1px solid #f1f5f9', display: 'flex', gap: 14, fontSize: 11, color: '#64748b', flexShrink: 0 }}>
                 <span>총 <strong style={{ color: '#334155' }}>{filtered.length}</strong>개</span>
                 <span>승강기 <strong style={{ color: '#334155' }}>{totalElevs}</strong>대</span>
@@ -616,170 +614,130 @@ if (cachedMember !== null) {
               </div>
             </div>
 
-            {/* ── 오른쪽: 알림 (하나의 패널, 내부 가로 3분할) ── */}
-<div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-
-  {/* 단일 패널 */}
-  <div style={{ ...S.panel(), flex: 1, minHeight: 0 }}>
-    {/* 패널 헤더 */}
-    <div style={S.panelHead()}>
-      <div style={{ width: 3, height: 14, borderRadius: 2, background: 'linear-gradient(to bottom,#ef4444,#f97316)', flexShrink: 0 }} />
-      <span style={{ fontSize: 13, fontWeight: 700, color: '#334155', flex: 1 }}>최근 알림</span>
-      {alertCount > 0 && <span style={S.badge('#ef4444')}>{alertCount}</span>}
-    </div>
-
-    {/* 가로 3분할 내용 */}
-    <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr 1fr', gridTemplateColumns: '1fr', gap: 8, flex: 1, overflow: 'hidden', padding: '8px 10px' }}>
-
-
-
-      {/* 📅 예약건 */}
-      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
-
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#ef4444' }}>📅 예약건</span>
-          {contractAlertCount > 0 && <span style={S.badge('#ef4444')}>{contractAlertCount}</span>}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {expiredSites.length === 0 && urgentSites.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
-              만료 예정 없음
-            </div>
-          ) : (
-            <>
-              {expiredSites.map(s => (
-                <div key={`exp-${s.id}`} onClick={() => router.push('/sites')} style={{
-                  padding: '9px 10px', borderRadius: 9, background: '#fef2f2',
-                  borderLeft: '3px solid #ef4444', cursor: 'pointer', transition: 'opacity .15s',
-                }}
-                onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
-                onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626' }}>🔴 계약 만료</span>
-                    <span style={{ fontSize: 9, background: '#fee2e2', color: '#ef4444', padding: '1px 5px', borderRadius: 6, fontWeight: 700 }}>만료</span>
-                  </div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{s.name}</div>
-                  <div style={{ fontSize: 10, color: '#94a3b8' }}>{s.contractType || '계약'} · {s.contractEnd || '-'}</div>
+            {/* 오른쪽: 알림 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+              <div style={{ ...S.panel(), flex: 1, minHeight: 0 }}>
+                <div style={S.panelHead()}>
+                  <div style={{ width: 3, height: 14, borderRadius: 2, background: 'linear-gradient(to bottom,#ef4444,#f97316)', flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#334155', flex: 1 }}>최근 알림</span>
+                  {alertCount > 0 && <span style={S.badge('#ef4444')}>{alertCount}</span>}
                 </div>
-              ))}
-              {urgentSites.map(s => {
-                const info = getDdayInfo(s.contractEnd);
-                return (
-                  <div key={`urg-${s.id}`} onClick={() => router.push('/sites')} style={{
-                    padding: '9px 10px', borderRadius: 9, background: '#fff7ed',
-                    borderLeft: '3px solid #f97316', cursor: 'pointer', transition: 'opacity .15s',
-                  }}
-                  onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
-                  onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#ea580c' }}>⏰ 만료 임박</span>
-                      <span style={{ fontSize: 9, background: '#ffedd5', color: '#f97316', padding: '1px 5px', borderRadius: 6, fontWeight: 700 }}>{info?.label}</span>
+                <div style={{ display: 'grid', gridTemplateRows: '1fr 1fr 1fr', gap: 8, flex: 1, overflow: 'hidden', padding: '8px 10px' }}>
+
+                  {/* 📅 예약건 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#ef4444' }}>📅 예약건</span>
+                      {contractAlertCount > 0 && <span style={S.badge('#ef4444')}>{contractAlertCount}</span>}
                     </div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{s.name}</div>
-                    <div style={{ fontSize: 10, color: '#94a3b8' }}>{s.contractType || '계약'} · {s.contractEnd || '-'}</div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {expiredSites.length === 0 && urgentSites.length === 0 ? (
+                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
+                          <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>만료 예정 없음
+                        </div>
+                      ) : (
+                        <>
+                          {expiredSites.map(s => (
+                            <div key={`exp-${s.id}`} onClick={() => router.push('/sites')} style={{ padding: '9px 10px', borderRadius: 9, background: '#fef2f2', borderLeft: '3px solid #ef4444', cursor: 'pointer' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626' }}>🔴 계약 만료</span>
+                                <span style={{ fontSize: 9, background: '#fee2e2', color: '#ef4444', padding: '1px 5px', borderRadius: 6, fontWeight: 700 }}>만료</span>
+                              </div>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{getSiteName(s)}</div>
+                              <div style={{ fontSize: 10, color: '#94a3b8' }}>{getContractType(s) || '계약'} · {getContractEnd(s) || '-'}</div>
+                            </div>
+                          ))}
+                          {urgentSites.map(s => {
+                            const info = getDdayInfo(getContractEnd(s));
+                            return (
+                              <div key={`urg-${s.id}`} onClick={() => router.push('/sites')} style={{ padding: '9px 10px', borderRadius: 9, background: '#fff7ed', borderLeft: '3px solid #f97316', cursor: 'pointer' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: '#ea580c' }}>⏰ 만료 임박</span>
+                                  <span style={{ fontSize: 9, background: '#ffedd5', color: '#f97316', padding: '1px 5px', borderRadius: 6, fontWeight: 700 }}>{info?.label}</span>
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{getSiteName(s)}</div>
+                                <div style={{ fontSize: 10, color: '#94a3b8' }}>{getContractType(s) || '계약'} · {getContractEnd(s) || '-'}</div>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
                   </div>
-                );
-              })}
-            </>
-          )}
-        </div>
-      </div>
 
-      {/* 🔧 고장접수 */}
-      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                  {/* 🔧 고장접수 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#d97706' }}>🔧 고장접수</span>
+                      {counts.fault > 0 && <span style={S.badge('#f59e0b')}>{counts.fault}</span>}
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {faultList.length === 0 ? (
+                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
+                          <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>대기 중인 고장 없음
+                        </div>
+                      ) : faultList.map(f => (
+                        <div key={f.id} onClick={() => router.push('/fault')} style={{ padding: '9px 10px', borderRadius: 9, background: '#fffbeb', borderLeft: '3px solid #f59e0b', cursor: 'pointer' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706' }}>접수대기</span>
+                            <span style={{ fontSize: 9, color: '#94a3b8' }}>{timeAgo(f.created_at)}</span>
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{f.site_name || f.siteName} · {f.hogi_no || f.hogiNo}</div>
+                          <div style={{ fontSize: 10, color: '#78716c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.content}</div>
+                          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>담당: {f.assigned_name || f.assignedName || '미배정'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#d97706' }}>🔧 고장접수</span>
-          {counts.fault > 0 && <span style={S.badge('#f59e0b')}>{counts.fault}</span>}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {faultList.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
-              대기 중인 고장 없음
-            </div>
-          ) : faultList.map(f => (
-            <div key={f.id} onClick={() => router.push('/fault')} style={{
-              padding: '9px 10px', borderRadius: 9, background: '#fffbeb',
-              borderLeft: '3px solid #f59e0b', cursor: 'pointer', transition: 'opacity .15s',
-            }}
-            onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
-            onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706' }}>접수대기</span>
-                <span style={{ fontSize: 9, color: '#94a3b8' }}>{timeAgo(f.createdAt)}</span>
+                  {/* 📦 자재신청 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>📦 자재신청</span>
+                      {counts.material > 0 && <span style={S.badge('#8b5cf6')}>{counts.material}</span>}
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {materialList.length === 0 ? (
+                        <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
+                          <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>대기 중인 신청 없음
+                        </div>
+                      ) : materialList.map(m => (
+                        <div key={m.id} onClick={() => router.push('/material')} style={{ padding: '9px 10px', borderRadius: 9, background: '#faf5ff', borderLeft: '3px solid #8b5cf6', cursor: 'pointer' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed' }}>신청중</span>
+                            <span style={{ fontSize: 9, color: '#94a3b8' }}>{timeAgo(m.created_at)}</span>
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{m.site_name || m.siteName}</div>
+                          <div style={{ fontSize: 11, color: '#6d28d9', marginBottom: 2 }}>{m.item_name || m.itemName}</div>
+                          <div style={{ fontSize: 10, color: '#94a3b8' }}>신청자: {m.requester_name || m.requesterName || '-'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{f.siteName} · {f.hogiNo}</div>
-              <div style={{ fontSize: 10, color: '#78716c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.content}</div>
-              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>담당: {f.assignedName || '미배정'}</div>
-            </div>
-          ))}
-        </div>
-      </div>
 
-      {/* 📦 자재신청 */}
-      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 8, border: '1px solid #f1f5f9' }}>
-
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>📦 자재신청</span>
-          {counts.material > 0 && <span style={S.badge('#8b5cf6')}>{counts.material}</span>}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {materialList.length === 0 ? (
-            <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11, padding: '20px 0' }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
-              대기 중인 신청 없음
-            </div>
-          ) : materialList.map(m => (
-            <div key={m.id} onClick={() => router.push('/material')} style={{
-              padding: '9px 10px', borderRadius: 9, background: '#faf5ff',
-              borderLeft: '3px solid #8b5cf6', cursor: 'pointer', transition: 'opacity .15s',
-            }}
-            onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.opacity = '.8'}
-            onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.opacity = '1'}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed' }}>신청중</span>
-                <span style={{ fontSize: 9, color: '#94a3b8' }}>{timeAgo(m.createdAt)}</span>
+              {/* 처리 현황 바 */}
+              <div style={{ background: '#0f172a', borderRadius: 12, padding: 14, flexShrink: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 10 }}>이번달 처리 현황</div>
+                {[
+                  { name: '🔴 계약 갱신율', pct: sites.length > 0 ? Math.round((safeSites.length / sites.length) * 100) : 0, grad: 'linear-gradient(90deg,#ef4444,#f97316)' },
+                  { name: '🔧 고장 처리율', pct: 87, grad: 'linear-gradient(90deg,#f59e0b,#fbbf24)' },
+                  { name: '📋 점검 완료율', pct: 74, grad: 'linear-gradient(90deg,#3b82f6,#6366f1)' },
+                ].map(p => (
+                  <div key={p.name} style={{ marginBottom: 9 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>{p.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: '#f1f5f9' }}>{p.pct}%</span>
+                    </div>
+                    <div style={{ height: 5, background: '#1e293b', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', borderRadius: 3, width: `${p.pct}%`, background: p.grad }} />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{m.siteName}</div>
-              <div style={{ fontSize: 11, color: '#6d28d9', marginBottom: 2 }}>{m.itemName}</div>
-              <div style={{ fontSize: 10, color: '#94a3b8' }}>신청자: {m.requesterName || '-'}</div>
             </div>
-          ))}
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  {/* 처리 현황 바 */}
-  <div style={{ background: '#0f172a', borderRadius: 12, padding: 14, flexShrink: 0 }}>
-    <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 10 }}>이번달 처리 현황</div>
-    {[
-      { name: '🔴 계약 갱신율', pct: sites.length > 0 ? Math.round((safeSites.length / sites.length) * 100) : 0, grad: 'linear-gradient(90deg,#ef4444,#f97316)' },
-      { name: '🔧 고장 처리율', pct: 87, grad: 'linear-gradient(90deg,#f59e0b,#fbbf24)' },
-      { name: '📋 점검 완료율', pct: 74, grad: 'linear-gradient(90deg,#3b82f6,#6366f1)' },
-    ].map(p => (
-      <div key={p.name} style={{ marginBottom: 9 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>{p.name}</span>
-          <span style={{ fontSize: 12, fontWeight: 800, color: '#f1f5f9' }}>{p.pct}%</span>
-        </div>
-        <div style={{ height: 5, background: '#1e293b', borderRadius: 3, overflow: 'hidden' }}>
-          <div style={{ height: '100%', borderRadius: 3, width: `${p.pct}%`, background: p.grad }} />
-        </div>
-      </div>
-    ))}
-  </div>
-
-</div>
-
-
           </div>
         </main>
       </div>

@@ -1,13 +1,7 @@
-// app/(pages)/material/page.tsx
 'use client';
 
-import {
-  collection, doc, getDocs, onSnapshot, orderBy, query,
-  serverTimestamp, Timestamp, updateDoc, deleteDoc, where,
-} from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
 import { useEffect, useMemo, useState } from 'react';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 type MaterialStatus = '신청중' | '접수' | '자재분출' | '자재교체';
 
@@ -34,12 +28,12 @@ type MaterialRequest = {
   replacerId?: string;
   replacerName?: string;
   status: MaterialStatus;
-  requestedAt?: any;
-  receivedAt?: any;
-  dispatchedAt?: any;
-  replacedAt?: any;
+  requestedAt?: string;
+  receivedAt?: string;
+  dispatchedAt?: string;
+  replacedAt?: string;
   note?: string;
-  createdAt?: any;
+  createdAt?: string;
 };
 
 type Site = {
@@ -56,7 +50,6 @@ type UserInfo = {
   role: string;
   companyId?: string;
   team?: string;
-  useNewStructure?: boolean;
   superAdmin?: boolean;
 };
 
@@ -67,18 +60,20 @@ const STATUS_STYLE: Record<MaterialStatus, { bg: string; text: string; border: s
   자재교체: { bg: '#D1FAE5', text: '#065F46', border: '#10B981', label: '교체완료' },
 };
 
-const formatTs = (ts: any): string => {
+// ── 날짜 포맷 유틸 ──────────────────────────────
+const formatTs = (ts: string | null | undefined): string => {
   if (!ts) return '-';
   try {
-    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    const d = new Date(ts);
     if (isNaN(d.getTime())) return '-';
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   } catch { return '-'; }
 };
-const formatTsTwo = (ts: any): { date: string; time: string } => {
+
+const formatTsTwo = (ts: string | null | undefined): { date: string; time: string } => {
   if (!ts) return { date: '-', time: '' };
   try {
-    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    const d = new Date(ts);
     if (isNaN(d.getTime())) return { date: '-', time: '' };
     return {
       date: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
@@ -87,10 +82,10 @@ const formatTsTwo = (ts: any): { date: string; time: string } => {
   } catch { return { date: '-', time: '' }; }
 };
 
-const tsToDateStr = (ts: any): string => {
+const tsToDateStr = (ts: string | null | undefined): string => {
   if (!ts) return '';
   try {
-    const d = ts instanceof Timestamp ? ts.toDate() : ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+    const d = new Date(ts);
     if (isNaN(d.getTime())) return '';
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   } catch { return ''; }
@@ -105,162 +100,291 @@ const printHtml = (html: string) => {
   setTimeout(() => w.print(), 500);
 };
 
+// ── 메인 컴포넌트 ────────────────────────────────
 export default function MaterialPage() {
-  const [userInfo, setUserInfo]   = useState<UserInfo | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [requests, setRequests]   = useState<MaterialRequest[]>([]);
-  const [sites, setSites]         = useState<Site[]>([]);
-  const [search, setSearch]       = useState('');
-  const [statusFilter, setStatusFilter] = useState<MaterialStatus | '전체'>('전체');
-  const [teamFilter, setTeamFilter]     = useState('전체');
-  const [detailModal, setDetailModal]   = useState(false);
-  const [selected, setSelected]         = useState<MaterialRequest | null>(null);
-  const [pdfModal, setPdfModal]         = useState(false);
-  const [pdfSiteId, setPdfSiteId]       = useState('');
-  const [pdfSiteName, setPdfSiteName]   = useState('');
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [requests, setRequests] = useState<MaterialRequest[]>([]);
+  const [sites, setSites]       = useState<Site[]>([]);
+
+  // 필터
+  const [search, setSearch]               = useState('');
+  const [statusFilter, setStatusFilter]   = useState<MaterialStatus | '전체'>('전체');
+  const [teamFilter, setTeamFilter]       = useState('전체');
+
+  // 모달
+  const [detailModal, setDetailModal] = useState(false);
+  const [selected, setSelected]       = useState<MaterialRequest | null>(null);
+  const [pdfModal, setPdfModal]       = useState(false);
+
+  // PDF 옵션
+  const [pdfSiteId, setPdfSiteId]         = useState('');
+  const [pdfSiteName, setPdfSiteName]     = useState('');
   const [pdfSiteSearch, setPdfSiteSearch] = useState('');
-  const [pdfDateFrom, setPdfDateFrom]   = useState('');
-  const [pdfDateTo, setPdfDateTo]       = useState('');
+  const [pdfDateFrom, setPdfDateFrom]     = useState('');
+  const [pdfDateTo, setPdfDateTo]         = useState('');
   const [pdfStatusFilter, setPdfStatusFilter] = useState<MaterialStatus | '전체'>('전체');
 
+  // ── 인증 ──────────────────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { window.location.href = '/login'; return; }
-      try {
-        const { doc: fd, getDoc } = await import('firebase/firestore');
-        const snap = await getDoc(fd(db, 'users', user.uid));
-        if (!snap.exists()) { window.location.href = '/login'; return; }
-        const data = snap.data() as UserInfo;
-        if (!['admin', 'superadmin'].includes(data.role) && data.superAdmin !== true) {
-          alert('관리자만 접근 가능합니다.');
-          window.location.href = '/';
-          return;
-        }
-        setUserInfo({ ...data, uid: user.uid });
-      } catch { window.location.href = '/login'; }
-    });
-    return () => unsub();
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { window.location.href = '/login'; return; }
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('name, role, company_id, team, super_admin')
+        .eq('id', session.user.id)
+        .single();
+
+      if (userError || !userData) { window.location.href = '/login'; return; }
+
+      const isSuperAdmin = userData.super_admin === true;
+      const isAdmin      = ['admin', 'superadmin'].includes(userData.role);
+      if (!isSuperAdmin && !isAdmin) {
+        alert('관리자만 접근 가능합니다.');
+        window.location.href = '/';
+        return;
+      }
+
+      setUserInfo({
+        uid:        session.user.id,
+        name:       userData.name       || '',
+        role:       userData.role       || 'member',
+        companyId:  userData.company_id || '',
+        team:       userData.team       || '',
+        superAdmin: isSuperAdmin,
+      });
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => { if (!session) window.location.href = '/login'; }
+    );
+    return () => subscription.unsubscribe();
   }, []);
 
+  // ── 데이터 로드 ───────────────────────────────
   useEffect(() => {
     if (!userInfo) return;
-    const isSA  = userInfo.superAdmin === true || userInfo.role === 'superadmin';
-    const useNew = userInfo.useNewStructure && !!userInfo.companyId;
-    const cid   = userInfo.companyId || '';
-    const unsubs: (() => void)[] = [];
 
-    const matCol = useNew ? collection(db, 'companies', cid, 'materialRequests') : collection(db, 'materialRequests');
-    const matQ   = isSA || useNew
-      ? query(matCol, orderBy('createdAt', 'desc'))
-      : query(matCol, where('companyId', '==', cid), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(matQ, (snap) => {
-      setRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as MaterialRequest)));
+    const loadData = async () => {
+      setLoading(true);
+      const cid = userInfo.companyId || '';
+      console.log('🔍 cid 값:', cid);       // ← 이 줄 추가
+      console.log('🔍 userInfo:', userInfo); // ← 이 줄 추가
+
+      // 자재신청 목록
+      const { data: matData, error: matError } = await supabase
+        .from('material_requests')
+        .select('*')
+        .eq('company_id', cid)
+        .order('created_at', { ascending: false });
+
+      if (matError) { console.error(matError); }
+      else {
+        setRequests(
+          (matData || []).map((r: any) => ({
+            id:              r.id,
+            companyId:       r.company_id,
+            team:            r.team,
+            siteId:          r.site_id,
+            siteName:        r.site_name,
+            hogiNo:          r.hogi_no,
+            materialName:    r.material_name,
+            partNumber:      r.part_number,
+            spec:            r.spec,
+            quantity:        r.quantity,
+            unit:            r.unit,
+            reason:          r.reason,
+            contractType:    r.contract_type,
+            requesterId:     r.requester_id,
+            requesterName:   r.requester_name,
+            receiverId:      r.receiver_id,
+            receiverName:    r.receiver_name,
+            dispatcherId:    r.dispatcher_id,
+            dispatcherName:  r.dispatcher_name,
+            replacerId:      r.replacer_id,
+            replacerName:    r.replacer_name,
+            status:          r.status,
+            requestedAt:     r.requested_at,
+            receivedAt:      r.received_at,
+            dispatchedAt:    r.dispatched_at,
+            replacedAt:      r.replaced_at,
+            note:            r.note,
+            createdAt:       r.created_at,
+          }))
+        );
+      }
+
+      // 현장 목록
+      const { data: siteData, error: siteError } = await supabase
+        .from('sites')
+        .select('id, site_name, name, company_id, team_name, contract_type')
+        .eq('company_id', cid);
+
+      if (siteError) { console.error(siteError); }
+      else {
+        setSites(
+          (siteData || []).map((s: any) => ({
+            id:           s.id,
+            siteName:     s.site_name || s.name || '',
+            companyId:    s.company_id,
+            team:         s.team_name,
+            contractType: s.contract_type,
+          }))
+        );
+      }
+
       setLoading(false);
-    }, () => setLoading(false)));
+    };
 
-    const siteCol = useNew ? collection(db, 'companies', cid, 'sites') : collection(db, 'sites');
-    const siteQ   = isSA || useNew ? query(siteCol) : query(siteCol, where('companyId', '==', cid));
-    getDocs(siteQ).then(snap => {
-      setSites(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Site)));
-    }).catch(console.error);
-
-    return () => unsubs.forEach((u) => u());
+    loadData();
   }, [userInfo]);
 
+  // ── 팀 목록 ───────────────────────────────────
   const teams = useMemo(() => {
-    const set = new Set(requests.map((r) => r.team).filter(Boolean) as string[]);
+    const set = new Set(requests.map(r => r.team).filter(Boolean) as string[]);
     return ['전체', ...Array.from(set)];
   }, [requests]);
 
+  // ── 필터링 ────────────────────────────────────
   const filtered = useMemo(() => {
     let list = requests;
-    if (teamFilter !== '전체')   list = list.filter((r) => r.team === teamFilter);
-    if (statusFilter !== '전체') list = list.filter((r) => r.status === statusFilter);
+    if (teamFilter !== '전체')   list = list.filter(r => r.team === teamFilter);
+    if (statusFilter !== '전체') list = list.filter(r => r.status === statusFilter);
     if (search.trim()) {
       const s = search.toLowerCase();
-      list = list.filter((r) =>
-        r.siteName?.toLowerCase().includes(s) ||
-        r.materialName?.toLowerCase().includes(s) ||
-        r.hogiNo?.toLowerCase().includes(s) ||
+      list = list.filter(r =>
+        r.siteName?.toLowerCase().includes(s)      ||
+        r.materialName?.toLowerCase().includes(s)  ||
+        r.hogiNo?.toLowerCase().includes(s)        ||
         r.requesterName?.toLowerCase().includes(s) ||
-        r.partNumber?.toLowerCase().includes(s) ||
+        r.partNumber?.toLowerCase().includes(s)    ||
         r.contractType?.toLowerCase().includes(s)
       );
     }
     return list;
   }, [requests, search, statusFilter, teamFilter]);
 
+  // ── 통계 ──────────────────────────────────────
   const stats = useMemo(() => ({
     전체:     requests.length,
-    신청중:   requests.filter((r) => r.status === '신청중').length,
-    접수:     requests.filter((r) => r.status === '접수').length,
-    자재분출: requests.filter((r) => r.status === '자재분출').length,
-    자재교체: requests.filter((r) => r.status === '자재교체').length,
+    신청중:   requests.filter(r => r.status === '신청중').length,
+    접수:     requests.filter(r => r.status === '접수').length,
+    자재분출: requests.filter(r => r.status === '자재분출').length,
+    자재교체: requests.filter(r => r.status === '자재교체').length,
   }), [requests]);
 
-  const getDocRef = (id: string) => {
-    const useNew = userInfo?.useNewStructure && !!userInfo?.companyId;
-    const cid = userInfo?.companyId || '';
-    return useNew ? doc(db, 'companies', cid, 'materialRequests', id) : doc(db, 'materialRequests', id);
+  // ── 로컬 상태 업데이트 헬퍼 ───────────────────
+  const updateLocal = (id: string, patch: Partial<MaterialRequest>) => {
+    setRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
   };
 
-  // ✅ 접수 처리
+  // ── 접수 처리 ─────────────────────────────────
   const handleReceive = async (item: MaterialRequest) => {
     if (!confirm(`${item.materialName} 접수 처리하시겠습니까?`)) return;
-    try {
-      await updateDoc(getDocRef(item.id), {
-        status:       '접수',
-        receivedAt:   serverTimestamp(),
-        receiverId:   userInfo?.uid  || '',
-        receiverName: userInfo?.name || '',
-      });
-    } catch { alert('접수 처리 실패'); }
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('material_requests')
+      .update({
+        status:        '접수',
+        received_at:   now,
+        receiver_id:   userInfo?.uid  || '',
+        receiver_name: userInfo?.name || '',
+      })
+      .eq('id', item.id);
+
+    if (error) { alert('접수 처리 실패'); return; }
+    updateLocal(item.id, {
+      status:       '접수',
+      receivedAt:   now,
+      receiverId:   userInfo?.uid  || '',
+      receiverName: userInfo?.name || '',
+    });
   };
 
+  // ── 자재분출 처리 ─────────────────────────────
   const handleDispatch = async (item: MaterialRequest) => {
     if (!confirm(`${item.materialName} 자재분출 처리하시겠습니까?`)) return;
-    try {
-      await updateDoc(getDocRef(item.id), {
-        status:         '자재분출',
-        dispatchedAt:   serverTimestamp(),
-        dispatcherId:   userInfo?.uid  || '',
-        dispatcherName: userInfo?.name || '',
-      });
-    } catch { alert('자재분출 처리 실패'); }
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('material_requests')
+      .update({
+        status:          '자재분출',
+        dispatched_at:   now,
+        dispatcher_id:   userInfo?.uid  || '',
+        dispatcher_name: userInfo?.name || '',
+      })
+      .eq('id', item.id);
+
+    if (error) { alert('자재분출 처리 실패'); return; }
+    updateLocal(item.id, {
+      status:          '자재분출',
+      dispatchedAt:    now,
+      dispatcherId:    userInfo?.uid  || '',
+      dispatcherName:  userInfo?.name || '',
+    });
   };
 
+  // ── 자재교체 처리 ─────────────────────────────
   const handleReplace = async (item: MaterialRequest) => {
     if (!confirm(`${item.materialName} 교체완료 처리하시겠습니까?`)) return;
-    try {
-      await updateDoc(getDocRef(item.id), {
-        status:       '자재교체',
-        replacedAt:   serverTimestamp(),
-        replacerId:   userInfo?.uid  || '',
-        replacerName: userInfo?.name || '',
-      });
-    } catch { alert('자재교체 처리 실패'); }
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('material_requests')
+      .update({
+        status:        '자재교체',
+        replaced_at:   now,
+        replacer_id:   userInfo?.uid  || '',
+        replacer_name: userInfo?.name || '',
+      })
+      .eq('id', item.id);
+
+    if (error) { alert('자재교체 처리 실패'); return; }
+    updateLocal(item.id, {
+      status:       '자재교체',
+      replacedAt:   now,
+      replacerId:   userInfo?.uid  || '',
+      replacerName: userInfo?.name || '',
+    });
   };
 
+  // ── 삭제 ──────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('이 자재신청을 삭제하시겠습니까?')) return;
-    try { await deleteDoc(getDocRef(id)); setDetailModal(false); }
-    catch { alert('삭제 실패'); }
+    const { error } = await supabase
+      .from('material_requests')
+      .delete()
+      .eq('id', id);
+
+    if (error) { alert('삭제 실패'); return; }
+    setRequests(prev => prev.filter(r => r.id !== id));
+    setDetailModal(false);
   };
 
+  // ── PDF 필터 ──────────────────────────────────
   const pdfFiltered = useMemo(() => {
     let list = requests;
-    if (pdfSiteId)          list = list.filter((r) => r.siteId === pdfSiteId);
-    if (pdfStatusFilter !== '전체') list = list.filter((r) => r.status === pdfStatusFilter);
-    if (pdfDateFrom)        list = list.filter((r) => tsToDateStr(r.requestedAt) >= pdfDateFrom);
-    if (pdfDateTo)          list = list.filter((r) => tsToDateStr(r.requestedAt) <= pdfDateTo);
+    if (pdfSiteId)              list = list.filter(r => r.siteId === pdfSiteId);
+    if (pdfStatusFilter !== '전체') list = list.filter(r => r.status === pdfStatusFilter);
+    if (pdfDateFrom)            list = list.filter(r => tsToDateStr(r.requestedAt) >= pdfDateFrom);
+    if (pdfDateTo)              list = list.filter(r => tsToDateStr(r.requestedAt) <= pdfDateTo);
     return list;
   }, [requests, pdfSiteId, pdfStatusFilter, pdfDateFrom, pdfDateTo]);
 
+  // ── PDF 출력 ──────────────────────────────────
   const exportPDF = () => {
     if (pdfFiltered.length === 0) { alert('출력할 내역이 없습니다.'); return; }
-    const titleSite   = pdfSiteId ? (sites.find((s) => s.id === pdfSiteId)?.siteName || '') : '전체 현장';
-    const titlePeriod = pdfDateFrom && pdfDateTo ? `${pdfDateFrom} ~ ${pdfDateTo}`
-      : pdfDateFrom ? `${pdfDateFrom} 이후` : pdfDateTo ? `${pdfDateTo} 이전` : '전체 기간';
+    const titleSite   = pdfSiteId
+      ? (sites.find(s => s.id === pdfSiteId)?.siteName || '')
+      : '전체 현장';
+    const titlePeriod = pdfDateFrom && pdfDateTo
+      ? `${pdfDateFrom} ~ ${pdfDateTo}`
+      : pdfDateFrom ? `${pdfDateFrom} 이후`
+      : pdfDateTo   ? `${pdfDateTo} 이전`
+      : '전체 기간';
 
     const rows = pdfFiltered.map((r, i) => `
       <tr>
@@ -316,7 +440,7 @@ export default function MaterialPage() {
   };
 
   const currentSelected = useMemo(() =>
-    selected ? (requests.find((r) => r.id === selected.id) || selected) : null,
+    selected ? (requests.find(r => r.id === selected.id) || selected) : null,
   [selected, requests]);
 
   if (loading) return (
@@ -336,8 +460,10 @@ export default function MaterialPage() {
           <h1 className="text-2xl font-bold text-gray-900">자재신청 관리</h1>
           <p className="text-sm text-gray-500 mt-1">앱에서 신청된 자재를 확인하고 처리하세요</p>
         </div>
-        <button onClick={() => setPdfModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-semibold text-sm">
+        <button
+          onClick={() => setPdfModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-semibold text-sm"
+        >
           📄 PDF 출력
         </button>
       </div>
@@ -345,12 +471,12 @@ export default function MaterialPage() {
       {/* 통계 카드 */}
       <div className="grid grid-cols-5 gap-3 mb-6">
         {([
-          { label: '전체',     value: stats.전체,     color: 'text-gray-700',   bg: 'bg-gray-50',    border: 'border-gray-200'   },
-          { label: '신청중',   value: stats.신청중,   color: 'text-yellow-700', bg: 'bg-yellow-50',  border: 'border-yellow-200' },
-          { label: '접수',     value: stats.접수,     color: 'text-purple-700', bg: 'bg-purple-50',  border: 'border-purple-200' },
-          { label: '자재분출', value: stats.자재분출, color: 'text-blue-700',   bg: 'bg-blue-50',    border: 'border-blue-200'   },
-          { label: '교체완료', value: stats.자재교체, color: 'text-green-700',  bg: 'bg-green-50',   border: 'border-green-200'  },
-        ] as const).map((s) => (
+          { label: '전체',     value: stats.전체,     color: 'text-gray-700',   bg: 'bg-gray-50',   border: 'border-gray-200'   },
+          { label: '신청중',   value: stats.신청중,   color: 'text-yellow-700', bg: 'bg-yellow-50', border: 'border-yellow-200' },
+          { label: '접수',     value: stats.접수,     color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200' },
+          { label: '자재분출', value: stats.자재분출, color: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-200'   },
+          { label: '교체완료', value: stats.자재교체, color: 'text-green-700',  bg: 'bg-green-50',  border: 'border-green-200'  },
+        ] as const).map(s => (
           <div key={s.label} className={`${s.bg} rounded-xl p-4 border ${s.border}`}>
             <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
             <p className="text-sm text-gray-500 mt-1">{s.label}</p>
@@ -360,23 +486,32 @@ export default function MaterialPage() {
 
       {/* 필터 */}
       <div className="flex flex-wrap gap-3 mb-4">
-        <input type="text" placeholder="현장명, 자재명, 파트번호, 계약종류, 신청자 검색"
-          value={search} onChange={(e) => setSearch(e.target.value)}
-          className="border border-gray-200 rounded-lg px-4 py-2 text-sm w-80 focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+        <input
+          type="text"
+          placeholder="현장명, 자재명, 파트번호, 계약종류, 신청자 검색"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="border border-gray-200 rounded-lg px-4 py-2 text-sm w-80 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+        />
         <div className="flex gap-2">
-          {(['전체', '신청중', '접수', '자재분출', '자재교체'] as const).map((s) => (
+          {(['전체','신청중','접수','자재분출','자재교체'] as const).map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-colors ${
-                statusFilter === s ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                statusFilter === s
+                  ? 'bg-yellow-400 text-white border-yellow-400'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
               }`}>
               {s === '자재교체' ? '교체완료' : s}
             </button>
           ))}
         </div>
         {teams.length > 1 && (
-          <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
-            {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+          <select
+            value={teamFilter}
+            onChange={e => setTeamFilter(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+          >
+            {teams.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
       </div>
@@ -387,86 +522,84 @@ export default function MaterialPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['상태','신청일시','현장','호기','계약종류','자재명','파트번호','수량','신청자','접수일시','분출일시','교체완료일시','처리'].map((h) => (
-  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
-))}
+                {['상태','신청일시','현장','호기','계약종류','자재명','파트번호','수량','신청자','접수일시','분출일시','교체완료일시','처리'].map(h => (
+                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.length === 0 ? (
-                <tr><td colSpan={13} className="text-center py-16 text-gray-400">
-                  <div className="text-4xl mb-2">📦</div>
-                  <p>자재신청 내역이 없습니다.</p>
-                </td></tr>
-              ) : filtered.map((r) => {
+                <tr>
+                  <td colSpan={13} className="text-center py-16 text-gray-400">
+                    <div className="text-4xl mb-2">📦</div>
+                    <p>자재신청 내역이 없습니다.</p>
+                  </td>
+                </tr>
+              ) : filtered.map(r => {
                 const st = STATUS_STYLE[r.status] || STATUS_STYLE['신청중'];
                 return (
-                  // ✅ 기존 tr 안쪽 전체를 아래로 교체
-<tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
-  onClick={() => { setSelected(r); setDetailModal(true); }}>
-  <td className="px-3 py-3">
-    <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
-      className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
-      {st.label}
-    </span>
-  </td>
-  {/* 신청일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.requestedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  <td className="px-3 py-3 font-semibold text-gray-900">{r.siteName}</td>
-  <td className="px-3 py-3 text-gray-700 text-xs font-semibold">{r.hogiNo}</td>
-  <td className="px-3 py-3 text-blue-700 text-xs font-semibold">{r.contractType || '-'}</td>
-  <td className="px-3 py-3 text-gray-900 text-sm">{r.materialName}{r.spec ? ` (${r.spec})` : ''}</td>
-  <td className="px-3 py-3 text-gray-500 text-xs font-mono">{r.partNumber || '-'}</td>
-  <td className="px-3 py-3 font-semibold text-yellow-700">{r.quantity}{r.unit}</td>
-  <td className="px-3 py-3 text-gray-600">{r.requesterName || '-'}</td>
-  {/* 접수일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.receivedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  {/* 분출일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.dispatchedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  {/* 교체완료일시 - 2줄 */}
-  <td className="px-3 py-3 text-xs">
-    {(() => { const t = formatTsTwo(r.replacedAt); return (
-      <><p className="text-gray-600 font-medium">{t.date}</p>
-        <p className="text-gray-400">{t.time}</p></>
-    ); })()}
-  </td>
-  <td className="px-3 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-    {r.status === '신청중' && (
-      <button onClick={() => handleReceive(r)}
-        className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold hover:bg-purple-200">
-        📬 접수
-      </button>
-    )}
-    {r.status === '접수' && (
-      <button onClick={() => handleDispatch(r)}
-        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
-        📦 자재분출
-      </button>
-    )}
-    {r.status === '자재분출' && (
-      <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
-    )}
-    {r.status === '자재교체' && (
-      <span className="text-xs text-gray-400">완료</span>
-    )}
-  </td>
-</tr>
-
+                  <tr key={r.id} className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => { setSelected(r); setDetailModal(true); }}>
+                    <td className="px-3 py-3">
+                      <span style={{ background: st.bg, color: st.text, border: `1px solid ${st.border}` }}
+                        className="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
+                        {st.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.requestedAt); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 font-semibold text-gray-900">{r.siteName}</td>
+                    <td className="px-3 py-3 text-gray-700 text-xs font-semibold">{r.hogiNo}</td>
+                    <td className="px-3 py-3 text-blue-700 text-xs font-semibold">{r.contractType || '-'}</td>
+                    <td className="px-3 py-3 text-gray-900 text-sm">
+                      {r.materialName}{r.spec ? ` (${r.spec})` : ''}
+                    </td>
+                    <td className="px-3 py-3 text-gray-500 text-xs font-mono">{r.partNumber || '-'}</td>
+                    <td className="px-3 py-3 font-semibold text-yellow-700">{r.quantity}{r.unit}</td>
+                    <td className="px-3 py-3 text-gray-600">{r.requesterName || '-'}</td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.receivedAt); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.dispatchedAt); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {(() => { const t = formatTsTwo(r.replacedAt); return (
+                        <><p className="text-gray-600 font-medium">{t.date}</p>
+                          <p className="text-gray-400">{t.time}</p></>
+                      ); })()}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      {r.status === '신청중' && (
+                        <button onClick={() => handleReceive(r)}
+                          className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold hover:bg-purple-200">
+                          📬 접수
+                        </button>
+                      )}
+                      {r.status === '접수' && (
+                        <button onClick={() => handleDispatch(r)}
+                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-200">
+                          📦 자재분출
+                        </button>
+                      )}
+                      {r.status === '자재분출' && (
+                        <span className="text-xs text-blue-500 font-semibold">앱에서 처리</span>
+                      )}
+                      {r.status === '자재교체' && (
+                        <span className="text-xs text-gray-400">완료</span>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
@@ -482,7 +615,8 @@ export default function MaterialPage() {
             <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <h2 className="text-lg font-bold text-gray-900">자재신청 상세</h2>
-                <button onClick={() => setDetailModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+                <button onClick={() => setDetailModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
               </div>
               <div className="p-6 overflow-y-auto max-h-[70vh]">
                 <div className="flex justify-center mb-6">
@@ -502,10 +636,14 @@ export default function MaterialPage() {
                     { label: '수량',     value: `${currentSelected.quantity}${currentSelected.unit}` },
                     { label: '사유',     value: currentSelected.reason || '-' },
                     { label: '비고',     value: currentSelected.note   || '-' },
-                  ].map((row) => (
+                  ].map(row => (
                     <div key={row.label} className="flex py-2 border-b border-gray-100 last:border-0">
                       <span className="w-20 text-xs text-gray-500 font-semibold shrink-0">{row.label}</span>
-                      <span className={`text-sm flex-1 ${row.label==='파트번호'?'font-mono text-gray-600':row.label==='계약종류'?'text-blue-700 font-semibold':'text-gray-900'}`}>
+                      <span className={`text-sm flex-1 ${
+                        row.label === '파트번호' ? 'font-mono text-gray-600'
+                        : row.label === '계약종류' ? 'text-blue-700 font-semibold'
+                        : 'text-gray-900'
+                      }`}>
                         {row.value}
                       </span>
                     </div>
@@ -516,11 +654,11 @@ export default function MaterialPage() {
                 <div className="bg-gray-50 rounded-xl p-4 mb-4">
                   <p className="text-xs font-bold text-blue-600 mb-3">⏱ 처리 이력</p>
                   {[
-                    { label: '신청일시', value: formatTs(currentSelected.requestedAt),  sub: currentSelected.requesterName },
-                    { label: '접수일시', value: formatTs(currentSelected.receivedAt),   sub: currentSelected.receiverName  },
+                    { label: '신청일시', value: formatTs(currentSelected.requestedAt),  sub: currentSelected.requesterName  },
+                    { label: '접수일시', value: formatTs(currentSelected.receivedAt),   sub: currentSelected.receiverName   },
                     { label: '분출일시', value: formatTs(currentSelected.dispatchedAt), sub: currentSelected.dispatcherName },
-                    { label: '교체완료', value: formatTs(currentSelected.replacedAt),   sub: currentSelected.replacerName  },
-                  ].map((row) => (
+                    { label: '교체완료', value: formatTs(currentSelected.replacedAt),   sub: currentSelected.replacerName   },
+                  ].map(row => (
                     <div key={row.label} className="flex py-2 border-b border-gray-100 last:border-0">
                       <span className="w-20 text-xs text-gray-500 font-semibold shrink-0">{row.label}</span>
                       <div className="flex-1">
@@ -545,10 +683,10 @@ export default function MaterialPage() {
                   </button>
                 )}
                 {currentSelected.status === '자재분출' && (
-  <div className="w-full py-3 bg-blue-50 text-blue-600 rounded-xl text-sm font-semibold text-center mb-2">
-    🛗 교체완료는 앱에서 처리해주세요
-  </div>
-)}
+                  <div className="w-full py-3 bg-blue-50 text-blue-600 rounded-xl text-sm font-semibold text-center mb-2">
+                    🛗 교체완료는 앱에서 처리해주세요
+                  </div>
+                )}
                 <button onClick={() => handleDelete(currentSelected.id)}
                   className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl font-semibold hover:bg-red-100 text-sm mt-1">
                   🗑 삭제
@@ -565,7 +703,8 @@ export default function MaterialPage() {
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <h2 className="text-lg font-bold text-gray-900">PDF 출력 옵션</h2>
-              <button onClick={() => setPdfModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+              <button onClick={() => setPdfModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
             <div className="p-6 overflow-y-auto max-h-[75vh]">
               <p className="text-xs font-semibold text-gray-500 mb-2">출력 기간</p>
@@ -588,7 +727,7 @@ export default function MaterialPage() {
                     setPdfDateFrom(fmt(start)); setPdfDateTo(fmt(end));
                   }},
                   { label: '전체 기간', action: () => { setPdfDateFrom(''); setPdfDateTo(''); }},
-                ].map((btn) => (
+                ].map(btn => (
                   <button key={btn.label} onClick={btn.action}
                     className="px-3 py-1.5 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-full text-xs font-semibold hover:bg-yellow-100">
                     {btn.label}
@@ -598,70 +737,62 @@ export default function MaterialPage() {
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">시작일</label>
-                  <input type="date" value={pdfDateFrom} onChange={(e) => setPdfDateFrom(e.target.value)}
+                  <input type="date" value={pdfDateFrom} onChange={e => setPdfDateFrom(e.target.value)}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">종료일</label>
-                  <input type="date" value={pdfDateTo} onChange={(e) => setPdfDateTo(e.target.value)}
+                  <input type="date" value={pdfDateTo} onChange={e => setPdfDateTo(e.target.value)}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
                 </div>
               </div>
 
               <p className="text-xs font-semibold text-gray-500 mb-2">상태 필터</p>
               <div className="flex flex-wrap gap-2 mb-4">
-                {(['전체', '신청중', '접수', '자재분출', '자재교체'] as const).map((s) => (
+                {(['전체','신청중','접수','자재분출','자재교체'] as const).map(s => (
                   <button key={s} onClick={() => setPdfStatusFilter(s)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                      pdfStatusFilter === s ? 'bg-yellow-400 text-white border-yellow-400' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      pdfStatusFilter === s
+                        ? 'bg-yellow-400 text-white border-yellow-400'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                     }`}>
                     {s === '자재교체' ? '교체완료' : s}
                   </button>
                 ))}
               </div>
 
-             
               <p className="text-xs font-semibold text-gray-500 mb-2">현장 선택 (선택 안 하면 전체)</p>
-
-{pdfSiteName ? (
-  <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 mb-4">
-    <span className="text-sm font-semibold text-gray-800">{pdfSiteName}</span>
-    <button onClick={() => { setPdfSiteId(''); setPdfSiteName(''); }}
-      className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
-  </div>
-) : (
-  <div className="relative mb-4">
-    <input
-      type="text"
-      placeholder="현장명 검색 (2글자 이상)"
-      value={pdfSiteSearch}
-      onChange={(e) => setPdfSiteSearch(e.target.value)}
-      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
-    />
-    {pdfSiteSearch.trim().length >= 2 && (
-      <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-48 overflow-y-auto shadow-lg">
-        {sites
-          .filter((s) => s.siteName?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
-          .slice(0, 20)
-          .length === 0 ? (
-          <p className="text-sm text-gray-400 px-3 py-2">검색 결과 없음</p>
-        ) : (
-          sites
-            .filter((s) => s.siteName?.trim().toLowerCase().includes(pdfSiteSearch.toLowerCase()))
-            .slice(0, 20)
-            .map((s) => (
-              <button key={s.id}
-                onClick={() => { setPdfSiteId(s.id); setPdfSiteName(s.siteName?.trim()); setPdfSiteSearch(''); }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-yellow-50 border-b border-gray-50 last:border-0">
-                {s.siteName?.trim()}
-              </button>
-            ))
-        )}
-      </div>
-    )}
-  </div>
-)}
-
+              {pdfSiteName ? (
+                <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2 mb-4">
+                  <span className="text-sm font-semibold text-gray-800">{pdfSiteName}</span>
+                  <button onClick={() => { setPdfSiteId(''); setPdfSiteName(''); }}
+                    className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+                </div>
+              ) : (
+                <div className="relative mb-4">
+                  <input type="text" placeholder="현장명 검색 (2글자 이상)"
+                    value={pdfSiteSearch} onChange={e => setPdfSiteSearch(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
+                  {pdfSiteSearch.trim().length >= 2 && (
+                    <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg mt-1 max-h-48 overflow-y-auto shadow-lg">
+                      {sites.filter(s => s.siteName?.toLowerCase().includes(pdfSiteSearch.toLowerCase())).slice(0, 20).length === 0 ? (
+                        <p className="text-sm text-gray-400 px-3 py-2">검색 결과 없음</p>
+                      ) : (
+                        sites
+                          .filter(s => s.siteName?.toLowerCase().includes(pdfSiteSearch.toLowerCase()))
+                          .slice(0, 20)
+                          .map(s => (
+                            <button key={s.id}
+                              onClick={() => { setPdfSiteId(s.id); setPdfSiteName(s.siteName); setPdfSiteSearch(''); }}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-yellow-50 border-b border-gray-50 last:border-0">
+                              {s.siteName}
+                            </button>
+                          ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4 text-sm text-yellow-800">
                 출력 대상: <strong>{pdfFiltered.length}건</strong>

@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
-import {
-  doc, getDoc, collection, query, onSnapshot,
-  addDoc, updateDoc, deleteDoc, serverTimestamp,
-  orderBy, where, getDocs,
-} from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 
 // ── 타입 ──────────────────────────────────────────
 interface UserInfo {
@@ -42,7 +36,7 @@ interface InspectionRecord {
   completedCount: number;
   status: '예정' | '진행중' | '완료';
   note?: string;
-  createdAt?: any;
+  createdAt?: string;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -90,64 +84,114 @@ export default function InspectionPage() {
 
   // ── 인증 ──────────────────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { router.push('/login'); return; }
-      const snap = await getDoc(doc(db, 'users', user.uid));
-      if (!snap.exists()) { router.push('/login'); return; }
-      const data = snap.data();
-      const isSuperAdmin = data.superAdmin === true;
-      const isAdmin = data.role === 'admin';
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { router.push('/login'); return; }
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('name, company_id, company_display_name, role, super_admin')
+        .eq('id', session.user.id)
+        .single();
+
+      if (userError || !userData) { router.push('/login'); return; }
+
+      const isSuperAdmin = userData.super_admin === true;
+      const isAdmin = userData.role === 'admin';
       if (!isSuperAdmin && !isAdmin) { router.push('/'); return; }
+
       setUserInfo({
-        uid: user.uid,
-        name: data.name || '',
-        companyId: data.companyId || '',
-        companyDisplayName: data.companyDisplayName || '',
-        role: data.role || 'member',
+        uid: session.user.id,
+        name: userData.name || '',
+        companyId: userData.company_id || '',
+        companyDisplayName: userData.company_display_name || '',
+        role: userData.role || 'member',
         superAdmin: isSuperAdmin,
       });
-    });
-    return unsub;
-  }, [router]);
+      setLoading(false);
+    };
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => { if (!session) router.push('/login'); }
+    );
+    return () => subscription.unsubscribe();
+  }, []);
 
   // ── 팀 목록 로드 ──────────────────────────────
   useEffect(() => {
     if (!userInfo) return;
-    getDocs(collection(db, 'companies', userInfo.companyId, 'teams')).then(
-      snap => setTeams(snap.docs.map(d => ({ id: d.id, name: d.data().name || '' })))
-    ).catch(console.error);
+    const loadTeams = async () => {
+      const { data, error } = await supabase
+        .from('teams')
+        .select('id, name')
+        .eq('company_id', userInfo.companyId)
+        .order('name', { ascending: true });
+
+      if (error) { console.error(error); return; }
+      setTeams((data || []).map((t: any) => ({ id: t.id, name: t.name || '' })));
+    };
+    loadTeams();
   }, [userInfo]);
 
   // ── 현장 목록 로드 ────────────────────────────
   useEffect(() => {
     if (!userInfo) return;
-    const load = async () => {
-      const snap = await getDocs(collection(db, 'companies', userInfo.companyId, 'sites'));
-      setSites(snap.docs.map(d => ({
-        id: d.id,
-        name: d.data().name || d.data().siteName || '',
-        teamName: d.data().teamName || '',
-      })));
+    const loadSites = async () => {
+      const { data, error } = await supabase
+        .from('sites')
+        .select('id, name, site_name, team_name')
+        .eq('company_id', userInfo.companyId);
+
+      if (error) { console.error(error); return; }
+      setSites(
+        (data || []).map((s: any) => ({
+          id: s.id,
+          name: s.name || s.site_name || '',
+          teamName: s.team_name || '',
+        }))
+      );
     };
-    load();
+    loadSites();
   }, [userInfo]);
 
-  // ── 점검 기록 구독 ────────────────────────────
+  // ── 점검 기록 로드 ────────────────────────────
   useEffect(() => {
     if (!userInfo) return;
-    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
-    const endDate   = `${year}-${String(month).padStart(2,'0')}-31`;
-    const q = query(
-      collection(db, 'companies', userInfo.companyId, 'inspections'),
-      where('scheduledDate', '>=', startDate),
-      where('scheduledDate', '<=', endDate),
-      orderBy('scheduledDate', 'asc')
-    );
-    setLoading(true);
-    getDocs(q).then(snap => {
-      setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as InspectionRecord)));
+    const loadRecords = async () => {
+      setLoading(true);
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const endDate   = `${year}-${String(month).padStart(2, '0')}-31`;
+
+      const { data, error } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('company_id', userInfo.companyId)
+        .gte('scheduled_date', startDate)
+        .lte('scheduled_date', endDate)
+        .order('scheduled_date', { ascending: true });
+
+      if (error) { console.error(error); setLoading(false); return; }
+
+      setRecords(
+        (data || []).map((r: any) => ({
+          id:             r.id,
+          siteId:         r.site_id,
+          siteName:       r.site_name,
+          teamName:       r.team_name,
+          scheduledDate:  r.scheduled_date,
+          completedDate:  r.completed_date,
+          totalCount:     r.total_count || 0,
+          completedCount: r.completed_count || 0,
+          status:         r.status,
+          note:           r.note || '',
+          createdAt:      r.created_at,
+        }))
+      );
       setLoading(false);
-    }).catch(err => { console.error(err); setLoading(false); });
+    };
+    loadRecords();
   }, [userInfo, year, month]);
 
   // ── 팀 필터 적용 ──────────────────────────────
@@ -157,12 +201,15 @@ export default function InspectionPage() {
 
   // ── 통계 ──────────────────────────────────────
   const stats = {
-    total:    filteredRecords.length,
-    done:     filteredRecords.filter(r => r.status === '완료').length,
+    total:      filteredRecords.length,
+    done:       filteredRecords.filter(r => r.status === '완료').length,
     inProgress: filteredRecords.filter(r => r.status === '진행중').length,
-    planned:  filteredRecords.filter(r => r.status === '예정').length,
+    planned:    filteredRecords.filter(r => r.status === '예정').length,
     rate: filteredRecords.length > 0
-      ? Math.round(filteredRecords.filter(r => r.status === '완료').length / filteredRecords.length * 100)
+      ? Math.round(
+          filteredRecords.filter(r => r.status === '완료').length /
+          filteredRecords.length * 100
+        )
       : 0,
   };
 
@@ -185,18 +232,50 @@ export default function InspectionPage() {
     }
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'companies', userInfo!.companyId, 'inspections'), {
-        siteId:         form.siteId,
-        siteName:       form.siteName,
-        teamName:       form.teamName,
-        scheduledDate:  form.scheduledDate,
-        totalCount:     Number(form.totalCount) || 0,
-        completedCount: Number(form.completedCount) || 0,
-        status:         form.status,
-        note:           form.note.trim(),
-        createdAt:      serverTimestamp(),
-        companyId:      userInfo!.companyId,
-      });
+      const { error } = await supabase
+        .from('inspections')
+        .insert({
+          company_id:      userInfo!.companyId,
+          site_id:         form.siteId,
+          site_name:       form.siteName,
+          team_name:       form.teamName,
+          scheduled_date:  form.scheduledDate,
+          total_count:     Number(form.totalCount) || 0,
+          completed_count: Number(form.completedCount) || 0,
+          status:          form.status,
+          note:            form.note.trim(),
+          created_at:      new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      // 목록 새로고침
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const endDate   = `${year}-${String(month).padStart(2, '0')}-31`;
+      const { data: refreshed } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('company_id', userInfo!.companyId)
+        .gte('scheduled_date', startDate)
+        .lte('scheduled_date', endDate)
+        .order('scheduled_date', { ascending: true });
+
+      setRecords(
+        (refreshed || []).map((r: any) => ({
+          id:             r.id,
+          siteId:         r.site_id,
+          siteName:       r.site_name,
+          teamName:       r.team_name,
+          scheduledDate:  r.scheduled_date,
+          completedDate:  r.completed_date,
+          totalCount:     r.total_count || 0,
+          completedCount: r.completed_count || 0,
+          status:         r.status,
+          note:           r.note || '',
+          createdAt:      r.created_at,
+        }))
+      );
+
       setAddModal(false);
       resetForm();
     } catch (e: any) {
@@ -211,19 +290,43 @@ export default function InspectionPage() {
     if (!selectedRecord) return;
     setSubmitting(true);
     try {
-      await updateDoc(
-        doc(db, 'companies', userInfo!.companyId, 'inspections', selectedRecord.id),
-        {
-          siteId:         form.siteId,
-          siteName:       form.siteName,
-          teamName:       form.teamName,
-          scheduledDate:  form.scheduledDate,
-          totalCount:     Number(form.totalCount) || 0,
-          completedCount: Number(form.completedCount) || 0,
-          status:         form.status,
-          note:           form.note.trim(),
-        }
+      const { error } = await supabase
+        .from('inspections')
+        .update({
+          site_id:         form.siteId,
+          site_name:       form.siteName,
+          team_name:       form.teamName,
+          scheduled_date:  form.scheduledDate,
+          total_count:     Number(form.totalCount) || 0,
+          completed_count: Number(form.completedCount) || 0,
+          status:          form.status,
+          note:            form.note.trim(),
+          updated_at:      new Date().toISOString(),
+        })
+        .eq('id', selectedRecord.id)
+        .eq('company_id', userInfo!.companyId);
+
+      if (error) throw error;
+
+      // 로컬 상태 업데이트
+      setRecords(prev =>
+        prev.map(r =>
+          r.id === selectedRecord.id
+            ? {
+                ...r,
+                siteId:         form.siteId,
+                siteName:       form.siteName,
+                teamName:       form.teamName,
+                scheduledDate:  form.scheduledDate,
+                totalCount:     Number(form.totalCount) || 0,
+                completedCount: Number(form.completedCount) || 0,
+                status:         form.status,
+                note:           form.note.trim(),
+              }
+            : r
+        )
       );
+
       setEditModal(false);
       setSelectedRecord(null);
       resetForm();
@@ -237,7 +340,15 @@ export default function InspectionPage() {
   // ── 삭제 ──────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('삭제하시겠어요?')) return;
-    await deleteDoc(doc(db, 'companies', userInfo!.companyId, 'inspections', id));
+    const { error } = await supabase
+      .from('inspections')
+      .delete()
+      .eq('id', id)
+      .eq('company_id', userInfo!.companyId);
+
+    if (error) { alert(error.message); return; }
+
+    setRecords(prev => prev.filter(r => r.id !== id));
     setEditModal(false);
     setSelectedRecord(null);
   };
@@ -247,9 +358,18 @@ export default function InspectionPage() {
     const next: Record<string, InspectionRecord['status']> = {
       '예정': '진행중', '진행중': '완료', '완료': '예정',
     };
-    await updateDoc(
-      doc(db, 'companies', userInfo!.companyId, 'inspections', record.id),
-      { status: next[record.status] }
+    const newStatus = next[record.status];
+
+    const { error } = await supabase
+      .from('inspections')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', record.id)
+      .eq('company_id', userInfo!.companyId);
+
+    if (error) { alert(error.message); return; }
+
+    setRecords(prev =>
+      prev.map(r => r.id === record.id ? { ...r, status: newStatus } : r)
     );
   };
 
@@ -294,7 +414,6 @@ export default function InspectionPage() {
   // ── 폼 공통 렌더 ──────────────────────────────
   const renderForm = () => (
     <div className="space-y-3">
-      {/* 현장 선택 */}
       <div>
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">현장</label>
         <select
@@ -309,7 +428,6 @@ export default function InspectionPage() {
         </select>
       </div>
 
-      {/* 팀명 */}
       <div>
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">팀</label>
         <select
@@ -324,7 +442,6 @@ export default function InspectionPage() {
         </select>
       </div>
 
-      {/* 점검일 */}
       <div>
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">점검일</label>
         <input
@@ -335,7 +452,6 @@ export default function InspectionPage() {
         />
       </div>
 
-      {/* 호기 수 / 완료 수 */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">전체 호기</label>
@@ -359,7 +475,6 @@ export default function InspectionPage() {
         </div>
       </div>
 
-      {/* 상태 */}
       <div>
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">상태</label>
         <div className="flex gap-2">
@@ -370,7 +485,7 @@ export default function InspectionPage() {
               onClick={() => setForm(f => ({ ...f, status: s }))}
               className={`flex-1 py-2 rounded-xl text-sm font-semibold border transition ${
                 form.status === s
-                  ? s === '완료' ? 'bg-green-500 text-white border-green-500'
+                  ? s === '완료'   ? 'bg-green-500 text-white border-green-500'
                   : s === '진행중' ? 'bg-blue-500 text-white border-blue-500'
                   : 'bg-gray-500 text-white border-gray-500'
                   : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
@@ -382,7 +497,6 @@ export default function InspectionPage() {
         </div>
       </div>
 
-      {/* 메모 */}
       <div>
         <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">메모 (선택)</label>
         <textarea
@@ -437,10 +551,10 @@ export default function InspectionPage() {
         {/* 통계 카드 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: '전체',   value: stats.total,      color: 'text-gray-700',  bg: 'bg-gray-50',   icon: '📋' },
-            { label: '완료',   value: stats.done,       color: 'text-green-600', bg: 'bg-green-50',  icon: '✅' },
-            { label: '진행중', value: stats.inProgress, color: 'text-blue-600',  bg: 'bg-blue-50',   icon: '🔄' },
-            { label: '완료율', value: `${stats.rate}%`, color: 'text-purple-600',bg: 'bg-purple-50', icon: '📊' },
+            { label: '전체',   value: stats.total,      color: 'text-gray-700',   bg: 'bg-gray-50',   icon: '📋' },
+            { label: '완료',   value: stats.done,       color: 'text-green-600',  bg: 'bg-green-50',  icon: '✅' },
+            { label: '진행중', value: stats.inProgress, color: 'text-blue-600',   bg: 'bg-blue-50',   icon: '🔄' },
+            { label: '완료율', value: `${stats.rate}%`, color: 'text-purple-600', bg: 'bg-purple-50', icon: '📊' },
           ].map(c => (
             <div key={c.label} className={`${c.bg} rounded-2xl border border-gray-100 p-4 shadow-sm`}>
               <p className="text-xs text-gray-500 mb-1">{c.icon} {c.label}</p>
@@ -581,7 +695,10 @@ export default function InspectionPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="p-5 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
               <h2 className="text-lg font-black text-gray-800">✏️ 점검 수정</h2>
-              <button onClick={() => { setEditModal(false); setSelectedRecord(null); }} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <button
+                onClick={() => { setEditModal(false); setSelectedRecord(null); }}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >✕</button>
             </div>
             <div className="p-5">
               {renderForm()}
