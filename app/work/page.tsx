@@ -5,43 +5,33 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const MENUS = [
-  { icon: '🏢', label: '내 현장',   path: '/team-sites' },
-  { icon: '🔧', label: '고장접수',  path: '/fault',      badgeKey: 'fault' },
-  { icon: '📋', label: '점검관리',  path: '/inspection' },
-  { icon: '🔍', label: '검사지적',  path: '/inspect' },
-  { icon: '📦', label: '자재신청',  path: '/material',   badgeKey: 'material' },
+  { icon: '🏢', label: '현장',   path: '/team-sites' },
+  { icon: '🔧', label: '고장',   path: '/fault',      badgeKey: 'fault' },
+  { icon: '📋', label: '점검',   path: '/inspection' },
+  { icon: '🔍', label: '검사',   path: '/inspect' },
+  { icon: '📦', label: '자재',   path: '/material',   badgeKey: 'material' },
 ];
 
 const siteName = (s: any) => s.site_name || s.name || '';
-const dday = (d?: string) => {
-  if (!d) return null;
-  const t = new Date(); t.setHours(0,0,0,0);
-  const x = new Date(d); x.setHours(0,0,0,0);
-  return Math.ceil((x.getTime() - t.getTime()) / 86400000);
-};
 const timeAgo = (v: any) => {
   if (!v) return '-';
   const m = Math.floor((Date.now() - new Date(v).getTime()) / 60000);
   if (m < 1) return '방금 전';
   if (m < 60) return `${m}분 전`;
-  if (m < 1440) return `${Math.floor(m/60)}시간 전`;
-  return `${Math.floor(m/1440)}일 전`;
+  if (m < 1440) return `${Math.floor(m / 60)}시간 전`;
+  return `${Math.floor(m / 1440)}일 전`;
 };
 
 export default function WorkPage() {
   const router = useRouter();
   const [userInfo, setUserInfo] = useState<any>(null);
-  const [loading, setLoading]   = useState(true);
-  const [sites, setSites]       = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sites, setSites] = useState<any[]>([]);
   const [elevCount, setElevCount] = useState(0);
-  const [faults, setFaults]     = useState<any[]>([]);
+  const [faults, setFaults] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
-  const [search, setSearch]     = useState('');
-  const [today, setToday]       = useState('');
-
-  useEffect(() => {
-    setToday(new Date().toLocaleDateString('ko-KR', { month:'long', day:'numeric', weekday:'short' }));
-  }, []);
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'site' | 'alert'>('site');
 
   useEffect(() => {
     const init = async () => {
@@ -61,7 +51,6 @@ export default function WorkPage() {
     if (!userInfo) return;
     const load = async () => {
       const isAdmin = userInfo.role === 'admin' || userInfo.super_admin === true;
-
       let q = supabase.from('sites').select('*').eq('company_id', userInfo.company_id);
       if (!isAdmin && userInfo.team) q = q.eq('team', userInfo.team);
       const { data: siteData } = await q;
@@ -94,7 +83,6 @@ export default function WorkPage() {
   }, [userInfo]);
 
   const counts = { fault: faults.length, material: materials.length };
-  const expiring = sites.filter(s => { const d = dday(s.contract_end); return d !== null && d <= 60; });
   const filtered = sites.filter(s => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -102,204 +90,202 @@ export default function WorkPage() {
   });
 
   if (loading) return (
-    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#f8fafc' }}>
-      <div style={{ textAlign:'center' }}>
-        <div style={{ fontSize:36 }}>🛗</div>
-        <p style={{ color:'#94a3b8', fontSize:13, marginTop:10 }}>로딩 중...</p>
-      </div>
-    </div>
+    <div className="wLoad"><div><div style={{ fontSize: 36 }}>🛗</div><p>로딩 중...</p></div></div>
   );
 
   return (
-    <div style={{ height:'100vh', overflow:'hidden', display:'flex', flexDirection:'column',
-      fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif', background:'#0f172a' }}>
-
-      <header style={{ height:50, background:'#0f172a', borderBottom:'1px solid #1e293b',
-        display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 20px', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <div style={{ width:28, height:28, borderRadius:7, background:'linear-gradient(135deg,#3b82f6,#6366f1)',
-              display:'flex', alignItems:'center', justifyContent:'center', fontSize:14 }}>🛗</div>
-            <span style={{ color:'#f8fafc', fontWeight:800, fontSize:16 }}>LiftField</span>
-          </div>
-          <div style={{ width:1, height:16, background:'#334155' }} />
-          <span style={{ color:'#64748b', fontSize:13, fontWeight:600 }}>현장 업무</span>
-          {userInfo?.team && (
-            <span style={{ background:'#1e3a5f', color:'#93c5fd', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:12 }}>
-              {userInfo.team}
-            </span>
-          )}
+    <div className="wRoot">
+      <header className="wHead">
+        <div className="wHeadTop">
+          <span className="wLogo">🛗 LiftField</span>
+          <button className="wOut" onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}>
+            로그아웃
+          </button>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <span style={{ fontSize:13, color:'#cbd5e1', fontWeight:600 }}>{userInfo?.name}님</span>
-          <button onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
-            style={{ background:'none', border:'1px solid #334155', borderRadius:6, color:'#64748b',
-              fontSize:12, padding:'4px 10px', cursor:'pointer', fontFamily:'inherit' }}>로그아웃</button>
+        <div className="wHeadSub">
+          <strong>{userInfo?.name}님</strong>
+          {userInfo?.team && <span className="wTeam">{userInfo.team}</span>}
+          <span className="wDate">{new Date().toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}</span>
         </div>
       </header>
 
-      <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
-        <aside style={{ width:188, background:'#0f172a', borderRight:'1px solid #1e293b',
-          display:'flex', flexDirection:'column', padding:'12px 0', flexShrink:0 }}>
-          <div style={{ padding:'0 10px 6px', fontSize:10, fontWeight:700, color:'#334155', letterSpacing:'1.2px' }}>MENU</div>
-          {MENUS.map(m => {
-            const cnt = m.badgeKey ? (counts as any)[m.badgeKey] : 0;
-            return (
-              <button key={m.path} onClick={() => router.push(m.path)}
-                style={{ width:'100%', display:'flex', alignItems:'center', gap:8, padding:'10px',
-                  border:'none', borderLeft:'2px solid transparent', background:'none',
-                  cursor:'pointer', textAlign:'left', fontFamily:'inherit' }}
-                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#1e293b'}
-                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'none'}>
-                <div style={{ width:26, height:26, borderRadius:6, background:'#1e293b', fontSize:12,
-                  display:'flex', alignItems:'center', justifyContent:'center' }}>{m.icon}</div>
-                <span style={{ fontSize:13, fontWeight:500, color:'#64748b', flex:1 }}>{m.label}</span>
-                {cnt > 0 && <span style={{ fontSize:9, fontWeight:800, color:'#fff', padding:'2px 7px',
-                  borderRadius:10, background:'#ef4444' }}>{cnt}</span>}
-              </button>
-            );
-          })}
-          <div style={{ flex:1 }} />
-          <div style={{ padding:10, borderTop:'1px solid #1e293b' }}>
-            <button onClick={() => router.push('/')} style={{ display:'flex', alignItems:'center', gap:6,
-              fontSize:12, color:'#475569', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit' }}>
-              ← 홈으로
-            </button>
-          </div>
-        </aside>
-
-        <main style={{ flex:1, background:'#f1f5f9', display:'flex', flexDirection:'column',
-          padding:'16px 20px 12px', gap:12, overflow:'hidden' }}>
-
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-            <div>
-              <h1 style={{ fontSize:19, fontWeight:800, color:'#0f172a', margin:0 }}>
-                안녕하세요, {userInfo?.name}님 👋
-              </h1>
-              <p style={{ fontSize:13, color:'#94a3b8', marginTop:2 }}>
-                {userInfo?.team || userInfo?.company_display_name} · 담당 현장 {sites.length}개
-              </p>
+      <main className="wMain">
+        <div className="wKpi">
+          {[
+            { ic: '🏢', val: sites.length,    lbl: '담당 현장',   c: '#10b981' },
+            { ic: '🛗', val: elevCount,       lbl: '담당 승강기', c: '#3b82f6' },
+            { ic: '🔧', val: counts.fault,    lbl: '처리할 고장', c: '#ef4444' },
+            { ic: '📦', val: counts.material, lbl: '자재 신청중', c: '#8b5cf6' },
+          ].map((k, i) => (
+            <div key={i} className="wKpiCard" style={{ borderTopColor: k.c }}>
+              <span className="wKpiIc">{k.ic}</span>
+              <span className="wKpiVal">{k.val}</span>
+              <span className="wKpiLbl">{k.lbl}</span>
             </div>
-            <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:16,
-              padding:'5px 12px', fontSize:12, color:'#64748b', fontWeight:600 }}>{today}</div>
-          </div>
+          ))}
+        </div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, flexShrink:0 }}>
-            {[
-              { ic:'🏢', val:sites.length,       lbl:'담당 현장',   c:'#10b981', path:'/team-sites' },
-              { ic:'🛗', val:elevCount,          lbl:'담당 승강기', c:'#3b82f6', path:'/team-sites' },
-              { ic:'🔧', val:counts.fault,       lbl:'처리할 고장', c:'#ef4444', path:'/fault' },
-              { ic:'📦', val:counts.material,    lbl:'자재 신청중', c:'#8b5cf6', path:'/material' },
-            ].map((k,i) => (
-              <div key={i} onClick={() => router.push(k.path)}
-                style={{ background:'#fff', borderRadius:12, padding:'14px 16px', display:'flex',
-                  alignItems:'center', gap:12, cursor:'pointer', borderTop:`3px solid ${k.c}`,
-                  boxShadow:'0 1px 3px rgba(0,0,0,.05)' }}>
-                <div style={{ width:38, height:38, borderRadius:10, background:'#f8fafc', fontSize:17,
-                  display:'flex', alignItems:'center', justifyContent:'center' }}>{k.ic}</div>
-                <div>
-                  <div style={{ fontSize:28, fontWeight:900, lineHeight:1, color:'#0f172a' }}>{k.val}</div>
-                  <div style={{ fontSize:12, color:'#94a3b8', fontWeight:600, marginTop:3 }}>{k.lbl}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="wTabs">
+          <button className={tab === 'site' ? 'wTab on' : 'wTab'} onClick={() => setTab('site')}>
+            내 현장 {sites.length}
+          </button>
+          <button className={tab === 'alert' ? 'wTab on' : 'wTab'} onClick={() => setTab('alert')}>
+            알림 {counts.fault + counts.material}
+          </button>
+        </div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 380px', gap:12, flex:1, minHeight:0 }}>
-
-            <div style={{ background:'#fff', borderRadius:14, display:'flex', flexDirection:'column',
-              overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,.05)' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:7, padding:'12px 14px 10px',
-                borderBottom:'1px solid #f1f5f9', flexShrink:0 }}>
-                <div style={{ width:3, height:14, borderRadius:2, background:'#3b82f6' }} />
-                <span style={{ fontSize:13, fontWeight:700, color:'#334155', flex:1 }}>내 현장</span>
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 현장 검색"
-                  style={{ border:'1px solid #e2e8f0', borderRadius:7, padding:'4px 8px', fontSize:12,
-                    background:'#f8fafc', outline:'none', width:160, fontFamily:'inherit' }} />
-              </div>
-              <div style={{ flex:1, overflowY:'auto' }}>
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                  <thead>
-                    <tr style={{ background:'#f8fafc', position:'sticky', top:0 }}>
-                      {['현장명','주소','대수','현관번호','비상통화'].map(h => (
-                        <th key={h} style={{ padding:'7px 8px', textAlign:'left', fontWeight:700,
-                          color:'#64748b', fontSize:11, borderBottom:'1px solid #f1f5f9' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.length === 0 ? (
-                      <tr><td colSpan={5} style={{ textAlign:'center', padding:'28px 0', color:'#94a3b8' }}>
-                        <div style={{ fontSize:24, marginBottom:6 }}>🏢</div>담당 현장이 없어요
-                      </td></tr>
-                    ) : filtered.map(s => (
-                      <tr key={s.id} style={{ borderBottom:'1px solid #f8fafc' }}>
-                        <td style={{ padding:'6px 8px', fontWeight:700, color:'#1e293b' }}>{siteName(s)}</td>
-                        <td style={{ padding:'6px 8px', color:'#64748b', fontSize:11 }}>{s.address || '-'}</td>
-                        <td style={{ padding:'6px 8px', color:'#475569', fontSize:11 }}>{s.elevator_count ? `${s.elevator_count}대` : '-'}</td>
-                        <td style={{ padding:'6px 8px', color:'#475569', fontSize:11, fontWeight:700 }}>{s.access_code || '-'}</td>
-                        <td style={{ padding:'6px 8px', color:'#475569', fontSize:11 }}>{s.emergency_phone || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ padding:'6px 10px', background:'#f8fafc', borderTop:'1px solid #f1f5f9',
-                display:'flex', gap:14, fontSize:11, color:'#64748b', flexShrink:0 }}>
-                <span>현장 <strong style={{ color:'#334155' }}>{filtered.length}</strong>개</span>
-                <span>승강기 <strong style={{ color:'#334155' }}>{elevCount}</strong>대</span>
-                {expiring.length > 0 && <span style={{ color:'#f97316' }}>계약 만료 임박 {expiring.length}건</span>}
-              </div>
-            </div>
-
-            <div style={{ display:'flex', flexDirection:'column', gap:10, minHeight:0 }}>
-              {[
-                { title:'🔧 고장 접수', color:'#ef4444', bg:'#fef2f2', list:faults, path:'/fault',
-                  render:(x:any) => (<>
-                    <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{x.site_name} · {x.hogi_no}</div>
-                    <div style={{ fontSize:10, color:'#78716c', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{x.content}</div>
-                    <div style={{ fontSize:10, color:'#94a3b8', marginTop:2 }}>담당: {x.assigned_name || '미배정'} · {timeAgo(x.created_at)}</div>
-                  </>) },
-                { title:'📦 자재 신청', color:'#8b5cf6', bg:'#faf5ff', list:materials, path:'/material',
-                  render:(x:any) => (<>
-                    <div style={{ fontSize:12, fontWeight:700, color:'#1e293b' }}>{x.site_name}</div>
-                    <div style={{ fontSize:11, color:'#6d28d9' }}>{x.item_name}</div>
-                    <div style={{ fontSize:10, color:'#94a3b8', marginTop:2 }}>{x.requester_name || '-'} · {timeAgo(x.created_at)}</div>
-                  </>) },
-              ].map(sec => (
-                <div key={sec.title} style={{ background:'#fff', borderRadius:14, flex:1, minHeight:0,
-                  display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,.05)' }}>
-                  <div style={{ padding:'12px 14px 10px', borderBottom:'1px solid #f1f5f9', display:'flex',
-                    alignItems:'center', gap:6, flexShrink:0 }}>
-                    <span style={{ fontSize:13, fontWeight:700, color:'#334155', flex:1 }}>{sec.title}</span>
-                    {sec.list.length > 0 && <span style={{ fontSize:9, fontWeight:800, color:'#fff',
-                      padding:'2px 7px', borderRadius:10, background:sec.color }}>{sec.list.length}</span>}
+        {tab === 'site' && (
+          <>
+            <input className="wSearch" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 현장명 또는 주소 검색" />
+            <div className="wList">
+              {filtered.length === 0 ? (
+                <div className="wEmpty"><div style={{ fontSize: 28 }}>🏢</div>담당 현장이 없어요</div>
+              ) : filtered.map(s => (
+                <div key={s.id} className="wCard">
+                  <div className="wCardTop">
+                    <span className="wCardName">{siteName(s)}</span>
+                    {s.elevator_count ? <span className="wPill">{s.elevator_count}대</span> : null}
                   </div>
-                  <div style={{ flex:1, overflowY:'auto', padding:'8px 10px', display:'flex',
-                    flexDirection:'column', gap:6 }}>
-                    {sec.list.length === 0 ? (
-                      <div style={{ textAlign:'center', color:'#94a3b8', fontSize:11, padding:'20px 0' }}>
-                        <div style={{ fontSize:22, marginBottom:6 }}>✅</div>대기 중인 항목 없음
-                      </div>
-                    ) : sec.list.map((x:any) => (
-                      <div key={x.id} onClick={() => router.push(sec.path)}
-                        style={{ padding:'9px 10px', borderRadius:9, background:sec.bg,
-                          borderLeft:`3px solid ${sec.color}`, cursor:'pointer' }}>
-                        {sec.render(x)}
-                      </div>
-                    ))}
+                  {s.address && <div className="wAddr">{s.address}</div>}
+                  <div className="wRow">
+                    {s.access_code && <span className="wKey">🔑 {s.access_code}</span>}
+                    {s.emergency_phone && (
+                      <a className="wCall" href={`tel:${String(s.emergency_phone).replace(/[^0-9+]/g, '')}`}>
+                        📞 {s.emergency_phone}
+                      </a>
+                    )}
+                    {s.address && (
+                      <a className="wNav" target="_blank" rel="noreferrer"
+                        href={`https://map.kakao.com/link/search/${encodeURIComponent(s.address)}`}>
+                        🗺️ 길찾기
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
+          </>
+        )}
+
+        {tab === 'alert' && (
+          <div className="wList">
+            {counts.fault + counts.material === 0 ? (
+              <div className="wEmpty"><div style={{ fontSize: 28 }}>✅</div>대기 중인 항목 없음</div>
+            ) : (
+              <>
+                {faults.map(x => (
+                  <div key={x.id} className="wCard alert red" onClick={() => router.push('/fault')}>
+                    <div className="wCardTop">
+                      <span className="wCardName">{x.site_name} · {x.hogi_no}</span>
+                      <span className="wAgo">{timeAgo(x.created_at)}</span>
+                    </div>
+                    <div className="wDesc">{x.content}</div>
+                    <div className="wMeta">🔧 {x.status} · 담당 {x.assigned_name || '미배정'}</div>
+                  </div>
+                ))}
+                {materials.map(x => (
+                  <div key={x.id} className="wCard alert purple" onClick={() => router.push('/material')}>
+                    <div className="wCardTop">
+                      <span className="wCardName">{x.site_name}</span>
+                      <span className="wAgo">{timeAgo(x.created_at)}</span>
+                    </div>
+                    <div className="wDesc">📦 {x.item_name}</div>
+                    <div className="wMeta">신청자 {x.requester_name || '-'}</div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
-        </main>
-      </div>
+        )}
+      </main>
+
+      <nav className="wNavBar">
+        {MENUS.map(m => {
+          const cnt = m.badgeKey ? (counts as any)[m.badgeKey] : 0;
+          return (
+            <button key={m.path} onClick={() => router.push(m.path)}>
+              <span className="wNavIc">{m.icon}{cnt > 0 && <i className="wDot">{cnt}</i>}</span>
+              <span className="wNavLbl">{m.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       <style>{`
-        * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 4px; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        .wLoad { min-height:100vh; display:flex; align-items:center; justify-content:center;
+          background:#f8fafc; text-align:center; color:#94a3b8; font-size:13px; }
+        .wRoot { min-height:100dvh; background:#f1f5f9; padding-bottom:calc(66px + env(safe-area-inset-bottom));
+          font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif; }
+
+        .wHead { position:sticky; top:0; z-index:20; background:#0f172a; padding:10px 14px 8px; }
+        .wHeadTop { display:flex; align-items:center; justify-content:space-between; }
+        .wLogo { color:#f8fafc; font-weight:800; font-size:15px; }
+        .wOut { background:none; border:1px solid #334155; border-radius:6px; color:#64748b;
+          font-size:11px; padding:4px 9px; font-family:inherit; }
+        .wHeadSub { display:flex; align-items:center; gap:7px; margin-top:6px; font-size:12px; color:#94a3b8; flex-wrap:wrap; }
+        .wHeadSub strong { color:#e2e8f0; font-size:13px; }
+        .wTeam { background:#1e3a5f; color:#93c5fd; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; }
+        .wDate { margin-left:auto; font-size:11px; }
+
+        .wMain { padding:12px 12px 0; }
+        .wKpi { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .wKpiCard { background:#fff; border-radius:12px; border-top:3px solid; padding:12px 10px;
+          display:flex; flex-direction:column; align-items:flex-start; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+        .wKpiIc { font-size:15px; }
+        .wKpiVal { font-size:26px; font-weight:900; line-height:1.1; color:#0f172a; }
+        .wKpiLbl { font-size:11px; color:#94a3b8; font-weight:600; margin-top:2px; }
+
+        .wTabs { display:flex; gap:8px; margin:14px 0 10px; }
+        .wTab { flex:1; padding:10px; border-radius:10px; border:1px solid #e2e8f0; background:#fff;
+          font-size:13px; font-weight:700; color:#64748b; font-family:inherit; }
+        .wTab.on { background:#3b82f6; border-color:#3b82f6; color:#fff; }
+
+        .wSearch { width:100%; border:1px solid #e2e8f0; border-radius:10px; padding:11px 12px;
+          font-size:15px; background:#fff; outline:none; font-family:inherit; margin-bottom:10px; }
+
+        .wList { display:flex; flex-direction:column; gap:8px; }
+        .wEmpty { text-align:center; color:#94a3b8; font-size:13px; padding:40px 0; }
+        .wCard { background:#fff; border-radius:12px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+        .wCard.alert { border-left:3px solid; }
+        .wCard.red { border-left-color:#ef4444; background:#fef2f2; }
+        .wCard.purple { border-left-color:#8b5cf6; background:#faf5ff; }
+        .wCardTop { display:flex; align-items:center; gap:8px; }
+        .wCardName { font-size:15px; font-weight:700; color:#1e293b; flex:1;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .wPill { font-size:11px; font-weight:700; background:#eff6ff; color:#3b82f6;
+          padding:2px 7px; border-radius:7px; flex-shrink:0; }
+        .wAgo { font-size:11px; color:#94a3b8; flex-shrink:0; }
+        .wAddr { font-size:12px; color:#64748b; margin-top:4px; line-height:1.4; }
+        .wDesc { font-size:13px; color:#475569; margin-top:5px; line-height:1.4; }
+        .wMeta { font-size:11px; color:#94a3b8; margin-top:5px; }
+        .wRow { display:flex; gap:6px; margin-top:9px; flex-wrap:wrap; }
+        .wKey, .wCall, .wNav { font-size:13px; font-weight:700; padding:7px 11px; border-radius:9px;
+          text-decoration:none; display:inline-block; }
+        .wKey { background:#fef9c3; color:#a16207; }
+        .wCall { background:#dcfce7; color:#15803d; }
+        .wNav { background:#eff6ff; color:#2563eb; }
+
+        .wNavBar { position:fixed; bottom:0; left:0; right:0; z-index:30; background:#0f172a;
+          display:flex; border-top:1px solid #1e293b; padding-bottom:env(safe-area-inset-bottom); }
+        .wNavBar button { flex:1; background:none; border:none; padding:9px 0 8px; display:flex;
+          flex-direction:column; align-items:center; gap:3px; font-family:inherit; }
+        .wNavIc { font-size:19px; position:relative; }
+        .wDot { position:absolute; top:-4px; right:-9px; background:#ef4444; color:#fff; font-size:9px;
+          font-weight:800; font-style:normal; min-width:15px; height:15px; line-height:15px;
+          border-radius:8px; padding:0 3px; }
+        .wNavLbl { font-size:10px; color:#94a3b8; font-weight:600; }
+
+        @media (min-width:768px) {
+          .wRoot { padding-bottom:0; display:flex; flex-direction:column; min-height:100vh; }
+          .wKpi { grid-template-columns:repeat(4,1fr); gap:10px; }
+          .wKpiVal { font-size:30px; }
+          .wMain { max-width:1100px; width:100%; margin:0 auto; padding:16px 20px 90px; flex:1; }
+          .wTabs { max-width:400px; }
+          .wNavBar { justify-content:center; gap:10px; }
+          .wNavBar button { flex:0 0 96px; }
+        }
       `}</style>
     </div>
   );
