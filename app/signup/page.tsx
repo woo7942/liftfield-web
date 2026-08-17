@@ -368,7 +368,8 @@ export default function SignupPage() {
                 <button type="button"
                   onClick={() => { setInviteMode(!inviteMode); setInviteInfo(null); setInviteMsg(''); setInviteCode(''); }}
                   className="text-sm font-semibold text-blue-600 hover:text-blue-800 transition">
-                  {inviteMode ? '▼ 초대코드 입력 취소' : '🔗 초대코드가 있으신가요?'}
+                                  <p className="text-sm font-semibold text-blue-700">🔗 초대코드 입력 (필수)</p>
+
                 </button>
                 {inviteMode && (
                   <div className="mt-3 space-y-2">
