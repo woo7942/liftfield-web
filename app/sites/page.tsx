@@ -319,6 +319,41 @@ export default function SitesPage() {
     if (sortKey !== k) return <span className="text-gray-300 ml-1">↕</span>;
     return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
+    // ─── 엑셀 내보내기 ───
+  function handleExcelExport() {
+    if (filteredSites.length === 0) { alert('내보낼 현장이 없어요.'); return; }
+
+    const headers = ['현장명','원장번호','계약업체','계약종류','대수','보수료',
+                     '계약일자','만료일자','계약자','전화번호','이메일','지역','주소','팀'];
+
+    const rows = filteredSites.map(s => [
+      getSiteName(s),
+      s.contract_number ?? '',
+      s.company_name ?? '',
+      s.contract_type ?? '',
+      s.elevator_count ?? '',
+      s.maintenance_fee ?? '',
+      s.contract_start ?? '',
+      s.contract_end ?? '',
+      s.contract_person ?? '',
+      s.phone ?? '',
+      s.email ?? '',
+      s.region ?? '',
+      s.address ?? '',
+      s.team_name ?? '',
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!cols'] = [{wch:24},{wch:12},{wch:16},{wch:12},{wch:6},{wch:10},
+                   {wch:12},{wch:12},{wch:10},{wch:14},{wch:20},{wch:10},{wch:30},{wch:10}];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '현장목록');
+
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `현장목록_${today}.xlsx`);
+  }
+
 
   // ─── 엑셀 업로드 ───
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -497,6 +532,7 @@ export default function SitesPage() {
         </div>
         {canEdit && (
           <div className="flex gap-2">
+                        <button onClick={handleExcelExport} className="text-sm bg-gray-600 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg font-medium">⬇️ 다운로드</button>
             <button onClick={() => fileInputRef.current?.click()} className="text-sm bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg font-medium">📊 엑셀</button>
             <button onClick={() => setShowAddModal(true)} className="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium">+ 추가</button>
             <button onClick={handleDeleteAll} className="text-sm bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg font-medium">🗑️ 전체삭제</button>
