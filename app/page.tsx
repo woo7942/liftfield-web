@@ -64,11 +64,13 @@ export default function HomePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const isPro        = userInfo?.subscription?.plan === 'pro';
-  const isCompany    = userInfo?.subscription?.plan === 'company';
+    const hasCompany   = !!(userInfo?.company_id && String(userInfo.company_id).trim() !== '');
+  const isPro        = hasCompany;
+  const isCompany    = hasCompany;
   const isSuperAdmin = userInfo?.super_admin === true;
   const isAdmin      = userInfo?.role === 'admin';
-  const canQna       = isPro || isCompany || isSuperAdmin;
+  const canQna       = hasCompany || isSuperAdmin;
+
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -211,6 +213,35 @@ export default function HomePage() {
           </div>
         </div>
       </header>
+            {/* ── 로그인 사용자 작업 메뉴 ── */}
+      {!authLoading && userInfo && hasCompany && (
+        <section className="bg-slate-50 border-b border-gray-100 px-6 py-6">
+          <div className="max-w-6xl mx-auto">
+            <p className="text-sm font-bold text-gray-500 mb-3">
+              내 업무 {userInfo.team ? `· ${userInfo.team}` : ''}
+            </p>
+            <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+              {[
+                { icon: '🏢', label: '팀별현장', path: '/team-sites' },
+                { icon: '🔧', label: '고장접수', path: '/fault' },
+                { icon: '📋', label: '점검관리', path: '/inspection' },
+                { icon: '🔍', label: '검사지적', path: '/inspect' },
+                { icon: '📦', label: '자재신청', path: '/material' },
+              ].map(m => (
+                <button
+                  key={m.path}
+                  onClick={() => router.push(m.path)}
+                  className="bg-white border border-gray-200 hover:border-blue-400 hover:bg-blue-50 rounded-2xl py-5 flex flex-col items-center gap-2 transition-all hover:-translate-y-0.5"
+                >
+                  <span className="text-2xl">{m.icon}</span>
+                  <span className="text-sm font-bold text-gray-700">{m.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
 
       {/* ── 히어로 ── */}
       <section className="relative overflow-hidden bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-28 px-6 text-center">
