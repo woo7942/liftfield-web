@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import Image from 'next/image';
+
 
 export default function HomePage() {
   const router = useRouter();
@@ -110,12 +112,21 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
 
           {/* 로고 */}
-          <button
-            onClick={() => router.push('/')}
-            className="text-xl font-black text-blue-600 tracking-tight flex items-center gap-2"
-          >
-            🛗 LiftField
-          </button>
+<button
+  onClick={() => router.push('/')}
+  className="text-xl font-black text-blue-600 tracking-tight flex items-center gap-2"
+>
+  <Image
+    src="/logo-mark.png"
+    alt="LiftField"
+    width={32}
+    height={32}
+    priority
+    className="rounded-lg"
+  />
+  LiftField
+</button>
+
 
           {/* 중앙 네비 */}
           <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
