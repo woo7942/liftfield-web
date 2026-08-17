@@ -55,7 +55,7 @@ export default function SignupPage() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
 
   // 초대코드
-  const [inviteMode, setInviteMode] = useState(false);
+  const [inviteMode, setInviteMode] = useState(true);
   const [inviteCode, setInviteCode] = useState('');
   const [inviteInfo, setInviteInfo] = useState<{
     id: string;
@@ -126,7 +126,8 @@ export default function SignupPage() {
     if (!phone.trim()) return '휴대폰 번호를 입력해주세요.';
     if (password.length < 6) return '비밀번호는 6자 이상이어야 해요.';
     if (password !== passwordConfirm) return '비밀번호가 일치하지 않아요.';
-    if (inviteMode && !inviteInfo) return '초대코드를 확인해주세요.';
+        if (!inviteInfo) return '초대코드를 입력하고 확인 버튼을 눌러주세요.';
+
     return null;
   };
 
@@ -392,7 +393,8 @@ export default function SignupPage() {
                 setError('');
                 const err = validateStep1();
                 if (err) { setError(err); return; }
-                setStep(inviteMode && inviteInfo ? 3 : 2);
+                                setStep(3);
+
               }} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition">
                 다음
               </button>
@@ -537,7 +539,8 @@ export default function SignupPage() {
               {error && <p className="text-red-500 text-sm">{error}</p>}
 
               <div className="flex gap-3">
-                <button onClick={() => setStep(inviteMode && inviteInfo ? 1 : 2)}
+                                <button onClick={() => setStep(1)}
+
                   className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50 transition">
                   이전
                 </button>
