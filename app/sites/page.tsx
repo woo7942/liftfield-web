@@ -33,6 +33,8 @@ interface SiteItem {
   company_name?: string;
   phone?: string;
   email?: string;
+  access_code?: string;
+  emergency_phone?: string;
   region?: string;
   team_name?: string;
   source?: 'admin' | 'member';
@@ -83,6 +85,8 @@ const HEADER_MAP: Record<string, keyof SiteItem> = {
   '지역': 'region', '지역명': 'region', '구역': 'region',
   '주소': 'address', '도로명주소': 'address', '지번주소': 'address', '소재지': 'address',
   '메일주소': 'email', '이메일': 'email', 'email': 'email', '이-메일': 'email',
+  '현관비밀번호': 'access_code', '현관비번': 'access_code', '출입번호': 'access_code', '공동현관': 'access_code',
+  '비상통화번호': 'emergency_phone', '비상통화': 'emergency_phone', '비통번호': 'emergency_phone', '비통': 'emergency_phone',
 };
 
 function normalizeHeader(h: string): string {
@@ -323,8 +327,10 @@ export default function SitesPage() {
   function handleExcelExport() {
     if (filteredSites.length === 0) { alert('내보낼 현장이 없어요.'); return; }
 
-    const headers = ['현장명','원장번호','계약업체','계약종류','대수','보수료',
-                     '계약일자','만료일자','계약자','전화번호','이메일','지역','주소','팀'];
+        const headers = ['현장명','원장번호','계약업체','계약종류','대수','보수료',
+                     '계약일자','만료일자','계약자','전화번호','이메일','지역','주소',
+                     '현관비밀번호','비상통화번호','팀'];
+
 
     const rows = filteredSites.map(s => [
       getSiteName(s),
@@ -340,12 +346,16 @@ export default function SitesPage() {
       s.email ?? '',
       s.region ?? '',
       s.address ?? '',
+       s.access_code ?? '',
+      s.emergency_phone ?? '',
       s.team_name ?? '',
+      
     ]);
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     ws['!cols'] = [{wch:24},{wch:12},{wch:16},{wch:12},{wch:6},{wch:10},
-                   {wch:12},{wch:12},{wch:10},{wch:14},{wch:20},{wch:10},{wch:30},{wch:10}];
+                   {wch:12},{wch:12},{wch:10},{wch:14},{wch:20},{wch:10},{wch:30},
+                   {wch:12},{wch:14},{wch:10}];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '현장목록');
