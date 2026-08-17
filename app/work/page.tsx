@@ -83,11 +83,23 @@ export default function WorkPage() {
   }, [userInfo]);
 
   const counts = { fault: faults.length, material: materials.length };
+    const onlyNum = (v: any) => String(v ?? '').replace(/[^0-9]/g, '');
   const filtered = sites.filter(s => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return siteName(s).toLowerCase().includes(q) || (s.address || '').toLowerCase().includes(q);
+    const qn = onlyNum(search);
+    const hitText =
+      siteName(s).toLowerCase().includes(q) ||
+      (s.address || '').toLowerCase().includes(q) ||
+      (s.contract_person || '').toLowerCase().includes(q);
+    const hitNum = qn.length > 0 && (
+      onlyNum(s.phone).includes(qn) ||
+      onlyNum(s.emergency_phone).includes(qn) ||
+      onlyNum(s.access_code).includes(qn)
+    );
+    return hitText || hitNum;
   });
+
 
   if (loading) return (
     <div className="wLoad"><div><div style={{ fontSize: 36 }}>🛗</div><p>로딩 중...</p></div></div>
@@ -137,7 +149,8 @@ export default function WorkPage() {
         {tab === 'site' && (
           <>
             <input className="wSearch" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="🔍 현장명 또는 주소 검색" />
+                            placeholder="🔍 현장명, 주소, 전화번호 검색" />
+
             <div className="wList">
               {filtered.length === 0 ? (
                 <div className="wEmpty"><div style={{ fontSize: 28 }}>🏢</div>담당 현장이 없어요</div>
@@ -148,11 +161,16 @@ export default function WorkPage() {
                     {s.elevator_count ? <span className="wPill">{s.elevator_count}대</span> : null}
                   </div>
                   {s.address && <div className="wAddr">{s.address}</div>}
-                  <div className="wRow">
+                                    <div className="wRow">
                     {s.access_code && <span className="wKey">🔑 {s.access_code}</span>}
+                    {s.phone && (
+                      <a className="wCall" href={`tel:${String(s.phone).replace(/[^0-9+]/g, '')}`}>
+                        📞 담당 {s.phone}
+                      </a>
+                    )}
                     {s.emergency_phone && (
-                      <a className="wCall" href={`tel:${String(s.emergency_phone).replace(/[^0-9+]/g, '')}`}>
-                        📞 {s.emergency_phone}
+                      <a className="wCall alt" href={`tel:${String(s.emergency_phone).replace(/[^0-9+]/g, '')}`}>
+                        🚨 비통 {s.emergency_phone}
                       </a>
                     )}
                     {s.address && (
@@ -162,6 +180,7 @@ export default function WorkPage() {
                       </a>
                     )}
                   </div>
+
                 </div>
               ))}
             </div>
@@ -266,6 +285,8 @@ export default function WorkPage() {
         .wKey { background:#fef9c3; color:#a16207; }
         .wCall { background:#dcfce7; color:#15803d; }
         .wNav { background:#eff6ff; color:#2563eb; }
+                .wCall.alt { background:#fee2e2; color:#b91c1c; }
+
 
         .wNavBar { position:fixed; bottom:0; left:0; right:0; z-index:30; background:#0f172a;
           display:flex; border-top:1px solid #1e293b; padding-bottom:env(safe-area-inset-bottom); }
