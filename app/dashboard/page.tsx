@@ -47,6 +47,7 @@ interface SiteItem {
   contract_end?: string;
   teamName?: string;
   team_name?: string;
+  team?: string;
   region?: string;
   phone?: string;
 }
@@ -109,7 +110,8 @@ const getContractType = (s: SiteItem) => s.contract_type || s.contractType || ''
 const getElevatorCount = (s: SiteItem) => s.elevator_count || s.elevatorCount || 0;
 const getMaintenanceFee = (s: SiteItem) => s.maintenance_fee || s.maintenanceFee || 0;
 const getContractEnd = (s: SiteItem) => s.contract_end || s.contractEnd || '';
-const getTeamName = (s: SiteItem) => s.team_name || s.teamName || '';
+const getTeamName = (s: SiteItem) => s.team || s.team_name || s.teamName || '';
+
 
 // ── 사이드바 메뉴 ──────────────────────────────────
 const MENUS = [
