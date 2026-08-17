@@ -22,6 +22,11 @@ export default function HomePage() {
         if (userData) {
           setUserInfo({ ...userData, uid: session.user.id });
 
+          if (userData.company_id && userData.role !== 'admin' && !userData.super_admin) {
+            router.push('/work');
+            return;
+          }
+
           // pro/company인데 companyId 없으면 setup으로
           const subPlan  = userData.subscription?.plan || 'trial';
           const hasCompany = userData.company_id && userData.company_id.trim() !== '';
