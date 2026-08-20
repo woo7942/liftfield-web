@@ -446,42 +446,43 @@ export default function TeamSitesPage() {
         {/* 테이블 */}
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm table-fixed">
 
               <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-blue-600">
-                      현장명 <SortIcon k="name" />
-                    </button>
-                  </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('teamName')} className="flex items-center justify-center hover:text-blue-600">
-                      팀 <SortIcon k="teamName" />
-                    </button>
-                  </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
-                      대수 <SortIcon k="elevatorCount" />
-                    </button>
-                  </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">담당자</th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">전화번호</th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">비통번호</th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('contractType')} className="flex items-center justify-center hover:text-blue-600">
-                      계약종류 <SortIcon k="contractType" />
-                    </button>
-                  </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
-                    <button onClick={() => handleSort('region')} className="flex items-center justify-center hover:text-blue-600">
-                      지역 <SortIcon k="region" />
-                    </button>
-                  </th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">주소</th>
-                  {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">관리</th>}
-                </tr>
-              </thead>
+  <tr className="bg-gray-50 border-b">
+    <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-40">
+      <button onClick={() => handleSort('name')} className="flex items-center hover:text-blue-600">
+        현장명 <SortIcon k="name" />
+      </button>
+    </th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">
+      <button onClick={() => handleSort('teamName')} className="flex items-center justify-center hover:text-blue-600">
+        팀 <SortIcon k="teamName" />
+      </button>
+    </th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
+      <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
+        대수 <SortIcon k="elevatorCount" />
+      </button>
+    </th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">담당자</th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">전화번호</th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">비통번호</th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-28">
+      <button onClick={() => handleSort('contractType')} className="flex items-center justify-center hover:text-blue-600">
+        계약종류 <SortIcon k="contractType" />
+      </button>
+    </th>
+    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
+      <button onClick={() => handleSort('region')} className="flex items-center justify-center hover:text-blue-600">
+        지역 <SortIcon k="region" />
+      </button>
+    </th>
+    <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-64">주소</th>
+    {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">관리</th>}
+  </tr>
+</thead>
+
               <tbody>
                 {filteredSites.length === 0 ? (
                   <tr>
@@ -761,7 +762,8 @@ function SiteRow({
         ) : '-'}
       </td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.region || '-'}</td>
-      <td className="px-3 py-2.5 text-gray-600 max-w-xs truncate">{site.address || '-'}</td>
+      <td className="px-3 py-2.5 text-gray-600 break-words">{site.address || '-'}</td>
+
       {canEdit && (
         <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
           <button
