@@ -24,7 +24,8 @@ interface SiteItem {
   phone?: string;
   region?: string;
   teamName?: string;
-  source?: 'admin' | 'member';
+  source?: 'admin' | 'member' | 'team';
+
   createdAt?: string;
   managerName?: string;
   memo?: string;
@@ -109,38 +110,55 @@ export default function TeamSitesPage() {
     return () => subscription.unsubscribe();
   }, [router]);
 
-  // ─── 현장 목록 로드 (source === 'member' 인 팀별현장만) ───
-  const reloadSites = async (companyId?: string) => {
-    const cid = companyId ?? userInfo?.companyId;
-    if (!cid) return;
+  // ─── 현장 목록 로드 (source === 'team' 인 팀별현장만) ───
+const reloadSites = async (companyId?: string) => {
+  const cid = companyId ?? userInfo?.companyId;
+  if (!cid) return;
 
-    const { data: sitesData, error } = await supabase
-      .from('sites')
-      .select('id, name, address, elevator_count, phone, region, team_name, source, created_at, manager_name, memo')
-      .eq('company_id', cid)
-      .eq('source', 'member')
-      .order('created_at', { ascending: false });
+  const isAdminUser = userInfo?.role === 'admin' || userInfo?.superAdmin === true;
+  const myTeam = (userInfo?.team || '').trim();
 
-    if (error) { console.error(error); return; }
+  // 기사인데 팀 미배정이면 아무것도 안 보여줌
+  if (!isAdminUser && !myTeam) {
+    setSites([]);
+    setTeams([]);
+    setTotalElevatorCount(0);
+    return;
+  }
 
-    const list: SiteItem[] = (sitesData || []).map(d => ({
-      id: d.id,
-      name: d.name || '',
-      address: d.address || '',
-      elevatorCount: d.elevator_count || 0,
-      phone: d.phone || '',
-      region: d.region || '',
-      teamName: d.team_name || '',
-      source: d.source as 'admin' | 'member',
-      createdAt: d.created_at,
-      managerName: d.manager_name || '',
-      memo: d.memo || '',
-    }));
+  let query = supabase
+    .from('sites')
+    .select('id, name, address, elevator_count, phone, region, team, source, created_at, manager_name, memo')
+    .eq('company_id', cid)
+    .in('source', ['team', 'member']);
 
-    setSites(list);
+  if (!isAdminUser) {
+    query = query.eq('team', myTeam);
+  }
 
-    const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
-    setTeams(Array.from(teamSet));
+  const { data: sitesData, error } = await query.order('created_at', { ascending: false });
+
+  if (error) { console.error(error); return; }
+
+  const list: SiteItem[] = (sitesData || []).map(d => ({
+    id: d.id,
+    name: d.name || '',
+    address: d.address || '',
+    elevatorCount: d.elevator_count || 0,
+    phone: d.phone || '',
+    region: d.region || '',
+    teamName: d.team || '',
+    source: d.source as 'admin' | 'member' | 'team',
+    createdAt: d.created_at,
+    managerName: d.manager_name || '',
+    memo: d.memo || '',
+  }));
+
+  setSites(list);
+
+  const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
+  setTeams(Array.from(teamSet).sort());
+
 
     // 전체 호기 수 집계
     const siteIds = list.map(s => s.id);
@@ -242,7 +260,7 @@ export default function TeamSitesPage() {
         phone: addForm.phone || '',
         region: addForm.region || '',
         elevator_count: addForm.elevatorCount || 0,
-        team_name: addForm.teamName || '',
+        team: addForm.teamName || '',
         manager_name: addForm.managerName || '',
         memo: addForm.memo || '',
         source: 'member',
@@ -275,7 +293,7 @@ export default function TeamSitesPage() {
           phone: editForm.phone || '',
           region: editForm.region || '',
           elevator_count: editForm.elevatorCount || 0,
-          team_name: editForm.teamName || '',
+          team: editForm.teamName || '',
           manager_name: editForm.managerName || '',
           memo: editForm.memo || '',
           updated_at: new Date().toISOString(),
