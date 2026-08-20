@@ -276,7 +276,7 @@ setTeams(Array.from(teamSet).sort());
         team: addForm.teamName || '',
         manager_name: addForm.managerName || '',
         memo: addForm.memo || '',
-        source: 'member',
+         source: 'team',
         company_id: userInfo.companyId,
         created_by: userInfo.uid,
         created_at: new Date().toISOString(),
@@ -394,12 +394,7 @@ setTeams(Array.from(teamSet).sort());
             >
               + 추가
             </button>
-            <button
-              onClick={handleDeleteAll}
-              className="text-sm bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg font-medium"
-            >
-              🗑️ 전체삭제
-            </button>
+            
           </div>
         )}
       </header>
