@@ -127,14 +127,14 @@ const reloadSites = async (companyId?: string) => {
   }
 
   let query = supabase
-    .from('sites')
-    .select('id, name, address, elevator_count, phone, region, team, source, created_at, manager_name, memo')
-    .eq('company_id', cid)
-    .in('source', ['team', 'member']);
+  .from('sites')
+  .select('id, name, address, elevator_count, phone, region, team, source, created_at, manager_name, memo')
+  .eq('company_id', cid);
 
-  if (!isAdminUser) {
-    query = query.eq('team', myTeam);
-  }
+if (!isAdminUser) {
+  query = query.eq('team', myTeam);
+}
+
 
   const { data: sitesData, error } = await query.order('created_at', { ascending: false });
 
