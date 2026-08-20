@@ -249,6 +249,9 @@ setTeams(Array.from(teamSet).sort());
       return 0;
     });
 
+    const filteredElevatorCount = filteredSites.reduce((sum, s) => sum + (s.elevatorCount || 0), 0);
+
+
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(!sortAsc);
     else { setSortKey(key); setSortAsc(true); }
@@ -517,12 +520,13 @@ setTeams(Array.from(teamSet).sort());
           </div>
 
           {/* 하단 합계 */}
-          {filteredSites.length > 0 && (
-            <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
-              <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
-              <span>승강기 <strong className="text-gray-700">{totalElevatorCount}</strong>대</span>
-            </div>
-          )}
+{filteredSites.length > 0 && (
+  <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
+    <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
+    <span>승강기 <strong className="text-gray-700">{filteredElevatorCount}</strong>대</span>
+  </div>
+)}
+
         </div>
       </div>
 
