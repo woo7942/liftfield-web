@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -22,10 +23,11 @@ interface SiteItem {
   address?: string;
   elevatorCount?: number;
   phone?: string;
+  emergencyPhone?: string;   // 비통번호
+  contractType?: string;     // 계약종류
   region?: string;
   teamName?: string;
   source?: 'admin' | 'member' | 'team';
-
   createdAt?: string;
   managerName?: string;
   memo?: string;
@@ -40,7 +42,10 @@ interface ElevatorItem {
   inspectionDate?: string;
 }
 
-type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'region';
+type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'region' | 'contractType';
+
+// 계약종류 고정 옵션 (입력 폼용)
+const CONTRACT_TYPES = ['종합계약', '일반계약', '분담종합계약', '분담일반계약', '종합SMART계약'];
 
 export default function TeamSitesPage() {
   const router = useRouter();
@@ -57,6 +62,8 @@ export default function TeamSitesPage() {
 
   // 필터/정렬
   const [selectedTeam, setSelectedTeam] = useState('전체');
+  const [selectedContractType, setSelectedContractType] = useState('전체');
+  const [groupByContract, setGroupByContract] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortAsc, setSortAsc] = useState(true);
@@ -110,67 +117,63 @@ export default function TeamSitesPage() {
     return () => subscription.unsubscribe();
   }, [router]);
 
-  // ─── 현장 목록 로드 (source === 'team' 인 팀별현장만) ───
-const reloadSites = async (companyId?: string) => {
-  const cid = companyId ?? userInfo?.companyId;
-  if (!cid) return;
+  // ─── 현장 목록 로드 ───
+  const reloadSites = async (companyId?: string) => {
+    const cid = companyId ?? userInfo?.companyId;
+    if (!cid) return;
 
-  const isAdminUser = userInfo?.role === 'admin' || userInfo?.superAdmin === true;
-  const myTeam = (userInfo?.team || '').trim();
+    const isAdminUser = userInfo?.role === 'admin' || userInfo?.superAdmin === true;
+    const myTeam = (userInfo?.team || '').trim();
 
-  // 기사인데 팀 미배정이면 아무것도 안 보여줌
-  if (!isAdminUser && !myTeam) {
-    setSites([]);
-    setTeams([]);
-    setTotalElevatorCount(0);
-    return;
-  }
+    if (!isAdminUser && !myTeam) {
+      setSites([]);
+      setTeams([]);
+      setTotalElevatorCount(0);
+      return;
+    }
 
-  let query = supabase
-  .from('sites')
-  .select('id, name, address, elevator_count, phone, region, team, source, created_at, manager_name, memo')
-  .eq('company_id', cid);
+    let query = supabase
+      .from('sites')
+      .select('id, name, address, elevator_count, phone, emergency_phone, contract_type, region, team, source, created_at, manager_name, memo')
+      .eq('company_id', cid);
 
-if (!isAdminUser) {
-  query = query.eq('team', myTeam);
-}
+    if (!isAdminUser) {
+      query = query.eq('team', myTeam);
+    }
 
+    const { data: sitesData, error } = await query.order('created_at', { ascending: false });
 
-  const { data: sitesData, error } = await query.order('created_at', { ascending: false });
+    if (error) { console.error(error); return; }
 
-  if (error) { console.error(error); return; }
+    const list: SiteItem[] = (sitesData || []).map(d => ({
+      id: d.id,
+      name: d.name || '',
+      address: d.address || '',
+      elevatorCount: d.elevator_count || 0,
+      phone: d.phone || '',
+      emergencyPhone: d.emergency_phone || '',
+      contractType: d.contract_type || '',
+      region: d.region || '',
+      teamName: d.team || '',
+      source: d.source as 'admin' | 'member' | 'team',
+      createdAt: d.created_at,
+      managerName: d.manager_name || '',
+      memo: d.memo || '',
+    }));
 
-  const list: SiteItem[] = (sitesData || []).map(d => ({
-    id: d.id,
-    name: d.name || '',
-    address: d.address || '',
-    elevatorCount: d.elevator_count || 0,
-    phone: d.phone || '',
-    region: d.region || '',
-    teamName: d.team || '',
-    source: d.source as 'admin' | 'member' | 'team',
-    createdAt: d.created_at,
-    managerName: d.manager_name || '',
-    memo: d.memo || '',
-  }));
+    setSites(list);
 
-  setSites(list);
+    const { data: teamRows } = await supabase
+      .from('users')
+      .select('team')
+      .eq('company_id', cid)
+      .not('team', 'is', null);
 
-  // 교체
-const { data: teamRows } = await supabase
-  .from('users')
-  .select('team')
-  .eq('company_id', cid)
-  .not('team', 'is', null);
+    const teamSet = new Set<string>();
+    (teamRows || []).forEach(r => { const t = (r.team || '').trim(); if (t) teamSet.add(t); });
+    list.forEach(s => { const t = (s.teamName || '').trim(); if (t) teamSet.add(t); });
+    setTeams(Array.from(teamSet).sort());
 
-const teamSet = new Set<string>();
-(teamRows || []).forEach(r => { const t = (r.team || '').trim(); if (t) teamSet.add(t); });
-list.forEach(s => { const t = (s.teamName || '').trim(); if (t) teamSet.add(t); });
-setTeams(Array.from(teamSet).sort());
-
-
-
-    // 전체 호기 수 집계
     const siteIds = list.map(s => s.id);
     if (siteIds.length > 0) {
       const { count, error: elevError } = await supabase
@@ -221,18 +224,26 @@ setTeams(Array.from(teamSet).sort());
     }
   }
 
+  // ─── 계약종류 옵션 (실제 데이터 기준) ───
+  const contractTypeOptions = Array.from(
+    new Set(sites.map(s => s.contractType).filter((v): v is string => !!v))
+  ).sort();
+
   // ─── 필터 + 정렬 ───
   const filteredSites = sites
     .filter(s => {
       if (!canEdit && s.teamName !== userInfo?.team) return false;
       if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
+      if (canEdit && selectedContractType !== '전체' && s.contractType !== selectedContractType) return false;
       if (searchText) {
         const q = searchText.toLowerCase();
         return (
           s.name?.toLowerCase().includes(q) ||
           s.teamName?.toLowerCase().includes(q) ||
           s.region?.toLowerCase().includes(q) ||
-          s.managerName?.toLowerCase().includes(q)
+          s.managerName?.toLowerCase().includes(q) ||
+          s.phone?.toLowerCase().includes(q) ||
+          s.emergencyPhone?.toLowerCase().includes(q)
         );
       }
       return true;
@@ -244,13 +255,25 @@ setTeams(Array.from(teamSet).sort());
       else if (sortKey === 'teamName') { valA = a.teamName || ''; valB = b.teamName || ''; }
       else if (sortKey === 'elevatorCount') { valA = a.elevatorCount || 0; valB = b.elevatorCount || 0; }
       else if (sortKey === 'region') { valA = a.region || ''; valB = b.region || ''; }
+      else if (sortKey === 'contractType') { valA = a.contractType || ''; valB = b.contractType || ''; }
       if (valA < valB) return sortAsc ? -1 : 1;
       if (valA > valB) return sortAsc ? 1 : -1;
       return 0;
     });
 
-    const filteredElevatorCount = filteredSites.reduce((sum, s) => sum + (s.elevatorCount || 0), 0);
+  const filteredElevatorCount = filteredSites.reduce((sum, s) => sum + (s.elevatorCount || 0), 0);
 
+  // ─── 계약종류별 그룹핑 ───
+  const groupedByContract = filteredSites.reduce((acc, s) => {
+    const key = s.contractType || '미분류';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(s);
+    return acc;
+  }, {} as Record<string, SiteItem[]>);
+
+  const groupKeys = Object.keys(groupedByContract).sort(
+    (a, b) => groupedByContract[b].length - groupedByContract[a].length
+  );
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -271,12 +294,14 @@ setTeams(Array.from(teamSet).sort());
         name: addForm.name,
         address: addForm.address || '',
         phone: addForm.phone || '',
+        emergency_phone: addForm.emergencyPhone || '',
+        contract_type: addForm.contractType || '',
         region: addForm.region || '',
         elevator_count: addForm.elevatorCount || 0,
         team: addForm.teamName || '',
         manager_name: addForm.managerName || '',
         memo: addForm.memo || '',
-         source: 'team',
+        source: 'team',
         company_id: userInfo.companyId,
         created_by: userInfo.uid,
         created_at: new Date().toISOString(),
@@ -304,6 +329,8 @@ setTeams(Array.from(teamSet).sort());
           name: editForm.name,
           address: editForm.address || '',
           phone: editForm.phone || '',
+          emergency_phone: editForm.emergencyPhone || '',
+          contract_type: editForm.contractType || '',
           region: editForm.region || '',
           elevator_count: editForm.elevatorCount || 0,
           team: editForm.teamName || '',
@@ -344,38 +371,14 @@ setTeams(Array.from(teamSet).sort());
     }
   }
 
-  // ─── 전체 삭제 ───
-  async function handleDeleteAll() {
-    if (!userInfo?.companyId) return;
-    const confirm1 = confirm('⚠️ 팀별현장을 전부 삭제할까요?\n이 작업은 되돌릴 수 없어요!');
-    if (!confirm1) return;
-    const input = prompt('확인을 위해 "전체삭제" 를 입력해주세요:');
-    if (input !== '전체삭제') { alert('취소됐어요.'); return; }
-
-    try {
-      const siteIds = sites.map(s => s.id);
-      if (siteIds.length === 0) return;
-
-      const { error } = await supabase
-        .from('sites')
-        .delete()
-        .in('id', siteIds);
-
-      if (error) throw error;
-
-      await reloadSites();
-      alert(`✅ ${siteIds.length}개 현장이 삭제됐어요.`);
-    } catch (e) {
-      console.error(e);
-      alert('❌ 삭제 중 오류가 발생했어요.');
-    }
-  }
-
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <p className="text-gray-500">로딩 중...</p>
     </div>
   );
+
+  // 테이블 컬럼 수 (colSpan용): 현장명,팀,대수,담당자,전화번호,비통번호,계약종류,지역,주소 = 9 (+관리 1)
+  const emptyColSpan = canEdit ? 10 : 9;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -394,7 +397,6 @@ setTeams(Array.from(teamSet).sort());
             >
               + 추가
             </button>
-            
           </div>
         )}
       </header>
@@ -406,18 +408,38 @@ setTeams(Array.from(teamSet).sort());
           <input
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
-            placeholder="현장명, 팀명, 지역, 담당자 검색..."
+            placeholder="현장명, 팀명, 지역, 담당자, 전화번호, 비통번호 검색..."
             className="flex-1 min-w-48 border rounded-xl px-3 py-2 text-sm bg-white"
           />
           {canEdit && (
-            <select
-              value={selectedTeam}
-              onChange={e => setSelectedTeam(e.target.value)}
-              className="border rounded-xl px-3 py-2 text-sm bg-white"
-            >
-              <option value="전체">전체 팀</option>
-              {teams.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <>
+              <select
+                value={selectedTeam}
+                onChange={e => setSelectedTeam(e.target.value)}
+                className="border rounded-xl px-3 py-2 text-sm bg-white"
+              >
+                <option value="전체">전체 팀</option>
+                {teams.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+
+              <select
+                value={selectedContractType}
+                onChange={e => setSelectedContractType(e.target.value)}
+                className="border rounded-xl px-3 py-2 text-sm bg-white"
+              >
+                <option value="전체">전체 계약종류</option>
+                {contractTypeOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+
+              <button
+                onClick={() => setGroupByContract(!groupByContract)}
+                className={`text-sm px-3 py-2 rounded-xl border ${
+                  groupByContract ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600'
+                }`}
+              >
+                📂 계약종류별 모아보기
+              </button>
+            </>
           )}
         </div>
 
@@ -444,6 +466,12 @@ setTeams(Array.from(teamSet).sort());
                   </th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">담당자</th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">전화번호</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">비통번호</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
+                    <button onClick={() => handleSort('contractType')} className="flex items-center justify-center hover:text-blue-600">
+                      계약종류 <SortIcon k="contractType" />
+                    </button>
+                  </th>
                   <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
                     <button onClick={() => handleSort('region')} className="flex items-center justify-center hover:text-blue-600">
                       지역 <SortIcon k="region" />
@@ -454,60 +482,41 @@ setTeams(Array.from(teamSet).sort());
                 </tr>
               </thead>
               <tbody>
-  {filteredSites.length === 0 ? (
-    <tr>
-      <td colSpan={canEdit ? 8 : 7} className="text-center py-16 text-gray-400">
-        <p className="text-3xl mb-2">🏢</p>
-        {canEdit && selectedTeam !== '전체' ? (
-          <>
-            <p className="text-gray-500">{selectedTeam}에 배정된 현장이 없어요</p>
-            <p className="text-xs mt-1">+ 추가 버튼으로 배정하거나, 기존 현장을 수정해 팀을 바꿀 수 있어요</p>
-          </>
-        ) : (
-          <p>팀별 현장이 없어요</p>
-        )}
-      </td>
-    </tr>
-  ) : (
-    filteredSites.map((site, idx) => (
-
-                    <tr
-                      key={site.id}
-                      onClick={() => handleSiteClick(site)}
-                      className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`}
-                    >
-                      <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{site.name}</td>
-                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                        {site.teamName ? (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{site.teamName}</span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                        {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                        {site.managerName || '-'}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                        {site.phone || '-'}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
-                        {site.region || '-'}
-                      </td>
-                      <td className="px-3 py-2.5 text-gray-600 max-w-xs truncate">
-                        {site.address || '-'}
-                      </td>
-                      {canEdit && (
-                        <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
-                          <button
-                            onClick={() => handleDeleteSite(site.id)}
-                            className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50"
-                          >
-                            삭제
-                          </button>
-                        </td>
+                {filteredSites.length === 0 ? (
+                  <tr>
+                    <td colSpan={emptyColSpan} className="text-center py-16 text-gray-400">
+                      <p className="text-3xl mb-2">🏢</p>
+                      {canEdit && selectedTeam !== '전체' ? (
+                        <>
+                          <p className="text-gray-500">{selectedTeam}에 배정된 현장이 없어요</p>
+                          <p className="text-xs mt-1">+ 추가 버튼으로 배정하거나, 기존 현장을 수정해 팀을 바꿀 수 있어요</p>
+                        </>
+                      ) : (
+                        <p>팀별 현장이 없어요</p>
                       )}
-                    </tr>
+                    </td>
+                  </tr>
+                ) : groupByContract ? (
+                  groupKeys.map(key => (
+                    <React.Fragment key={key}>
+                      <tr className="bg-blue-50 border-b">
+                        <td colSpan={emptyColSpan} className="px-3 py-2 font-semibold text-blue-700 text-sm">
+                          📂 {key} — {groupedByContract[key].length}개 현장 /{' '}
+                          {groupedByContract[key].reduce((sum, s) => sum + (s.elevatorCount || 0), 0)}대
+                        </td>
+                      </tr>
+                      {groupedByContract[key].map((site, idx) => (
+                        <SiteRow key={site.id} site={site} idx={idx} canEdit={canEdit}
+                          onClick={() => handleSiteClick(site)}
+                          onDelete={() => handleDeleteSite(site.id)} />
+                      ))}
+                    </React.Fragment>
+                  ))
+                ) : (
+                  filteredSites.map((site, idx) => (
+                    <SiteRow key={site.id} site={site} idx={idx} canEdit={canEdit}
+                      onClick={() => handleSiteClick(site)}
+                      onDelete={() => handleDeleteSite(site.id)} />
                   ))
                 )}
               </tbody>
@@ -515,13 +524,12 @@ setTeams(Array.from(teamSet).sort());
           </div>
 
           {/* 하단 합계 */}
-{filteredSites.length > 0 && (
-  <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
-    <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
-    <span>승강기 <strong className="text-gray-700">{filteredElevatorCount}</strong>대</span>
-  </div>
-)}
-
+          {filteredSites.length > 0 && (
+            <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
+              <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
+              <span>승강기 <strong className="text-gray-700">{filteredElevatorCount}</strong>대</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -536,6 +544,7 @@ setTeams(Array.from(teamSet).sort());
                 { label: '주소', field: 'address', type: 'text' },
                 { label: '담당자', field: 'managerName', type: 'text' },
                 { label: '전화번호', field: 'phone', type: 'text' },
+                { label: '비통번호', field: 'emergencyPhone', type: 'text' },
                 { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                 { label: '지역', field: 'region', type: 'text' },
                 { label: '메모', field: 'memo', type: 'text' },
@@ -553,6 +562,19 @@ setTeams(Array.from(teamSet).sort());
                   />
                 </div>
               ))}
+
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">계약종류</label>
+                <select
+                  value={addForm.contractType || ''}
+                  onChange={e => setAddForm(prev => ({ ...prev, contractType: e.target.value }))}
+                  className="w-full border rounded-xl px-3 py-2 text-sm"
+                >
+                  <option value="">선택 안 함</option>
+                  {CONTRACT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
                 <select
@@ -592,6 +614,8 @@ setTeams(Array.from(teamSet).sort());
                     { label: '배정 팀', value: selectedSite.teamName },
                     { label: '담당자', value: selectedSite.managerName },
                     { label: '전화번호', value: selectedSite.phone },
+                    { label: '비통번호', value: selectedSite.emergencyPhone },
+                    { label: '계약종류', value: selectedSite.contractType },
                     { label: '승강기 대수', value: selectedSite.elevatorCount ? `${selectedSite.elevatorCount}대` : undefined },
                     { label: '지역', value: selectedSite.region },
                     { label: '주소', value: selectedSite.address },
@@ -647,6 +671,7 @@ setTeams(Array.from(teamSet).sort());
                     { label: '주소', field: 'address', type: 'text' },
                     { label: '담당자', field: 'managerName', type: 'text' },
                     { label: '전화번호', field: 'phone', type: 'text' },
+                    { label: '비통번호', field: 'emergencyPhone', type: 'text' },
                     { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                     { label: '지역', field: 'region', type: 'text' },
                     { label: '메모', field: 'memo', type: 'text' },
@@ -664,6 +689,19 @@ setTeams(Array.from(teamSet).sort());
                       />
                     </div>
                   ))}
+
+                  <div>
+                    <label className="text-sm text-gray-600 mb-0.5 block">계약종류</label>
+                    <select
+                      value={editForm.contractType || ''}
+                      onChange={e => setEditForm(prev => ({ ...prev, contractType: e.target.value }))}
+                      className="w-full border rounded-xl px-3 py-2 text-sm"
+                    >
+                      <option value="">선택 안 함</option>
+                      {CONTRACT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
                     <select
@@ -686,5 +724,53 @@ setTeams(Array.from(teamSet).sort());
         </div>
       )}
     </div>
+  );
+}
+
+// ─── 현장 행 컴포넌트 (일반 목록 / 그룹 목록 공통 사용) ───
+function SiteRow({
+  site, idx, canEdit, onClick, onDelete,
+}: {
+  site: SiteItem;
+  idx: number;
+  canEdit: boolean;
+  onClick: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <tr
+      onClick={onClick}
+      className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`}
+    >
+      <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{site.name}</td>
+      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+        {site.teamName ? (
+          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{site.teamName}</span>
+        ) : '-'}
+      </td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
+        {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
+      </td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.managerName || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.phone || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.emergencyPhone || '-'}</td>
+      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+        {site.contractType ? (
+          <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">{site.contractType}</span>
+        ) : '-'}
+      </td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.region || '-'}</td>
+      <td className="px-3 py-2.5 text-gray-600 max-w-xs truncate">{site.address || '-'}</td>
+      {canEdit && (
+        <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={onDelete}
+            className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50"
+          >
+            삭제
+          </button>
+        </td>
+      )}
+    </tr>
   );
 }
