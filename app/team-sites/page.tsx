@@ -156,8 +156,18 @@ if (!isAdminUser) {
 
   setSites(list);
 
-  const teamSet = new Set(list.map(s => s.teamName).filter(Boolean) as string[]);
-  setTeams(Array.from(teamSet).sort());
+  // 교체
+const { data: teamRows } = await supabase
+  .from('users')
+  .select('team')
+  .eq('company_id', cid)
+  .not('team', 'is', null);
+
+const teamSet = new Set<string>();
+(teamRows || []).forEach(r => { const t = (r.team || '').trim(); if (t) teamSet.add(t); });
+list.forEach(s => { const t = (s.teamName || '').trim(); if (t) teamSet.add(t); });
+setTeams(Array.from(teamSet).sort());
+
 
 
     // 전체 호기 수 집계
@@ -446,16 +456,23 @@ if (!isAdminUser) {
                 </tr>
               </thead>
               <tbody>
-                {filteredSites.length === 0 ? (
-                  <tr>
-                    <td colSpan={canEdit ? 8 : 7} className="text-center py-16 text-gray-400">
-                      <p className="text-3xl mb-2">🏢</p>
-                      <p>팀별 현장이 없어요</p>
-                      {canEdit && <p className="text-xs mt-1">현장 추가를 해보세요!</p>}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredSites.map((site, idx) => (
+  {filteredSites.length === 0 ? (
+    <tr>
+      <td colSpan={canEdit ? 8 : 7} className="text-center py-16 text-gray-400">
+        <p className="text-3xl mb-2">🏢</p>
+        {canEdit && selectedTeam !== '전체' ? (
+          <>
+            <p className="text-gray-500">{selectedTeam}에 배정된 현장이 없어요</p>
+            <p className="text-xs mt-1">+ 추가 버튼으로 배정하거나, 기존 현장을 수정해 팀을 바꿀 수 있어요</p>
+          </>
+        ) : (
+          <p>팀별 현장이 없어요</p>
+        )}
+      </td>
+    </tr>
+  ) : (
+    filteredSites.map((site, idx) => (
+
                     <tr
                       key={site.id}
                       onClick={() => handleSiteClick(site)}
