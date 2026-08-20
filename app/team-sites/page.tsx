@@ -446,7 +446,8 @@ export default function TeamSitesPage() {
         {/* 테이블 */}
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
+
               <thead>
                 <tr className="bg-gray-50 border-b">
                   <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap">
