@@ -185,7 +185,8 @@ export default function QuotePage() {
       phone: items.site_phone || '',
       manager_name: items.site_manager || '',
     });
-    setTitle(q.title || '');
+    // 입력창에는 순수 제목만 표시 (DB의 title 컬럼에는 [현장명]이 붙어있으므로 items.title을 우선 사용)
+    setTitle(items.title ?? q.title ?? '');
     setMaterials(items.materials && items.materials.length ? items.materials : [{ name: '', unit: '', qty: 1, unit_price: 0, note: '' }]);
     setLaborType(items.labor?.type || '공');
     setLaborQty(items.labor?.qty ?? 1);
@@ -207,6 +208,8 @@ export default function QuotePage() {
     setSaving(true);
     try {
       const siteName = selectedSite.site_name || selectedSite.name || '';
+      // DB의 title 컬럼에는 [현장명] 제목 형태로 저장하여 목록/상세/인쇄 어디서든 현장명이 함께 보이도록 함
+      const finalTitle = siteName ? `[${siteName}] ${title.trim()}` : title.trim();
       const itemsPayload = {
         materials,
         labor: { type: laborType, qty: laborQty, unit_price: laborUnitPrice, amount: calc.laborDirect },
@@ -220,7 +223,7 @@ export default function QuotePage() {
         site_address: selectedSite.address || '',
         site_phone: selectedSite.phone || '',
         site_manager: selectedSite.manager_name || '',
-        title: title.trim(),
+        title: title.trim(), // 순수 제목 별도 보관 (수정 모드 진입 시 사용)
         remarks,
         breakdown: calc,
       };
@@ -230,7 +233,7 @@ export default function QuotePage() {
         const { error } = await supabase.from('quotes').update({
           site_id: selectedSite.id,
           team_id: effectiveTeam,
-          title: title.trim(),
+          title: finalTitle,
           amount: calc.total,
           items: itemsPayload,
           status: '승인대기',
@@ -243,7 +246,7 @@ export default function QuotePage() {
       } else {
         const { error } = await supabase.from('quotes').insert({
           site_id: selectedSite.id,
-          title: title.trim(),
+          title: finalTitle,
           amount: calc.total,
           status: '승인대기',
           team_id: effectiveTeam,
@@ -313,6 +316,15 @@ export default function QuotePage() {
     loadQuotes();
   };
 
+  // ── 견적서 삭제 (작성자 본인 또는 운영자만 가능) ──
+  const handleDeleteQuote = async (q: any, e: React.MouseEvent) => {
+    e.stopPropagation(); // 행 클릭 시 상세보기가 함께 열리는 것을 방지
+    if (!confirm(`"${q.title}" 견적서를 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다.`)) return;
+    const { error } = await supabase.from('quotes').delete().eq('id', q.id);
+    if (error) { alert('삭제 실패: ' + error.message); return; }
+    loadQuotes();
+  };
+
   const uploadCompanyImage = async (file: File, kind: 'logo' | 'stamp') => {
     const setUploading = kind === 'logo' ? setLogoUploading : setStampUploading;
     setUploading(true);
@@ -362,7 +374,7 @@ export default function QuotePage() {
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>불러오는 중...</div>;
 
   const won = (n: number) => Math.round(n || 0).toLocaleString('ko-KR');
-  // ── 승인 여부와 관계없이 운영자 또는 작성자 본인이면 수정 가능 ──
+  // ── 승인 여부와 관계없이 운영자 또는 작성자 본인이면 수정/삭제 가능 ──
   const canEdit = (q: any) => isAdmin || q.created_by === userInfo.uid;
   const fmtDate = (iso: string) => {
     if (!iso) return '';
@@ -419,31 +431,37 @@ export default function QuotePage() {
 
             <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
               {quotes.length === 0 ? (
-  <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>등록된 견적서가 없습니다.</div>
-) : quotes.map(q => (
-  <div key={q.id} onClick={() => setSelectedQuote(q)}
-    style={{ padding: 14, borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex',
-      justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-    <div>
-      <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>
-        {q.items?.site_name ? `[${q.items.site_name}] ${q.title}` : q.title}
-      </div>
-      <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-        {q.team_id} · {won(q.amount)}원 · {(q.created_at || '').slice(0, 10)}
-      </div>
-    </div>
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-      <span style={{
-        fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 10,
-        background: q.status === '승인' ? '#dcfce7' : q.status === '반려' ? '#fee2e2' : '#fef9c3',
-        color: q.status === '승인' ? '#15803d' : q.status === '반려' ? '#b91c1c' : '#a16207',
-      }}>{q.status}</span>
-      {q.invoice_issued && <span style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', padding: '3px 8px', borderRadius: 10 }}>계산서 발급</span>}
-      {q.payment_confirmed && <span style={{ fontSize: 11, background: '#f0fdf4', color: '#16a34a', padding: '3px 8px', borderRadius: 10 }}>결제완료</span>}
-    </div>
-  </div>
-))}
-
+                <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>등록된 견적서가 없습니다.</div>
+              ) : quotes.map(q => (
+                <div key={q.id} onClick={() => setSelectedQuote(q)}
+                  style={{ padding: 14, borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex',
+                    justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>
+                      {q.title}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+                      {q.team_id} · {won(q.amount)}원 · {(q.created_at || '').slice(0, 10)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 10,
+                      background: q.status === '승인' ? '#dcfce7' : q.status === '반려' ? '#fee2e2' : '#fef9c3',
+                      color: q.status === '승인' ? '#15803d' : q.status === '반려' ? '#b91c1c' : '#a16207',
+                    }}>{q.status}</span>
+                    {q.invoice_issued && <span style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', padding: '3px 8px', borderRadius: 10 }}>계산서 발급</span>}
+                    {q.payment_confirmed && <span style={{ fontSize: 11, background: '#f0fdf4', color: '#16a34a', padding: '3px 8px', borderRadius: 10 }}>결제완료</span>}
+                    {canEdit(q) && (
+                      <button onClick={(e) => handleDeleteQuote(q, e)}
+                        style={{ border: 'none', background: 'none', color: '#cbd5e1', fontSize: 16, padding: '2px 6px', cursor: 'pointer', lineHeight: 1 }}
+                        title="삭제">
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -792,8 +810,8 @@ export default function QuotePage() {
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right', marginBottom: 16 }}>※상기금액은 부가세 포함 합계금액임.</div>
 
-              {/* 제목 (공사명) */}
-              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>▣ 제목 : {selectedQuote.title}</div>
+              {/* 제목 (공사명) - 순수 제목 표시 (DB의 title에는 [현장명]이 붙어있으므로 items.title 우선 사용) */}
+              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>▣ 제목 : {selectedQuote.items?.title || selectedQuote.title}</div>
 
               {/* 자재비 표 */}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 4 }}>
