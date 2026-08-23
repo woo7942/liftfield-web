@@ -117,6 +117,7 @@ const getTeamName = (s: SiteItem) => s.team || s.team_name || s.teamName || '';
 const MENUS = [
   { icon: '📋', label: '계약현장',  path: '/sites',      badgeKey: '' },
   { icon: '🏢', label: '팀별현장',  path: '/team-sites', badgeKey: '' },
+  { icon: '📄', label: '견적서',    path: '/quote',      badgeKey: 'quote' },
   { icon: '🔧', label: '고장접수',  path: '/fault',      badgeKey: 'fault' },
   { icon: '📋', label: '점검관리',  path: '/inspection', badgeKey: '' },
   { icon: '🔍', label: '검사지적',  path: '/inspect',    badgeKey: '' },
@@ -126,9 +127,11 @@ const MENUS = [
   { icon: '🔗', label: '팀 초대',   path: '/team',       badgeKey: '' },
 ];
 
+
 const BADGE_COLORS: Record<string, string> = {
-  fault: '#ef4444', material: '#f59e0b', member: '#8b5cf6',
+  fault: '#ef4444', material: '#f59e0b', member: '#8b5cf6', quote: '#3b82f6',
 };
+
 
 const S = {
   flex: (gap = 0): React.CSSProperties => ({ display: 'flex', alignItems: 'center', gap }),
@@ -152,7 +155,8 @@ export default function DashboardPage() {
   const [loading, setLoading]       = useState(true);
   const [sites, setSites]           = useState<SiteItem[]>([]);
   const [totalElevs, setTotalElevs] = useState(0);
-  const [counts, setCounts]         = useState({ fault: 0, material: 0, member: 0 });
+  const [counts, setCounts] = useState({ fault: 0, material: 0, member: 0, quote: 0 });
+
   const [activeFilter, setActiveFilter] = useState<'all' | 'expired' | 'urgent' | 'warning'>('all');
   const [search, setSearch]         = useState('');
   const [activeNav, setActiveNav]   = useState('/dashboard');
@@ -260,6 +264,15 @@ export default function DashboardPage() {
       const { data: matData } = await matQ;
       setMaterialList((matData || []) as MaterialItem[]);
       setCounts(p => ({ ...p, material: matData?.length || 0 }));
+
+      // 견적서 승인대기
+let quoteQ = supabase.from('quotes')
+  .select('id', { count: 'exact' })
+  .eq('status', '승인대기');
+if (!userInfo.super_admin) quoteQ = quoteQ.eq('company_id', cid);
+const { count: quoteCount } = await quoteQ;
+setCounts(p => ({ ...p, quote: quoteCount || 0 }));
+
 
       // 직원 수
       const memberCacheKey = `memberCount_${cid}`;
