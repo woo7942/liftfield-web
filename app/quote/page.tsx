@@ -456,27 +456,28 @@ export default function QuotePage() {
                 </div>
 
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: 13, fontWeight: 700 }}>1. 자재비</label>
-                  <button onClick={addMaterialRow} style={{ fontSize: 12, color: '#3b82f6', border: '1px solid #93c5fd', borderRadius: 6, padding: '3px 8px', background: '#fff' }}>+ 품목추가</button>
-                </div>
+  <label style={{ fontSize: 13, fontWeight: 700 }}>1. 자재비</label>
+  <button onClick={addMaterialRow} style={{ fontSize: 12, color: '#3b82f6', border: '1px solid #93c5fd', borderRadius: 6, padding: '3px 8px', background: '#fff' }}>+ 품목추가</button>
+</div>
 
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', marginBottom: 6 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 0.8fr 1fr 1.2fr 1.5fr 0.4fr', background: '#f8fafc', padding: '6px 8px', fontSize: 11, fontWeight: 700, color: '#64748b' }}>
-                    <span>품명</span><span>단위</span><span>수량</span><span>단가</span><span>금액</span><span>비고</span><span></span>
-                  </div>
-                  {materials.map((m, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 0.8fr 1fr 1.2fr 1.5fr 0.4fr', padding: '5px 8px', gap: 4, borderTop: '1px solid #f1f5f9', alignItems: 'center' }}>
-                      <input value={m.name} onChange={e => updateMaterial(i, 'name', e.target.value)} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12 }} />
-                      <input value={m.unit} onChange={e => updateMaterial(i, 'unit', e.target.value)} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12 }} />
-                      <input type="number" value={m.qty} onChange={e => updateMaterial(i, 'qty', Number(e.target.value))} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12 }} />
-                      <input type="number" value={m.unit_price} onChange={e => updateMaterial(i, 'unit_price', Number(e.target.value))} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12 }} />
-                      <span style={{ fontSize: 12, textAlign: 'right', paddingRight: 4 }}>{won(m.qty * m.unit_price)}</span>
-                      <input value={m.note} onChange={e => updateMaterial(i, 'note', e.target.value)} placeholder="비고" style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12 }} />
-                      <button onClick={() => removeMaterialRow(i)} style={{ border: 'none', background: 'none', color: '#ef4444', fontSize: 14 }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, color: '#64748b', marginBottom: 14 }}>자재비 소계: <strong>{won(calc.materialsSubtotal)}원</strong></div>
+<div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden', marginBottom: 6 }}>
+  <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 0.8fr 1fr 1.2fr 1.5fr 0.4fr', gap: 4, background: '#f8fafc', padding: '6px 8px', fontSize: 11, fontWeight: 700, color: '#64748b' }}>
+    <span>품명</span><span>단위</span><span>수량</span><span>단가</span><span>금액</span><span>비고</span><span></span>
+  </div>
+  {materials.map((m, i) => (
+    <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 0.8fr 1fr 1.2fr 1.5fr 0.4fr', padding: '5px 8px', gap: 4, borderTop: '1px solid #f1f5f9', alignItems: 'center', boxSizing: 'border-box' }}>
+      <input value={m.name} onChange={e => updateMaterial(i, 'name', e.target.value)} style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' }} />
+      <input value={m.unit} onChange={e => updateMaterial(i, 'unit', e.target.value)} style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' }} />
+      <input type="number" value={m.qty} onChange={e => updateMaterial(i, 'qty', Number(e.target.value))} style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' }} />
+      <input type="number" value={m.unit_price} onChange={e => updateMaterial(i, 'unit_price', Number(e.target.value))} style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' }} />
+      <span style={{ fontSize: 12, textAlign: 'right', paddingRight: 4 }}>{won(m.qty * m.unit_price)}</span>
+      <input value={m.note} onChange={e => updateMaterial(i, 'note', e.target.value)} placeholder="비고" style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 6px', fontSize: 12, boxSizing: 'border-box' }} />
+      <button onClick={() => removeMaterialRow(i)} style={{ border: 'none', background: 'none', color: '#ef4444', fontSize: 14 }}>✕</button>
+    </div>
+  ))}
+</div>
+<div style={{ textAlign: 'right', fontSize: 12, color: '#64748b', marginBottom: 14 }}>자재비 소계: <strong>{won(calc.materialsSubtotal)}원</strong></div>
+
 
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, display: 'block' }}>2. 직접인건비</label>
