@@ -618,10 +618,11 @@ export default function QuotePage() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
           <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 680, maxHeight: '90vh', overflowY: 'auto', padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontWeight: 900, fontSize: 16 }}>견적서 상세</h3>
-              <button onClick={() => { setSelectedQuote(null); setShowRejectInput(false); }} style={{ border: 'none', background: 'none', fontSize: 18 }}>✕</button>
-            </div>
+            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+  <h3 style={{ fontWeight: 900, fontSize: 16 }}>견적서 상세</h3>
+  <button onClick={() => { setSelectedQuote(null); setShowRejectInput(false); }} style={{ border: 'none', background: 'none', fontSize: 18 }}>✕</button>
+</div>
+
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -643,6 +644,14 @@ export default function QuotePage() {
                 </button>
               )}
             </div>
+            {selectedQuote.status === '승인' && (
+  <button onClick={() => window.print()}
+    className="no-print"
+    style={{ fontSize: 12, fontWeight: 700, color: '#475569', border: '1px solid #cbd5e1', borderRadius: 8, padding: '5px 10px', background: '#fff' }}>
+    🖨️ 인쇄
+  </button>
+)}
+
 
             {selectedQuote.status === '반려' && selectedQuote.rejected_reason && (
               <div style={{ background: '#fef2f2', color: '#b91c1c', fontSize: 12, padding: 10, borderRadius: 8, marginBottom: 14 }}>
@@ -666,13 +675,14 @@ export default function QuotePage() {
                     {company?.company_name}
                   </div>
                   <div style={{ color: '#475569' }}>{fmtDate(selectedQuote.created_at)}</div>
-                  <div style={{ position: 'relative', display: 'inline-block', marginTop: 2 }}>
-                    대 표 : {company?.ceo_name}
-                    {company?.stamp_image_url && (
-                      <img src={company.stamp_image_url} alt="직인"
-                        style={{ position: 'absolute', top: -8, right: -46, width: 46, height: 46, objectFit: 'contain', opacity: 0.9 }} />
-                    )}
-                  </div>
+                  <div style={{ position: 'relative', display: 'inline-block', marginTop: 4, paddingRight: 44 }}>
+  대 표 : {company?.ceo_name}
+  {company?.stamp_image_url && (
+    <img src={company.stamp_image_url} alt="직인"
+      style={{ position: 'absolute', top: -12, right: 2, width: 42, height: 42, objectFit: 'contain', opacity: 0.85 }} />
+  )}
+</div>
+
                 </div>
               </div>
 
@@ -845,15 +855,31 @@ export default function QuotePage() {
       )}
 
       <style>{`
-        input[type=number]::-webkit-outer-spin-button,
-        input[type=number]::-webkit-inner-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        input[type=number] {
-          -moz-appearance: textfield;
-        }
-      `}</style>
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type=number] {
+    -moz-appearance: textfield;
+  }
+
+  @media print {
+    body * { visibility: hidden; }
+    #quote-document, #quote-document * { visibility: visible; }
+    #quote-document {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 10mm;
+    }
+    .no-print { display: none !important; }
+  }
+`}</style>
+
     </div>
   );
 }
