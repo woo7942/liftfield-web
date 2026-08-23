@@ -34,6 +34,7 @@ export default function QuotePage() {
   });
 
   const [showCreate, setShowCreate] = useState(false);
+  const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
   const [siteSearch, setSiteSearch] = useState('');
   const [siteResults, setSiteResults] = useState<any[]>([]);
   const [selectedSite, setSelectedSite] = useState<any>(null);
@@ -42,7 +43,6 @@ export default function QuotePage() {
     { name: '', unit: '', qty: 1, unit_price: 0, note: '' },
   ]);
 
-  // ── 직접인건비: 공/식 선택 + 수량 + 단가 ──
   const [laborType, setLaborType] = useState<LaborType>('공');
   const [laborQty, setLaborQty] = useState<number>(1);
   const [laborUnitPrice, setLaborUnitPrice] = useState<number>(0);
@@ -152,6 +152,29 @@ export default function QuotePage() {
     setTitle(''); setMaterials([{ name: '', unit: '', qty: 1, unit_price: 0, note: '' }]);
     setLaborType('공'); setLaborQty(1); setLaborUnitPrice(0);
     setRemarks('');
+    setEditingQuoteId(null);
+  };
+
+  // ── 견적서 수정 모드 진입 ──
+  const openEdit = (q: any) => {
+    const items = q.items || {};
+    setEditingQuoteId(q.id);
+    setSelectedSite({
+      id: q.site_id,
+      site_name: items.site_name || (items.client_name || '').replace(' 귀중', ''),
+      name: items.site_name || (items.client_name || '').replace(' 귀중', ''),
+      address: items.site_address || '',
+      phone: items.site_phone || '',
+      manager_name: items.site_manager || '',
+    });
+    setTitle(q.title || '');
+    setMaterials(items.materials && items.materials.length ? items.materials : [{ name: '', unit: '', qty: 1, unit_price: 0, note: '' }]);
+    setLaborType(items.labor?.type || '공');
+    setLaborQty(items.labor?.qty ?? 1);
+    setLaborUnitPrice(items.labor?.unit_price ?? 0);
+    setRemarks(items.remarks || '');
+    setSelectedQuote(null);
+    setShowCreate(true);
   };
 
   const handleSaveQuote = async () => {
@@ -166,21 +189,43 @@ export default function QuotePage() {
         labor_direct: calc.laborDirect,
         rates,
         client_name: `${siteName} 귀중`,
+        site_name: siteName,
+        site_address: selectedSite.address || '',
+        site_phone: selectedSite.phone || '',
+        site_manager: selectedSite.manager_name || '',
         title: title.trim(),
         remarks,
         breakdown: calc,
       };
-      const { error } = await supabase.from('quotes').insert({
-        site_id: selectedSite.id,
-        title: title.trim(),
-        amount: calc.total,
-        status: '승인대기',
-        team_id: userInfo.team,
-        created_by: userInfo.uid,
-        items: itemsPayload,
-        created_at: new Date().toISOString(),
-      });
-      if (error) throw error;
+
+      if (editingQuoteId) {
+        // 수정 저장: 재검토를 위해 승인대기로 초기화
+        const { error } = await supabase.from('quotes').update({
+          site_id: selectedSite.id,
+          title: title.trim(),
+          amount: calc.total,
+          items: itemsPayload,
+          status: '승인대기',
+          approved_by: null,
+          approved_at: null,
+          rejected_reason: null,
+          updated_at: new Date().toISOString(),
+        }).eq('id', editingQuoteId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('quotes').insert({
+          site_id: selectedSite.id,
+          title: title.trim(),
+          amount: calc.total,
+          status: '승인대기',
+          team_id: userInfo.team,
+          created_by: userInfo.uid,
+          items: itemsPayload,
+          created_at: new Date().toISOString(),
+        });
+        if (error) throw error;
+      }
+
       setShowCreate(false);
       resetCreateForm();
       loadQuotes();
@@ -288,7 +333,8 @@ export default function QuotePage() {
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>불러오는 중...</div>;
 
-  const won = (n: number) => Math.round(n).toLocaleString('ko-KR');
+  const won = (n: number) => Math.round(n || 0).toLocaleString('ko-KR');
+  const canEdit = (q: any) => (q.status === '승인대기' || q.status === '반려') && (isAdmin || q.created_by === userInfo.uid);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f1f5f9', paddingBottom: 40 }}>
@@ -342,7 +388,7 @@ export default function QuotePage() {
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>{q.title}</div>
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-                      {q.team_id} · {won(q.amount || 0)}원 · {(q.created_at || '').slice(0, 10)}
+                      {q.team_id} · {won(q.amount)}원 · {(q.created_at || '').slice(0, 10)}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -427,7 +473,7 @@ export default function QuotePage() {
           <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '90vh',
             overflowY: 'auto', padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
-              <h3 style={{ fontWeight: 900, fontSize: 17 }}>새 견적서 작성</h3>
+              <h3 style={{ fontWeight: 900, fontSize: 17 }}>{editingQuoteId ? '견적서 수정' : '새 견적서 작성'}</h3>
               <button onClick={() => { setShowCreate(false); resetCreateForm(); }} style={{ border: 'none', background: 'none', fontSize: 18 }}>✕</button>
             </div>
 
@@ -456,7 +502,9 @@ export default function QuotePage() {
                     <div style={{ fontWeight: 800, fontSize: 14, color: '#1e3a8a' }}>{selectedSite.site_name || selectedSite.name}</div>
                     <div style={{ fontSize: 12, color: '#60a5fa' }}>{selectedSite.address}</div>
                   </div>
-                  <button onClick={() => setSelectedSite(null)} style={{ fontSize: 12, color: '#3b82f6', background: 'none', border: 'none' }}>변경</button>
+                  {!editingQuoteId && (
+                    <button onClick={() => setSelectedSite(null)} style={{ fontSize: 12, color: '#3b82f6', background: 'none', border: 'none' }}>변경</button>
+                  )}
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
@@ -465,7 +513,6 @@ export default function QuotePage() {
                     style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 10, padding: '9px 12px', fontSize: 13, boxSizing: 'border-box' }} />
                 </div>
 
-                {/* ── 1. 자재비 ── */}
                 <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label style={{ fontSize: 13, fontWeight: 700 }}>1. 자재비</label>
                   <button onClick={addMaterialRow} style={{ fontSize: 12, color: '#3b82f6', border: '1px solid #93c5fd', borderRadius: 6, padding: '3px 8px', background: '#fff' }}>+ 품목추가</button>
@@ -502,7 +549,6 @@ export default function QuotePage() {
                 </div>
                 <div style={{ textAlign: 'right', fontSize: 12, color: '#64748b', marginBottom: 14 }}>자재비 소계: <strong>{won(calc.materialsSubtotal)}원</strong></div>
 
-                {/* ── 2. 직접인건비 (공/식 선택 + 수량 + 단가) ── */}
                 <div style={{ marginBottom: 8 }}>
                   <label style={{ fontSize: 13, fontWeight: 700 }}>2. 직접인건비</label>
                 </div>
@@ -553,7 +599,7 @@ export default function QuotePage() {
                 <button onClick={handleSaveQuote} disabled={saving}
                   style={{ width: '100%', marginTop: 16, background: '#3b82f6', color: '#fff', border: 'none',
                     borderRadius: 10, padding: '13px', fontWeight: 800, fontSize: 14 }}>
-                  {saving ? '저장 중...' : '견적서 저장 (승인요청)'}
+                  {saving ? '저장 중...' : editingQuoteId ? '수정 저장 (재승인 요청)' : '견적서 저장 (승인요청)'}
                 </button>
               </>
             )}
@@ -564,43 +610,102 @@ export default function QuotePage() {
       {selectedQuote && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto', padding: 20 }}>
+          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '90vh', overflowY: 'auto', padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-              <h3 style={{ fontWeight: 900, fontSize: 16 }}>{selectedQuote.title}</h3>
+              <h3 style={{ fontWeight: 900, fontSize: 16 }}>견적서 상세</h3>
               <button onClick={() => { setSelectedQuote(null); setShowRejectInput(false); }} style={{ border: 'none', background: 'none', fontSize: 18 }}>✕</button>
             </div>
 
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-              {selectedQuote.items?.client_name} · {selectedQuote.team_id} · {(selectedQuote.created_at || '').slice(0, 10)}
-            </div>
-
-            <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, fontSize: 13, marginBottom: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 15 }}>
-                <span>합계금액</span><span style={{ color: '#3b82f6' }}>{won(selectedQuote.amount || 0)}</span>
-              </div>
-            </div>
-
-            {selectedQuote.items?.remarks && (
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>특기사항: {selectedQuote.items.remarks}</div>
-            )}
-
-            <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 10,
-                background: selectedQuote.status === '승인' ? '#dcfce7' : selectedQuote.status === '반려' ? '#fee2e2' : '#fef9c3',
-                color: selectedQuote.status === '승인' ? '#15803d' : selectedQuote.status === '반려' ? '#b91c1c' : '#a16207' }}>
-                {selectedQuote.status}
-              </span>
-              {selectedQuote.status !== '승인대기' && (
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                  {selectedQuote.approved_by} · {(selectedQuote.approved_at || '').slice(0, 16).replace('T', ' ')}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 10,
+                  background: selectedQuote.status === '승인' ? '#dcfce7' : selectedQuote.status === '반려' ? '#fee2e2' : '#fef9c3',
+                  color: selectedQuote.status === '승인' ? '#15803d' : selectedQuote.status === '반려' ? '#b91c1c' : '#a16207' }}>
+                  {selectedQuote.status}
                 </span>
+                {selectedQuote.status !== '승인대기' && (
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                    {selectedQuote.approved_by} · {(selectedQuote.approved_at || '').slice(0, 16).replace('T', ' ')}
+                  </span>
+                )}
+              </div>
+              {canEdit(selectedQuote) && (
+                <button onClick={() => openEdit(selectedQuote)}
+                  style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', border: '1px solid #93c5fd', borderRadius: 8, padding: '5px 10px', background: '#fff' }}>
+                  ✏️ 수정
+                </button>
               )}
             </div>
+
             {selectedQuote.status === '반려' && selectedQuote.rejected_reason && (
               <div style={{ background: '#fef2f2', color: '#b91c1c', fontSize: 12, padding: 10, borderRadius: 8, marginBottom: 14 }}>
                 반려 사유: {selectedQuote.rejected_reason}
               </div>
             )}
+
+            {/* ── 견적서 문서 미리보기 ── */}
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 18, marginBottom: 14, background: '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, borderBottom: '2px solid #1e293b', paddingBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 4 }}>견 적 서</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#334155', marginTop: 6 }}>{selectedQuote.items?.client_name}</div>
+                </div>
+                {company?.logo_image_url && <img src={company.logo_image_url} alt="로고" style={{ height: 42, objectFit: 'contain' }} />}
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>{selectedQuote.title}</div>
+
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: '6px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>품명</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>단위</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>수량</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>단가</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>금액</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>비고</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedQuote.items?.materials || []).map((m: any, i: number) => (
+                    <tr key={i}>
+                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9' }}>{m.name}</td>
+                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9' }}>{m.unit}</td>
+                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>{m.qty}</td>
+                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>{won(m.unit_price)}</td>
+                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>{won(m.qty * m.unit_price)}</td>
+                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9' }}>{m.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>
+                직접인건비: {selectedQuote.items?.labor?.type} {selectedQuote.items?.labor?.qty} × {won(selectedQuote.items?.labor?.unit_price)}원 = {won(selectedQuote.items?.labor?.amount)}원
+              </div>
+
+              <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, fontSize: 12, color: '#374151' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>자재비 소계</span><span>{won(selectedQuote.items?.breakdown?.materialsSubtotal)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>직접인건비 (간접노무비 포함)</span><span>{won(selectedQuote.items?.breakdown?.laborSubtotal)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>경비 및 일반관리비</span><span>{won(selectedQuote.items?.breakdown?.overhead)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>기업이윤</span><span>{won(selectedQuote.items?.breakdown?.profit)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, borderTop: '1px solid #e2e8f0', paddingTop: 6 }}><span>공급가액</span><span>{won(selectedQuote.items?.breakdown?.supplyAmount)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>부가세</span><span>{won(selectedQuote.items?.breakdown?.vat)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 15, borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 4 }}>
+                  <span>합계금액</span><span style={{ color: '#3b82f6' }}>{won(selectedQuote.amount)}</span>
+                </div>
+              </div>
+
+              {selectedQuote.items?.remarks && (
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 10 }}>특기사항: {selectedQuote.items.remarks}</div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
+                <span style={{ fontSize: 12, color: '#475569' }}>{company?.company_name}</span>
+                <span style={{ fontSize: 12, color: '#475569' }}>대표 {company?.ceo_name}</span>
+                {company?.stamp_image_url && <img src={company.stamp_image_url} alt="직인" style={{ width: 44, height: 44, objectFit: 'contain' }} />}
+              </div>
+            </div>
 
             {isAdmin && selectedQuote.status === '승인대기' && !showRejectInput && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
