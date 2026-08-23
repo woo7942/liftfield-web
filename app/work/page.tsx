@@ -10,7 +10,9 @@ const MENUS = [
   { icon: '📋', label: '점검',   path: '/inspection' },
   { icon: '🔍', label: '검사',   path: '/inspect' },
   { icon: '📦', label: '자재',   path: '/material',   badgeKey: 'material' },
+  { icon: '📄', label: '견적서', path: '/quote' },
 ];
+
 
 const siteName = (s: any) => s.site_name || s.name || '';
 const timeAgo = (v: any) => {
