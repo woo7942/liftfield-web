@@ -147,17 +147,17 @@ export default function QuotePage() {
     vat: company?.vat_rate ?? 0.10,
   };
 
-  // ── 계산 로직: 퍼센트 기반 항목(간접인건비/경비및일반관리비/기업이윤/부가세/합계)에 천단위 절사 적용 ──
+  // ── 계산 로직: 천단위 절사는 최종 합계금액(total)에만 적용, 중간 항목은 절사 없이 그대로 계산 ──
   // ── 체크 해제 시 해당 항목은 0으로 처리되어 뒤이은 계산의 기준액도 자동으로 줄어듦 (레고 방식) ──
   const calc = useMemo(() => {
     const materialsSubtotal = materials.reduce((sum, m) => sum + (Number(m.qty) || 0) * (Number(m.unit_price) || 0), 0);
     const laborDirect = (Number(laborQty) || 0) * (Number(laborUnitPrice) || 0);
-    const laborIndirect = includeIndirectLabor ? truncateThousand(laborDirect * rates.labor_indirect) : 0;
+    const laborIndirect = includeIndirectLabor ? laborDirect * rates.labor_indirect : 0;
     const laborSubtotal = laborDirect + laborIndirect;
-    const overhead = includeOverhead ? truncateThousand((materialsSubtotal + laborSubtotal) * rates.overhead) : 0;
-    const profit = includeProfit ? truncateThousand((materialsSubtotal + overhead) * rates.profit) : 0;
+    const overhead = includeOverhead ? (materialsSubtotal + laborSubtotal) * rates.overhead : 0;
+    const profit = includeProfit ? (materialsSubtotal + overhead) * rates.profit : 0;
     const supplyAmount = materialsSubtotal + laborSubtotal + overhead + profit;
-    const vat = truncateThousand(supplyAmount * rates.vat);
+    const vat = supplyAmount * rates.vat;
     const total = truncateThousand(supplyAmount + vat);
     return { materialsSubtotal, laborDirect, laborIndirect, laborSubtotal, overhead, profit, supplyAmount, vat, total };
   }, [materials, laborQty, laborUnitPrice, rates, includeIndirectLabor, includeOverhead, includeProfit]);
@@ -362,7 +362,8 @@ export default function QuotePage() {
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>불러오는 중...</div>;
 
   const won = (n: number) => Math.round(n || 0).toLocaleString('ko-KR');
-  const canEdit = (q: any) => (q.status === '승인대기' || q.status === '반려') && (isAdmin || q.created_by === userInfo.uid);
+  // ── 승인 여부와 관계없이 운영자 또는 작성자 본인이면 수정 가능 ──
+  const canEdit = (q: any) => isAdmin || q.created_by === userInfo.uid;
   const fmtDate = (iso: string) => {
     if (!iso) return '';
     const d = new Date(iso);
