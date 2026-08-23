@@ -422,12 +422,6 @@ export default function TeamPage() {
               <span className="text-xs text-purple-500 font-semibold">🏢 Company</span>
             </div>
             <button
-              onClick={() => router.push('/company-info')}
-              className="bg-purple-100 text-purple-700 text-xs px-3 py-1.5 rounded-xl font-semibold hover:bg-purple-200 transition"
-            >
-              🏢 회사정보 관리
-            </button>
-            <button
               onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
               className="text-xs text-gray-400 hover:text-gray-600"
             >
