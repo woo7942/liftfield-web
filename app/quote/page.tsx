@@ -35,6 +35,7 @@ export default function QuotePage() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
+  const [createTeam, setCreateTeam] = useState(''); // 운영자가 견적서 작성 시 선택하는 담당 팀
   const [siteSearch, setSiteSearch] = useState('');
   const [siteResults, setSiteResults] = useState<any[]>([]);
   const [selectedSite, setSelectedSite] = useState<any>(null);
@@ -86,6 +87,11 @@ export default function QuotePage() {
     init();
   }, [router]);
 
+  // 일반 팀원은 담당 팀이 자기 팀으로 고정
+  useEffect(() => {
+    if (userInfo && !isAdmin) setCreateTeam(userInfo.team);
+  }, [userInfo, isAdmin]);
+
   const loadQuotes = async () => {
     if (!userInfo) return;
     let q = supabase.from('quotes').select('*').order('created_at', { ascending: false });
@@ -106,10 +112,12 @@ export default function QuotePage() {
 
   useEffect(() => {
     if (!showCreate || !siteSearch.trim() || !userInfo) { setSiteResults([]); return; }
+    if (isAdmin && !createTeam) { setSiteResults([]); return; }
     const t = setTimeout(async () => {
       let q = supabase.from('sites').select('id, name, site_name, address, phone, manager_name, team')
         .eq('company_id', userInfo.company_id);
       if (!isAdmin) q = q.eq('team', userInfo.team);
+      else if (createTeam) q = q.eq('team', createTeam);
       const { data } = await q;
       const kw = siteSearch.toLowerCase();
       const filtered = (data || []).filter((s: any) =>
@@ -119,7 +127,7 @@ export default function QuotePage() {
       setSiteResults(filtered.slice(0, 20));
     }, 300);
     return () => clearTimeout(t);
-  }, [siteSearch, showCreate, userInfo, isAdmin]);
+  }, [siteSearch, showCreate, userInfo, isAdmin, createTeam]);
 
   const addMaterialRow = () => setMaterials(prev => [...prev, { name: '', unit: '', qty: 1, unit_price: 0, note: '' }]);
   const removeMaterialRow = (idx: number) => setMaterials(prev => prev.filter((_, i) => i !== idx));
@@ -153,12 +161,14 @@ export default function QuotePage() {
     setLaborType('공'); setLaborQty(1); setLaborUnitPrice(0);
     setRemarks('');
     setEditingQuoteId(null);
+    setCreateTeam(isAdmin ? '' : (userInfo?.team || ''));
   };
 
   // ── 견적서 수정 모드 진입 ──
   const openEdit = (q: any) => {
     const items = q.items || {};
     setEditingQuoteId(q.id);
+    setCreateTeam(q.team_id || (isAdmin ? '' : userInfo?.team || ''));
     setSelectedSite({
       id: q.site_id,
       site_name: items.site_name || (items.client_name || '').replace(' 귀중', ''),
@@ -178,6 +188,8 @@ export default function QuotePage() {
   };
 
   const handleSaveQuote = async () => {
+    const effectiveTeam = isAdmin ? createTeam : userInfo.team;
+    if (isAdmin && !effectiveTeam) { alert('담당 팀을 선택해주세요.'); return; }
     if (!selectedSite) { alert('현장을 선택해주세요.'); return; }
     if (!title.trim()) { alert('제목을 입력해주세요.'); return; }
     setSaving(true);
@@ -199,9 +211,10 @@ export default function QuotePage() {
       };
 
       if (editingQuoteId) {
-        // 수정 저장: 재검토를 위해 승인대기로 초기화
+        // 수정 저장: 재검토를 위해 승인대기로 초기화 (팀도 변경 가능)
         const { error } = await supabase.from('quotes').update({
           site_id: selectedSite.id,
+          team_id: effectiveTeam,
           title: title.trim(),
           amount: calc.total,
           items: itemsPayload,
@@ -218,7 +231,7 @@ export default function QuotePage() {
           title: title.trim(),
           amount: calc.total,
           status: '승인대기',
-          team_id: userInfo.team,
+          team_id: effectiveTeam,
           created_by: userInfo.uid,
           items: itemsPayload,
           created_at: new Date().toISOString(),
@@ -376,7 +389,7 @@ export default function QuotePage() {
               )}
               <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
                 style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13 }} />
-              <button onClick={() => setShowCreate(true)}
+              <button onClick={() => { resetCreateForm(); setShowCreate(true); }}
                 style={{ marginLeft: 'auto', background: '#3b82f6', color: '#fff', border: 'none',
                   padding: '9px 16px', borderRadius: 8, fontWeight: 700, fontSize: 13 }}>
                 + 새 견적서
@@ -482,7 +495,23 @@ export default function QuotePage() {
               <button onClick={() => { setShowCreate(false); resetCreateForm(); }} style={{ border: 'none', background: 'none', fontSize: 18 }}>✕</button>
             </div>
 
-            {!selectedSite ? (
+            {isAdmin && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 13, fontWeight: 700, marginBottom: 5, display: 'block' }}>담당 팀 *</label>
+                <select value={createTeam}
+                  onChange={e => { setCreateTeam(e.target.value); if (!editingQuoteId) setSelectedSite(null); }}
+                  style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 10, padding: '9px 12px', fontSize: 13, boxSizing: 'border-box' }}>
+                  <option value="">팀을 선택하세요</option>
+                  {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            {isAdmin && !createTeam ? (
+              <div style={{ padding: '30px 10px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                담당 팀을 먼저 선택해주세요.
+              </div>
+            ) : !selectedSite ? (
               <div>
                 <input value={siteSearch} onChange={e => setSiteSearch(e.target.value)}
                   placeholder="현장명, 주소로 검색"
@@ -614,7 +643,7 @@ export default function QuotePage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: '#f8fafc', fontWeight: 700 }}>
                     <span>부가세 ({(rates.vat * 100).toFixed(0)}%)</span><span>{won(calc.vat)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 14px', background: '#475569', color: '#fff', fontWeight: 900, fontSize: 15 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 14px', background: '#eff6ff', fontWeight: 900, fontSize: 15, color: '#2563eb' }}>
                     <span>합계금액</span><span>{won(calc.total)}</span>
                   </div>
                 </div>
@@ -717,10 +746,10 @@ export default function QuotePage() {
                 ☎ {company?.phone}{company?.fax ? `   Fax ${company.fax}` : ''}
               </div>
 
-              {/* 견적금액 - 크게 강조 */}
-              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '16px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              {/* 견적금액 - 라벨과 숫자 크기 동일 */}
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 <span style={{ fontSize: 16, fontWeight: 800, color: '#1e3a8a' }}>견적금액</span>
-                <span style={{ fontSize: 28, fontWeight: 900, color: '#2563eb' }}>₩ {won(selectedQuote.amount)} 원</span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: '#2563eb' }}>₩ {won(selectedQuote.amount)} 원</span>
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right', marginBottom: 16 }}>※상기금액은 부가세 포함 합계금액임.</div>
 
@@ -810,9 +839,9 @@ export default function QuotePage() {
                     <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
                   </tr>
                   <tr>
-                    <td colSpan={4} style={{ padding: '9px 6px', border: '1px solid #475569', textAlign: 'right', fontWeight: 900, background: '#475569', color: '#fff' }}>합 계 금 액</td>
-                    <td style={{ padding: '9px 6px', border: '1px solid #475569', textAlign: 'right', fontWeight: 900, background: '#475569', color: '#fff' }}>{won(selectedQuote.amount)}</td>
-                    <td style={{ padding: '9px 6px', border: '1px solid #475569', background: '#475569', fontSize: 10, color: '#cbd5e1' }}>백단위절사</td>
+                    <td colSpan={4} style={{ padding: '7px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 900, background: '#eff6ff' }}>합 계 금 액</td>
+                    <td style={{ padding: '7px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 900, background: '#eff6ff', color: '#2563eb' }}>{won(selectedQuote.amount)}</td>
+                    <td style={{ padding: '7px 6px', border: '1px solid #e2e8f0', background: '#eff6ff', fontSize: 10, color: '#94a3b8' }}>백단위절사</td>
                   </tr>
                 </tbody>
               </table>
