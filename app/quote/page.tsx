@@ -48,6 +48,11 @@ export default function QuotePage() {
   const [laborQty, setLaborQty] = useState<number>(1);
   const [laborUnitPrice, setLaborUnitPrice] = useState<number>(0);
 
+  // ── 레고 기능: 간접인건비 / 경비및일반관리비 / 기업이윤 포함 여부 (기본값 전체 체크) ──
+  const [includeIndirectLabor, setIncludeIndirectLabor] = useState(true);
+  const [includeOverhead, setIncludeOverhead] = useState(true);
+  const [includeProfit, setIncludeProfit] = useState(true);
+
   const [remarks, setRemarks] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -142,23 +147,26 @@ export default function QuotePage() {
     vat: company?.vat_rate ?? 0.10,
   };
 
+  // ── 계산 로직: 퍼센트 기반 항목(간접인건비/경비및일반관리비/기업이윤/부가세/합계)에 천단위 절사 적용 ──
+  // ── 체크 해제 시 해당 항목은 0으로 처리되어 뒤이은 계산의 기준액도 자동으로 줄어듦 (레고 방식) ──
   const calc = useMemo(() => {
     const materialsSubtotal = materials.reduce((sum, m) => sum + (Number(m.qty) || 0) * (Number(m.unit_price) || 0), 0);
     const laborDirect = (Number(laborQty) || 0) * (Number(laborUnitPrice) || 0);
-    const laborIndirect = laborDirect * rates.labor_indirect;
+    const laborIndirect = includeIndirectLabor ? truncateThousand(laborDirect * rates.labor_indirect) : 0;
     const laborSubtotal = laborDirect + laborIndirect;
-    const overhead = (materialsSubtotal + laborSubtotal) * rates.overhead;
-    const profit = (materialsSubtotal + overhead) * rates.profit;
+    const overhead = includeOverhead ? truncateThousand((materialsSubtotal + laborSubtotal) * rates.overhead) : 0;
+    const profit = includeProfit ? truncateThousand((materialsSubtotal + overhead) * rates.profit) : 0;
     const supplyAmount = materialsSubtotal + laborSubtotal + overhead + profit;
-    const vat = supplyAmount * rates.vat;
+    const vat = truncateThousand(supplyAmount * rates.vat);
     const total = truncateThousand(supplyAmount + vat);
     return { materialsSubtotal, laborDirect, laborIndirect, laborSubtotal, overhead, profit, supplyAmount, vat, total };
-  }, [materials, laborQty, laborUnitPrice, rates]);
+  }, [materials, laborQty, laborUnitPrice, rates, includeIndirectLabor, includeOverhead, includeProfit]);
 
   const resetCreateForm = () => {
     setSiteSearch(''); setSiteResults([]); setSelectedSite(null);
     setTitle(''); setMaterials([{ name: '', unit: '', qty: 1, unit_price: 0, note: '' }]);
     setLaborType('공'); setLaborQty(1); setLaborUnitPrice(0);
+    setIncludeIndirectLabor(true); setIncludeOverhead(true); setIncludeProfit(true); // 새 견적서는 항상 전체 체크
     setRemarks('');
     setEditingQuoteId(null);
     setCreateTeam(isAdmin ? '' : (userInfo?.team || ''));
@@ -182,6 +190,10 @@ export default function QuotePage() {
     setLaborType(items.labor?.type || '공');
     setLaborQty(items.labor?.qty ?? 1);
     setLaborUnitPrice(items.labor?.unit_price ?? 0);
+    // 기존 견적서(체크 필드 없음)는 기본값 true로 처리, 저장된 값이 있으면 그대로 반영
+    setIncludeIndirectLabor(items.includeIndirectLabor !== false);
+    setIncludeOverhead(items.includeOverhead !== false);
+    setIncludeProfit(items.includeProfit !== false);
     setRemarks(items.remarks || '');
     setSelectedQuote(null);
     setShowCreate(true);
@@ -200,6 +212,9 @@ export default function QuotePage() {
         labor: { type: laborType, qty: laborQty, unit_price: laborUnitPrice, amount: calc.laborDirect },
         labor_direct: calc.laborDirect,
         rates,
+        includeIndirectLabor,
+        includeOverhead,
+        includeProfit,
         client_name: `${siteName} 귀중`,
         site_name: siteName,
         site_address: selectedSite.address || '',
@@ -353,6 +368,11 @@ export default function QuotePage() {
     const d = new Date(iso);
     return `${d.getFullYear()}. ${String(d.getMonth() + 1).padStart(2, '0')}. ${String(d.getDate()).padStart(2, '0')}`;
   };
+
+  // 상세보기(견적서 문서)에서 각 항목 표시 여부 (기존 견적서는 필드 없으므로 기본 true)
+  const inclIndirect = selectedQuote?.items?.includeIndirectLabor !== false;
+  const inclOverhead = selectedQuote?.items?.includeOverhead !== false;
+  const inclProfit = selectedQuote?.items?.includeProfit !== false;
 
   return (
     <div style={{ minHeight: '100vh', background: '#f1f5f9', paddingBottom: 40 }}>
@@ -625,17 +645,29 @@ export default function QuotePage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px' }}>
                     <span>직접인건비</span><span>{won(calc.laborDirect)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px' }}>
-                    <span>간접인건비 (직접인건비 × {(rates.labor_indirect * 100).toFixed(0)}%)</span><span>{won(calc.laborIndirect)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={includeIndirectLabor} onChange={e => setIncludeIndirectLabor(e.target.checked)} />
+                      간접인건비 (직접인건비 × {(rates.labor_indirect * 100).toFixed(0)}%)
+                    </label>
+                    <span>{won(calc.laborIndirect)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: '#f8fafc', fontWeight: 700 }}>
                     <span>인건비 소계</span><span>{won(calc.laborSubtotal)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px' }}>
-                    <span>경비 및 일반관리비 ({(rates.overhead * 100).toFixed(0)}%)</span><span>{won(calc.overhead)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={includeOverhead} onChange={e => setIncludeOverhead(e.target.checked)} />
+                      경비 및 일반관리비 ({(rates.overhead * 100).toFixed(0)}%)
+                    </label>
+                    <span>{won(calc.overhead)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px' }}>
-                    <span>기업이윤 ({(rates.profit * 100).toFixed(0)}%)</span><span>{won(calc.profit)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={includeProfit} onChange={e => setIncludeProfit(e.target.checked)} />
+                      기업이윤 ({(rates.profit * 100).toFixed(0)}%)
+                    </label>
+                    <span>{won(calc.profit)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: '#f8fafc', fontWeight: 700 }}>
                     <span>공급가액</span><span>{won(calc.supplyAmount)}</span>
@@ -647,6 +679,9 @@ export default function QuotePage() {
                     <span>합계금액</span><span>{won(calc.total)}</span>
                   </div>
                 </div>
+                <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                  ※ 체크 해제 시 해당 항목이 견적서에서 완전히 제외되고 합계금액에서도 차감됩니다. (현장 협의 시 활용)
+                </p>
 
                 <button onClick={handleSaveQuote} disabled={saving}
                   style={{ width: '100%', marginTop: 16, background: '#3b82f6', color: '#fff', border: 'none',
@@ -799,33 +834,42 @@ export default function QuotePage() {
                     <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(selectedQuote.items?.breakdown?.laborDirect)}</td>
                     <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
                   </tr>
-                  <tr>
-                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
-                      간접인건비 (직접인건비 × {(((selectedQuote.items?.rates?.labor_indirect) ?? rates.labor_indirect) * 100).toFixed(0)}%)
-                    </td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(selectedQuote.items?.breakdown?.laborIndirect)}</td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
-                  </tr>
+                  {/* 간접인건비: 체크 해제 시 줄 자체를 숨김 (레고 방식) */}
+                  {inclIndirect && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
+                        간접인건비 (직접인건비 × {(((selectedQuote.items?.rates?.labor_indirect) ?? rates.labor_indirect) * 100).toFixed(0)}%)
+                      </td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(selectedQuote.items?.breakdown?.laborIndirect)}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                    </tr>
+                  )}
                   <tr style={{ background: '#f8fafc' }}>
                     <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>소 계</td>
                     <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.laborSubtotal)}</td>
                     <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
                   </tr>
 
-                  <tr>
-                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
-                      3. 경비 및 일반관리비 ((1+2항) × {(((selectedQuote.items?.rates?.overhead) ?? rates.overhead) * 100).toFixed(0)}%)
-                    </td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.overhead)}</td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
-                  </tr>
-                  <tr>
-                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
-                      4. 기업이윤 ((1+3항) × {(((selectedQuote.items?.rates?.profit) ?? rates.profit) * 100).toFixed(0)}%)
-                    </td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.profit)}</td>
-                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
-                  </tr>
+                  {/* 경비및일반관리비: 체크 해제 시 줄 자체를 숨김 */}
+                  {inclOverhead && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
+                        3. 경비 및 일반관리비 ((1+2항) × {(((selectedQuote.items?.rates?.overhead) ?? rates.overhead) * 100).toFixed(0)}%)
+                      </td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.overhead)}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                    </tr>
+                  )}
+                  {/* 기업이윤: 체크 해제 시 줄 자체를 숨김 */}
+                  {inclProfit && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
+                        4. 기업이윤 ((1+3항) × {(((selectedQuote.items?.rates?.profit) ?? rates.profit) * 100).toFixed(0)}%)
+                      </td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.profit)}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                    </tr>
+                  )}
                   <tr style={{ background: '#f1f5f9' }}>
                     <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>금 액</td>
                     <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.supplyAmount)}</td>
