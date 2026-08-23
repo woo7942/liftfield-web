@@ -335,6 +335,11 @@ export default function QuotePage() {
 
   const won = (n: number) => Math.round(n || 0).toLocaleString('ko-KR');
   const canEdit = (q: any) => (q.status === '승인대기' || q.status === '반려') && (isAdmin || q.created_by === userInfo.uid);
+  const fmtDate = (iso: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return `${d.getFullYear()}. ${String(d.getMonth() + 1).padStart(2, '0')}. ${String(d.getDate()).padStart(2, '0')}`;
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: '#f1f5f9', paddingBottom: 40 }}>
@@ -586,11 +591,13 @@ export default function QuotePage() {
 
                 <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, fontSize: 13, color: '#374151' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>자재비 소계</span><span>{won(calc.materialsSubtotal)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>직접인건비 (간접노무비 +{rates.labor_indirect * 100}%)</span><span>{won(calc.laborSubtotal)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>경비 및 일반관리비 ({rates.overhead * 100}%)</span><span>{won(calc.overhead)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>기업이윤 ({rates.profit * 100}%)</span><span>{won(calc.profit)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>직접인건비</span><span>{won(calc.laborDirect)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>간접인건비 (직접인건비 × {(rates.labor_indirect * 100).toFixed(0)}%)</span><span>{won(calc.laborIndirect)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#94a3b8' }}><span>인건비 소계</span><span>{won(calc.laborSubtotal)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>경비 및 일반관리비 ({(rates.overhead * 100).toFixed(0)}%)</span><span>{won(calc.overhead)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>기업이윤 ({(rates.profit * 100).toFixed(0)}%)</span><span>{won(calc.profit)}</span></div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, borderTop: '1px solid #e2e8f0', paddingTop: 6 }}><span>공급가액</span><span>{won(calc.supplyAmount)}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>부가세 ({rates.vat * 100}%)</span><span>{won(calc.vat)}</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>부가세 ({(rates.vat * 100).toFixed(0)}%)</span><span>{won(calc.vat)}</span></div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 15, borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 4 }}>
                     <span>합계금액</span><span style={{ color: '#3b82f6' }}>{won(calc.total)}</span>
                   </div>
@@ -610,7 +617,7 @@ export default function QuotePage() {
       {selectedQuote && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '90vh', overflowY: 'auto', padding: 20 }}>
+          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 680, maxHeight: '90vh', overflowY: 'auto', padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <h3 style={{ fontWeight: 900, fontSize: 16 }}>견적서 상세</h3>
               <button onClick={() => { setSelectedQuote(null); setShowRejectInput(false); }} style={{ border: 'none', background: 'none', fontSize: 18 }}>✕</button>
@@ -643,69 +650,156 @@ export default function QuotePage() {
               </div>
             )}
 
-            {/* ── 견적서 문서 미리보기 ── */}
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 18, marginBottom: 14, background: '#fff' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, borderBottom: '2px solid #1e293b', paddingBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 4 }}>견 적 서</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#334155', marginTop: 6 }}>{selectedQuote.items?.client_name}</div>
-                </div>
-                {company?.logo_image_url && <img src={company.logo_image_url} alt="로고" style={{ height: 42, objectFit: 'contain' }} />}
+            {/* ══════════════ 견적서 문서 미리보기 (실제 양식 재현) ══════════════ */}
+            <div id="quote-document" style={{ border: '1px solid #cbd5e1', borderRadius: 4, padding: 24, marginBottom: 14, background: '#fff', fontFamily: 'inherit' }}>
+
+              {/* 제목 */}
+              <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 900, letterSpacing: 10, marginBottom: 22 }}>
+                견 적 서
               </div>
 
-              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>{selectedQuote.title}</div>
+              {/* 상단: 좌측 여백 / 우측 회사정보+대표+직인 */}
+              <div style={{ position: 'relative', minHeight: 74, marginBottom: 10 }}>
+                <div style={{ position: 'absolute', top: 0, right: 0, textAlign: 'right', fontSize: 13, lineHeight: 1.7 }}>
+                  <div style={{ fontWeight: 800, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
+                    {company?.logo_image_url && <img src={company.logo_image_url} alt="로고" style={{ height: 26, objectFit: 'contain' }} />}
+                    {company?.company_name}
+                  </div>
+                  <div style={{ color: '#475569' }}>{fmtDate(selectedQuote.created_at)}</div>
+                  <div style={{ position: 'relative', display: 'inline-block', marginTop: 2 }}>
+                    대 표 : {company?.ceo_name}
+                    {company?.stamp_image_url && (
+                      <img src={company.stamp_image_url} alt="직인"
+                        style={{ position: 'absolute', top: -8, right: -46, width: 46, height: 46, objectFit: 'contain', opacity: 0.9 }} />
+                    )}
+                  </div>
+                </div>
+              </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
+              {/* 귀중 */}
+              <div style={{ fontSize: 17, fontWeight: 900, marginTop: 10, marginBottom: 12, borderBottom: '2px solid #1e293b', paddingBottom: 10 }}>
+                {(selectedQuote.items?.client_name) || `${selectedQuote.items?.site_name || ''} 귀중`}
+              </div>
+
+              {/* 사업자등록번호 / 보수업등록번호 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#334155', marginBottom: 4 }}>
+                <span>사업자등록번호 : {company?.biz_no}</span>
+                <span>보수업등록번호 : {company?.license_no}</span>
+              </div>
+              {/* 주소 */}
+              <div style={{ fontSize: 12, color: '#334155', marginBottom: 4 }}>{company?.address}</div>
+              {/* 전화/팩스 */}
+              <div style={{ fontSize: 12, color: '#334155', marginBottom: 14 }}>
+                ☎ {company?.phone}{company?.fax ? `   Fax ${company.fax}` : ''}
+              </div>
+
+              {/* 견적금액 */}
+              <div style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>견적금액</span>
+                <span style={{ fontSize: 18, fontWeight: 900, color: '#3b82f6' }}>₩ {won(selectedQuote.amount)} 원</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'right', marginBottom: 16 }}>※상기금액은 부가세 포함 합계금액임.</div>
+
+              {/* 제목 (공사명) */}
+              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>▣ 제목 : {selectedQuote.title}</div>
+
+              {/* 자재비 표 */}
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 4 }}>
                 <thead>
-                  <tr style={{ background: '#f8fafc' }}>
-                    <th style={{ padding: '6px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>품명</th>
-                    <th style={{ padding: '6px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>단위</th>
-                    <th style={{ padding: '6px 6px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>수량</th>
-                    <th style={{ padding: '6px 6px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>단가</th>
-                    <th style={{ padding: '6px 6px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>금액</th>
-                    <th style={{ padding: '6px 6px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>비고</th>
+                  <tr style={{ background: '#f1f5f9' }}>
+                    <th style={{ padding: '6px 6px', textAlign: 'left', border: '1px solid #e2e8f0' }}>품명</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'center', border: '1px solid #e2e8f0', width: 50 }}>단위</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'right', border: '1px solid #e2e8f0', width: 55 }}>수량</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'right', border: '1px solid #e2e8f0', width: 80 }}>단가</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'right', border: '1px solid #e2e8f0', width: 90 }}>금액</th>
+                    <th style={{ padding: '6px 6px', textAlign: 'left', border: '1px solid #e2e8f0', width: 90 }}>비고</th>
                   </tr>
                 </thead>
                 <tbody>
+                  <tr>
+                    <td colSpan={6} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', background: '#fafafa', fontWeight: 700 }}>1. 자재비</td>
+                  </tr>
                   {(selectedQuote.items?.materials || []).map((m: any, i: number) => (
                     <tr key={i}>
-                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9' }}>{m.name}</td>
-                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9' }}>{m.unit}</td>
-                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>{m.qty}</td>
-                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>{won(m.unit_price)}</td>
-                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'right' }}>{won(m.qty * m.unit_price)}</td>
-                      <td style={{ padding: '5px 6px', borderBottom: '1px solid #f1f5f9' }}>{m.note}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>{m.name}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>{m.unit}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{m.qty}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(m.unit_price)}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(m.qty * m.unit_price)}</td>
+                      <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>{m.note}</td>
                     </tr>
                   ))}
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>소 계</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.materialsSubtotal)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+
+                  <tr>
+                    <td colSpan={6} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', background: '#fafafa', fontWeight: 700 }}>2. 인건비</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>직접인건비</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>{selectedQuote.items?.labor?.type}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{selectedQuote.items?.labor?.qty}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(selectedQuote.items?.labor?.unit_price)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(selectedQuote.items?.breakdown?.laborDirect)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
+                      간접인건비 (직접인건비 × {(((selectedQuote.items?.rates?.labor_indirect) ?? rates.labor_indirect) * 100).toFixed(0)}%)
+                    </td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{won(selectedQuote.items?.breakdown?.laborIndirect)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>소 계</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.laborSubtotal)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
+                      3. 경비 및 일반관리비 ((1+2항) × {(((selectedQuote.items?.rates?.overhead) ?? rates.overhead) * 100).toFixed(0)}%)
+                    </td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.overhead)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}>
+                      4. 기업이윤 ((1+3항) × {(((selectedQuote.items?.rates?.profit) ?? rates.profit) * 100).toFixed(0)}%)
+                    </td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.profit)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>금 액</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.supplyAmount)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>
+                      부 가 세 ({(((selectedQuote.items?.rates?.vat) ?? rates.vat) * 100).toFixed(0)}%)
+                    </td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 700 }}>{won(selectedQuote.items?.breakdown?.vat)}</td>
+                    <td style={{ padding: '5px 6px', border: '1px solid #e2e8f0' }}></td>
+                  </tr>
+                  <tr>
+                    <td colSpan={4} style={{ padding: '7px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 900, background: '#eff6ff' }}>합 계 금 액</td>
+                    <td style={{ padding: '7px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 900, background: '#eff6ff', color: '#2563eb' }}>{won(selectedQuote.amount)}</td>
+                    <td style={{ padding: '7px 6px', border: '1px solid #e2e8f0', background: '#eff6ff', fontSize: 10, color: '#94a3b8' }}>백단위절사</td>
+                  </tr>
                 </tbody>
               </table>
 
-              <div style={{ fontSize: 12, color: '#475569', marginBottom: 10 }}>
-                직접인건비: {selectedQuote.items?.labor?.type} {selectedQuote.items?.labor?.qty} × {won(selectedQuote.items?.labor?.unit_price)}원 = {won(selectedQuote.items?.labor?.amount)}원
-              </div>
-
-              <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, fontSize: 12, color: '#374151' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>자재비 소계</span><span>{won(selectedQuote.items?.breakdown?.materialsSubtotal)}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>직접인건비 (간접노무비 포함)</span><span>{won(selectedQuote.items?.breakdown?.laborSubtotal)}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>경비 및 일반관리비</span><span>{won(selectedQuote.items?.breakdown?.overhead)}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>기업이윤</span><span>{won(selectedQuote.items?.breakdown?.profit)}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, borderTop: '1px solid #e2e8f0', paddingTop: 6 }}><span>공급가액</span><span>{won(selectedQuote.items?.breakdown?.supplyAmount)}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>부가세</span><span>{won(selectedQuote.items?.breakdown?.vat)}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 15, borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 4 }}>
-                  <span>합계금액</span><span style={{ color: '#3b82f6' }}>{won(selectedQuote.amount)}</span>
-                </div>
-              </div>
-
               {selectedQuote.items?.remarks && (
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 10 }}>특기사항: {selectedQuote.items.remarks}</div>
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 12 }}>
+                  <strong>[특기사항]</strong> {selectedQuote.items.remarks}
+                </div>
               )}
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
-                <span style={{ fontSize: 12, color: '#475569' }}>{company?.company_name}</span>
-                <span style={{ fontSize: 12, color: '#475569' }}>대표 {company?.ceo_name}</span>
-                {company?.stamp_image_url && <img src={company.stamp_image_url} alt="직인" style={{ width: 44, height: 44, objectFit: 'contain' }} />}
-              </div>
             </div>
+            {/* ══════════════ 견적서 문서 미리보기 끝 ══════════════ */}
 
             {isAdmin && selectedQuote.status === '승인대기' && !showRejectInput && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
