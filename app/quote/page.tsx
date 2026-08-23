@@ -419,28 +419,31 @@ export default function QuotePage() {
 
             <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
               {quotes.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>등록된 견적서가 없습니다.</div>
-              ) : quotes.map(q => (
-                <div key={q.id} onClick={() => setSelectedQuote(q)}
-                  style={{ padding: 14, borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex',
-                    justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>{q.title}</div>
-                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-                      {q.team_id} · {won(q.amount)}원 · {(q.created_at || '').slice(0, 10)}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 10,
-                      background: q.status === '승인' ? '#dcfce7' : q.status === '반려' ? '#fee2e2' : '#fef9c3',
-                      color: q.status === '승인' ? '#15803d' : q.status === '반려' ? '#b91c1c' : '#a16207',
-                    }}>{q.status}</span>
-                    {q.invoice_issued && <span style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', padding: '3px 8px', borderRadius: 10 }}>계산서 발급</span>}
-                    {q.payment_confirmed && <span style={{ fontSize: 11, background: '#f0fdf4', color: '#16a34a', padding: '3px 8px', borderRadius: 10 }}>결제완료</span>}
-                  </div>
-                </div>
-              ))}
+  <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>등록된 견적서가 없습니다.</div>
+) : quotes.map(q => (
+  <div key={q.id} onClick={() => setSelectedQuote(q)}
+    style={{ padding: 14, borderBottom: '1px solid #f1f5f9', cursor: 'pointer', display: 'flex',
+      justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+    <div>
+      <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>
+        {q.items?.site_name ? `[${q.items.site_name}] ${q.title}` : q.title}
+      </div>
+      <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
+        {q.team_id} · {won(q.amount)}원 · {(q.created_at || '').slice(0, 10)}
+      </div>
+    </div>
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <span style={{
+        fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 10,
+        background: q.status === '승인' ? '#dcfce7' : q.status === '반려' ? '#fee2e2' : '#fef9c3',
+        color: q.status === '승인' ? '#15803d' : q.status === '반려' ? '#b91c1c' : '#a16207',
+      }}>{q.status}</span>
+      {q.invoice_issued && <span style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', padding: '3px 8px', borderRadius: 10 }}>계산서 발급</span>}
+      {q.payment_confirmed && <span style={{ fontSize: 11, background: '#f0fdf4', color: '#16a34a', padding: '3px 8px', borderRadius: 10 }}>결제완료</span>}
+    </div>
+  </div>
+))}
+
             </div>
           </>
         )}
