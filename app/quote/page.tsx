@@ -764,17 +764,17 @@ export default function QuotePage() {
             <div id="quote-document" style={{ border: '1px solid #cbd5e1', borderRadius: 4, padding: 24, marginBottom: 14, background: '#fff', fontFamily: 'inherit' }}>
 
               {/* 제목 */}
-              <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 900, letterSpacing: 10, marginBottom: 22 }}>
-                견 적 서
-              </div>
+              <div style={{ textAlign: 'center', fontSize: 32, fontWeight: 900, letterSpacing: 14, marginTop: 16, marginBottom: 30 }}>
+  견 적 서
+</div>
 
               {/* 상단: 좌측 여백 / 우측 회사정보+대표+직인 */}
               <div style={{ position: 'relative', minHeight: 74, marginBottom: 10 }}>
                 <div style={{ position: 'absolute', top: 0, right: 0, textAlign: 'right', fontSize: 13, lineHeight: 1.7 }}>
-                  <div style={{ fontWeight: 800, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
-                    {company?.logo_image_url && <img src={company.logo_image_url} alt="로고" style={{ height: 26, objectFit: 'contain' }} />}
-                    {company?.company_name}
-                  </div>
+                  <div style={{ fontWeight: 800, fontSize: 17, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+  {company?.logo_image_url && <img src={company.logo_image_url} alt="로고" style={{ height: 38, objectFit: 'contain' }} />}
+  {company?.company_name}
+</div>
                   <div style={{ color: '#475569' }}>{fmtDate(selectedQuote.created_at)}</div>
                   <div style={{ position: 'relative', display: 'inline-block', marginTop: 4, paddingRight: 44 }}>
                     대 표 : {company?.ceo_name}
