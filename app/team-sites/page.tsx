@@ -753,9 +753,10 @@ function SiteRow({
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">
         {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
       </td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.managerName || '-'}</td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.phone || '-'}</td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.emergencyPhone || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.managerName || '-'}</td>
+<td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.phone || '-'}</td>
+<td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.emergencyPhone || '-'}</td>
+
       <td className="px-3 py-2.5 text-center whitespace-nowrap">
         {site.contractType ? (
           <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">{site.contractType}</span>
