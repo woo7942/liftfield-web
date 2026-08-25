@@ -173,14 +173,15 @@ export default function InspectionPage() {
   }, []);
 
   // ── 지도 최초 1회 생성 ────────────────────────
-  useEffect(() => {
-    if (!mapReady || !mapContainerRef.current || mapObjRef.current) return;
-    const w = window as any;
-    mapObjRef.current = new w.kakao.maps.Map(mapContainerRef.current, {
-      center: new w.kakao.maps.LatLng(36.5, 127.8),
-      level: 12,
-    });
-  }, [mapReady]);
+useEffect(() => {
+  if (!mapReady || !mapContainerRef.current || mapObjRef.current) return;
+  const w = window as any;
+  mapObjRef.current = new w.kakao.maps.Map(mapContainerRef.current, {
+    center: new w.kakao.maps.LatLng(36.5, 127.8),
+    level: 12,
+  });
+}, [mapReady, loading]);
+
 
   // ── 현장이나 점검현황이 바뀔 때마다 마커 갱신 ──
   useEffect(() => {
