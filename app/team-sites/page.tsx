@@ -25,6 +25,10 @@ interface SiteItem {
   phone?: string;
   emergencyPhone?: string;   // 비통번호
   contractType?: string;     // 계약종류
+  contractStart?: string;    // 계약 시작일
+  contractEnd?: string;      // 계약 종료일
+  email?: string;            // 이메일
+  note?: string;             // 비고
   region?: string;
   teamName?: string;
   source?: 'admin' | 'member' | 'team';
@@ -40,6 +44,28 @@ interface ElevatorItem {
   status?: string;
   installDate?: string;
   inspectionDate?: string;
+}
+
+interface CacheRow {
+  elevator_no: string;
+  dong?: string;
+  hogi_no?: string;
+  building?: string;
+  installation_place?: string;
+  type?: string;
+  elvtr_model?: string;
+  manufacturer_name?: string;
+  mnt_cpny_nm?: string;
+  subcntr_cpny?: string;
+  live_load?: string;
+  rated_speed?: string;
+  shuttle_section?: string;
+  status?: string;
+  last_result_nm?: string;
+  exam_date?: string;
+  install_date?: string;
+  main_no?: string;
+  road_name?: string;
 }
 
 type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'region' | 'contractType';
@@ -75,6 +101,11 @@ export default function TeamSitesPage() {
   const [selectedSite, setSelectedSite] = useState<SiteItem | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<SiteItem>>({});
+
+  // 승강기 자동 조회 (elevator_national_cache)
+  const [cacheSearching, setCacheSearching] = useState(false);
+  const [cacheResults, setCacheResults] = useState<CacheRow[]>([]);
+  const [cacheGrouped, setCacheGrouped] = useState<{ dong: string; count: number }[]>([]);
 
   const isAdmin = userInfo?.role === 'admin';
   const isSuperAdmin = userInfo?.superAdmin === true;
@@ -134,7 +165,7 @@ export default function TeamSitesPage() {
 
     let query = supabase
       .from('sites')
-      .select('id, name, address, elevator_count, phone, emergency_phone, contract_type, region, team, source, created_at, manager_name, memo')
+      .select('id, name, address, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, email, note, region, team, source, created_at, manager_name, memo')
       .eq('company_id', cid);
 
     if (!isAdminUser) {
@@ -153,6 +184,10 @@ export default function TeamSitesPage() {
       phone: d.phone || '',
       emergencyPhone: d.emergency_phone || '',
       contractType: d.contract_type || '',
+      contractStart: d.contract_start || '',
+      contractEnd: d.contract_end || '',
+      email: d.email || '',
+      note: d.note || '',
       region: d.region || '',
       teamName: d.team || '',
       source: d.source as 'admin' | 'member' | 'team',
@@ -224,6 +259,48 @@ export default function TeamSitesPage() {
     }
   }
 
+  // ─── 승강기 자동 조회 (elevator_national_cache) ───
+  async function searchElevatorCache() {
+    const q = (addForm.address || '').trim();
+    if (!q) {
+      alert('먼저 주소나 건물명을 입력해주세요.');
+      return;
+    }
+    setCacheSearching(true);
+    setCacheResults([]);
+    setCacheGrouped([]);
+    try {
+      const { data, error } = await supabase
+        .from('elevator_national_cache')
+        .select('*')
+        .or(`address1.ilike.%${q}%,address2.ilike.%${q}%,building.ilike.%${q}%`)
+        .limit(500);
+
+      if (error) throw error;
+
+      const rows: CacheRow[] = data || [];
+      setCacheResults(rows);
+
+      const groupMap = new Map<string, number>();
+      rows.forEach((r) => {
+        const key = r.dong && String(r.dong).trim() ? `${r.dong}동` : '동 정보 없음';
+        groupMap.set(key, (groupMap.get(key) || 0) + 1);
+      });
+      setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
+
+      setAddForm(prev => ({ ...prev, elevatorCount: rows.length }));
+
+      if (rows.length === 0) {
+        alert('일치하는 승강기 정보를 찾지 못했어요. 주소나 건물명을 다시 확인해주세요.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('조회 중 오류가 발생했어요.');
+    } finally {
+      setCacheSearching(false);
+    }
+  }
+
   // ─── 계약종류 옵션 (실제 데이터 기준) ───
   const contractTypeOptions = Array.from(
     new Set(sites.map(s => s.contractType).filter((v): v is string => !!v))
@@ -243,7 +320,8 @@ export default function TeamSitesPage() {
           s.region?.toLowerCase().includes(q) ||
           s.managerName?.toLowerCase().includes(q) ||
           s.phone?.toLowerCase().includes(q) ||
-          s.emergencyPhone?.toLowerCase().includes(q)
+          s.emergencyPhone?.toLowerCase().includes(q) ||
+          s.email?.toLowerCase().includes(q)
         );
       }
       return true;
@@ -285,32 +363,82 @@ export default function TeamSitesPage() {
     return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
 
-  // ─── 현장 추가 ───
+  // ─── 현장 추가 (+ 자동 조회된 호기 정보 함께 저장) ───
   async function handleAddSite() {
     if (!addForm.name?.trim() || !userInfo?.companyId) return;
     setAddLoading(true);
     try {
-      const { error } = await supabase.from('sites').insert({
-        name: addForm.name,
-        address: addForm.address || '',
-        phone: addForm.phone || '',
-        emergency_phone: addForm.emergencyPhone || '',
-        contract_type: addForm.contractType || '',
-        region: addForm.region || '',
-        elevator_count: addForm.elevatorCount || 0,
-        team: addForm.teamName || '',
-        manager_name: addForm.managerName || '',
-        memo: addForm.memo || '',
-        source: 'team',
-        company_id: userInfo.companyId,
-        created_by: userInfo.uid,
-        created_at: new Date().toISOString(),
-      });
+      const { data: newSite, error } = await supabase
+        .from('sites')
+        .insert({
+          name: addForm.name,
+          address: addForm.address || '',
+          phone: addForm.phone || '',
+          emergency_phone: addForm.emergencyPhone || '',
+          contract_type: addForm.contractType || '',
+          contract_start: addForm.contractStart || null,
+          contract_end: addForm.contractEnd || null,
+          email: addForm.email || '',
+          note: addForm.note || '',
+          region: addForm.region || '',
+          elevator_count: addForm.elevatorCount || 0,
+          team: addForm.teamName || '',
+          manager_name: addForm.managerName || '',
+          memo: addForm.memo || '',
+          source: 'team',
+          company_id: userInfo.companyId,
+          created_by: userInfo.uid,
+          created_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
 
       if (error) throw error;
 
+      if (newSite?.id && cacheResults.length > 0) {
+        const elevatorRows = cacheResults.map((r) => ({
+          site_id: newSite.id,
+          company_id: userInfo.companyId,
+          elevator_no: r.elevator_no,
+          dong: r.dong,
+          hogi_no: r.hogi_no,
+          unit_number: r.hogi_no,
+          building: r.building,
+          installation_place: r.installation_place,
+          type: r.type,
+          model: r.elvtr_model,
+          elvtr_model: r.elvtr_model,
+          manufacturer: r.manufacturer_name,
+          manufacturer_name: r.manufacturer_name,
+          mnt_company: r.mnt_cpny_nm,
+          mnt_cpny_nm: r.mnt_cpny_nm,
+          sub_company: r.subcntr_cpny,
+          subcntr_cpny: r.subcntr_cpny,
+          live_load: r.live_load,
+          rated_speed: r.rated_speed,
+          shuttle_section: r.shuttle_section,
+          status: r.status,
+          last_result: r.last_result_nm,
+          last_result_nm: r.last_result_nm,
+          inspection_date: r.exam_date,
+          exam_date: r.exam_date,
+          install_date: r.install_date,
+          main_no: r.main_no,
+          road_name: r.road_name,
+          created_at: new Date().toISOString(),
+        }));
+
+        const { error: elevError } = await supabase.from('elevators').insert(elevatorRows);
+        if (elevError) {
+          console.error('호기 자동 저장 오류:', elevError);
+          alert('현장은 저장됐지만 호기 정보 자동 저장 중 오류가 있었어요.');
+        }
+      }
+
       setShowAddModal(false);
       setAddForm({});
+      setCacheResults([]);
+      setCacheGrouped([]);
       await reloadSites();
     } catch (e) {
       console.error(e);
@@ -331,6 +459,10 @@ export default function TeamSitesPage() {
           phone: editForm.phone || '',
           emergency_phone: editForm.emergencyPhone || '',
           contract_type: editForm.contractType || '',
+          contract_start: editForm.contractStart || null,
+          contract_end: editForm.contractEnd || null,
+          email: editForm.email || '',
+          note: editForm.note || '',
           region: editForm.region || '',
           elevator_count: editForm.elevatorCount || 0,
           team: editForm.teamName || '',
@@ -408,7 +540,7 @@ export default function TeamSitesPage() {
           <input
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
-            placeholder="현장명, 팀명, 지역, 담당자, 전화번호, 비통번호 검색..."
+            placeholder="현장명, 팀명, 지역, 담당자, 전화번호, 비통번호, 이메일 검색..."
             className="flex-1 min-w-48 border rounded-xl px-3 py-2 text-sm bg-white"
           />
           {canEdit && (
@@ -541,12 +673,60 @@ export default function TeamSitesPage() {
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5">
             <h2 className="font-bold text-lg mb-4">+ 팀별 현장 추가</h2>
             <div className="space-y-3">
+
+              {/* 현장명 */}
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">현장명 *</label>
+                <input
+                  type="text"
+                  value={addForm.name || ''}
+                  onChange={e => setAddForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full border rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+
+              {/* 주소 + 자동 조회 */}
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">주소</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={addForm.address || ''}
+                    onChange={e => setAddForm(prev => ({ ...prev, address: e.target.value }))}
+                    className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                    placeholder="도로명주소 또는 건물(아파트)명"
+                  />
+                  <button
+                    type="button"
+                    onClick={searchElevatorCache}
+                    disabled={cacheSearching}
+                    className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium whitespace-nowrap disabled:opacity-50"
+                  >
+                    {cacheSearching ? '조회 중...' : '🔍 자동 조회'}
+                  </button>
+                </div>
+
+                {cacheGrouped.length > 0 && (
+                  <div className="mt-2 bg-blue-50 rounded-xl p-3 text-sm">
+                    <p className="font-medium text-blue-700 mb-1">
+                      ✅ 총 {cacheResults.length}대 조회됨
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {cacheGrouped.map(g => (
+                        <span key={g.dong} className="text-xs bg-white border border-blue-200 px-2 py-0.5 rounded-full text-blue-600">
+                          {g.dong} {g.count}대
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {[
-                { label: '현장명 *', field: 'name', type: 'text' },
-                { label: '주소', field: 'address', type: 'text' },
                 { label: '담당자', field: 'managerName', type: 'text' },
                 { label: '전화번호', field: 'phone', type: 'text' },
                 { label: '비통번호', field: 'emergencyPhone', type: 'text' },
+                { label: '이메일', field: 'email', type: 'email' },
                 { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                 { label: '지역', field: 'region', type: 'text' },
                 { label: '메모', field: 'memo', type: 'text' },
@@ -577,6 +757,38 @@ export default function TeamSitesPage() {
                 </select>
               </div>
 
+              {/* 계약 기간 */}
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">계약 기간</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={addForm.contractStart || ''}
+                    onChange={e => setAddForm(prev => ({ ...prev, contractStart: e.target.value }))}
+                    className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                  />
+                  <span className="text-gray-400 text-sm">~</span>
+                  <input
+                    type="date"
+                    value={addForm.contractEnd || ''}
+                    onChange={e => setAddForm(prev => ({ ...prev, contractEnd: e.target.value }))}
+                    className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* 비고 */}
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">비고</label>
+                <textarea
+                  value={addForm.note || ''}
+                  onChange={e => setAddForm(prev => ({ ...prev, note: e.target.value }))}
+                  rows={2}
+                  placeholder="간단한 참고사항을 적어주세요"
+                  className="w-full border rounded-xl px-3 py-2 text-sm resize-none"
+                />
+              </div>
+
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
                 <select
@@ -590,7 +802,17 @@ export default function TeamSitesPage() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button onClick={() => setShowAddModal(false)} className="flex-1 py-2 border rounded-xl text-sm text-gray-600">취소</button>
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  setAddForm({});
+                  setCacheResults([]);
+                  setCacheGrouped([]);
+                }}
+                className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
+              >
+                취소
+              </button>
               <button onClick={handleAddSite} disabled={addLoading}
                 className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                 {addLoading ? '저장 중...' : '저장'}
@@ -617,11 +839,19 @@ export default function TeamSitesPage() {
                     { label: '담당자', value: selectedSite.managerName },
                     { label: '전화번호', value: selectedSite.phone },
                     { label: '비통번호', value: selectedSite.emergencyPhone },
+                    { label: '이메일', value: selectedSite.email },
                     { label: '계약종류', value: selectedSite.contractType },
+                    {
+                      label: '계약 기간',
+                      value: (selectedSite.contractStart || selectedSite.contractEnd)
+                        ? `${selectedSite.contractStart || '?'} ~ ${selectedSite.contractEnd || '?'}`
+                        : undefined,
+                    },
                     { label: '승강기 대수', value: selectedSite.elevatorCount ? `${selectedSite.elevatorCount}대` : undefined },
                     { label: '지역', value: selectedSite.region },
                     { label: '주소', value: selectedSite.address },
                     { label: '메모', value: selectedSite.memo },
+                    { label: '비고', value: selectedSite.note },
                   ].filter(i => i.value).map(({ label, value }) => (
                     <div key={label} className="flex justify-between py-1.5 border-b last:border-0">
                       <span className="text-gray-500">{label}</span>
@@ -674,6 +904,7 @@ export default function TeamSitesPage() {
                     { label: '담당자', field: 'managerName', type: 'text' },
                     { label: '전화번호', field: 'phone', type: 'text' },
                     { label: '비통번호', field: 'emergencyPhone', type: 'text' },
+                    { label: '이메일', field: 'email', type: 'email' },
                     { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                     { label: '지역', field: 'region', type: 'text' },
                     { label: '메모', field: 'memo', type: 'text' },
@@ -702,6 +933,38 @@ export default function TeamSitesPage() {
                       <option value="">선택 안 함</option>
                       {CONTRACT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
+                  </div>
+
+                  {/* 계약 기간 */}
+                  <div>
+                    <label className="text-sm text-gray-600 mb-0.5 block">계약 기간</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={editForm.contractStart || ''}
+                        onChange={e => setEditForm(prev => ({ ...prev, contractStart: e.target.value }))}
+                        className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                      />
+                      <span className="text-gray-400 text-sm">~</span>
+                      <input
+                        type="date"
+                        value={editForm.contractEnd || ''}
+                        onChange={e => setEditForm(prev => ({ ...prev, contractEnd: e.target.value }))}
+                        className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 비고 */}
+                  <div>
+                    <label className="text-sm text-gray-600 mb-0.5 block">비고</label>
+                    <textarea
+                      value={editForm.note || ''}
+                      onChange={e => setEditForm(prev => ({ ...prev, note: e.target.value }))}
+                      rows={2}
+                      placeholder="간단한 참고사항을 적어주세요"
+                      className="w-full border rounded-xl px-3 py-2 text-sm resize-none"
+                    />
                   </div>
 
                   <div>
