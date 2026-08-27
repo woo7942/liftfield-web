@@ -259,47 +259,91 @@ export default function TeamSitesPage() {
     }
   }
 
-  // ─── 승강기 자동 조회 (elevator_national_cache) ───
-  async function searchElevatorCache() {
-    const q = (addForm.address || '').trim();
-    if (!q) {
-      alert('먼저 주소나 건물명을 입력해주세요.');
-      return;
+  // 시/도 이름 접두어 제거 (정식명 먼저, 축약형 나중 순서 중요)
+const SIDO_PREFIXES = [
+  '서울특별시', '서울',
+  '부산광역시', '부산',
+  '대구광역시', '대구',
+  '인천광역시', '인천',
+  '광주광역시', '광주',
+  '대전광역시', '대전',
+  '울산광역시', '울산',
+  '세종특별자치시', '세종',
+  '경기도', '경기',
+  '강원특별자치도', '강원도', '강원',
+  '충청북도', '충북',
+  '충청남도', '충남',
+  '전북특별자치도', '전라북도', '전북',
+  '전라남도', '전남',
+  '경상북도', '경북',
+  '경상남도', '경남',
+  '제주특별자치도', '제주도', '제주',
+];
+
+function stripSidoPrefix(raw: string): string {
+  const q = raw.trim();
+  for (const prefix of SIDO_PREFIXES) {
+    if (q.startsWith(prefix)) {
+      return q.slice(prefix.length).trim();
     }
-    setCacheSearching(true);
-    setCacheResults([]);
-    setCacheGrouped([]);
-    try {
+  }
+  return q;
+}
+
+async function searchElevatorCache() {
+  const rawQ = (addForm.address || '').trim();
+  if (!rawQ) {
+    alert('먼저 주소나 건물명을 입력해주세요.');
+    return;
+  }
+
+  setCacheSearching(true);
+  setCacheResults([]);
+  setCacheGrouped([]);
+
+  try {
+    // 1차: 시/도 접두어를 제거한 문자열로 검색 (예: "경기도 파주시 가람로 113" → "파주시 가람로 113")
+    const normalizedQ = stripSidoPrefix(rawQ);
+
+    const runSearch = async (q: string) => {
       const { data, error } = await supabase
         .from('elevator_national_cache')
         .select('*')
         .or(`address1.ilike.%${q}%,address2.ilike.%${q}%,building.ilike.%${q}%`)
         .limit(500);
-
       if (error) throw error;
+      return data || [];
+    };
 
-      const rows: CacheRow[] = data || [];
-      setCacheResults(rows);
+    let rows: CacheRow[] = await runSearch(normalizedQ);
 
-      const groupMap = new Map<string, number>();
-      rows.forEach((r) => {
-        const key = r.dong && String(r.dong).trim() ? `${r.dong}동` : '동 정보 없음';
-        groupMap.set(key, (groupMap.get(key) || 0) + 1);
-      });
-      setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
-
-      setAddForm(prev => ({ ...prev, elevatorCount: rows.length }));
-
-      if (rows.length === 0) {
-        alert('일치하는 승강기 정보를 찾지 못했어요. 주소나 건물명을 다시 확인해주세요.');
-      }
-    } catch (e) {
-      console.error(e);
-      alert('조회 중 오류가 발생했어요.');
-    } finally {
-      setCacheSearching(false);
+    // 2차 폴백: 그래도 못 찾으면 원문 그대로 한 번 더 검색
+    if (rows.length === 0 && normalizedQ !== rawQ) {
+      rows = await runSearch(rawQ);
     }
+
+    setCacheResults(rows);
+
+    const groupMap = new Map<string, number>();
+    rows.forEach((r) => {
+      const key = r.dong && String(r.dong).trim() ? `${r.dong}동` : '동 정보 없음';
+      groupMap.set(key, (groupMap.get(key) || 0) + 1);
+    });
+    setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
+
+    setAddForm(prev => ({ ...prev, elevatorCount: rows.length }));
+
+    if (rows.length === 0) {
+      alert('일치하는 승강기 정보를 찾지 못했어요. 주소나 건물명을 다시 확인해주세요.');
+    }
+  } catch (e) {
+    console.error(e);
+    alert('조회 중 오류가 발생했어요.');
+  } finally {
+    setCacheSearching(false);
   }
+}
+
 
   // ─── 계약종류 옵션 (실제 데이터 기준) ───
   const contractTypeOptions = Array.from(
