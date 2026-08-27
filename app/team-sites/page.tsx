@@ -280,6 +280,11 @@ const SIDO_PREFIXES = [
   '제주특별자치도', '제주도', '제주',
 ];
 
+// 괄호 안 내용 제거 (예: "가람로 113 (당하동)" → "가람로 113")
+function cleanAddressInput(raw: string): string {
+  return raw.replace(/\([^)]*\)/g, '').trim();
+}
+
 function stripSidoPrefix(raw: string): string {
   const q = raw.trim();
   for (const prefix of SIDO_PREFIXES) {
@@ -288,6 +293,13 @@ function stripSidoPrefix(raw: string): string {
     }
   }
   return q;
+}
+
+// 도로명 + 번지 추출 (예: "파주시 가람로 113" → { road: '가람로', number: '113' })
+function extractRoadAndNumber(q: string): { road: string; number: string } | null {
+  const match = q.match(/([가-힣0-9]+(?:로|길))\s*(\d+(?:-\d+)?)/);
+  if (!match) return null;
+  return { road: match[1], number: match[2] };
 }
 
 async function searchElevatorCache() {
@@ -302,10 +314,10 @@ async function searchElevatorCache() {
   setCacheGrouped([]);
 
   try {
-    // 1차: 시/도 접두어를 제거한 문자열로 검색 (예: "경기도 파주시 가람로 113" → "파주시 가람로 113")
-    const normalizedQ = stripSidoPrefix(rawQ);
+    const cleaned = cleanAddressInput(rawQ);
+    const normalizedQ = stripSidoPrefix(cleaned);
 
-    const runSearch = async (q: string) => {
+    const runTextSearch = async (q: string) => {
       const { data, error } = await supabase
         .from('elevator_national_cache')
         .select('*')
@@ -315,11 +327,28 @@ async function searchElevatorCache() {
       return data || [];
     };
 
-    let rows: CacheRow[] = await runSearch(normalizedQ);
+    let rows: CacheRow[] = [];
 
-    // 2차 폴백: 그래도 못 찾으면 원문 그대로 한 번 더 검색
+    // 1차: 도로명 + 번지를 정확한 컬럼으로 검색 (가장 정확)
+    const roadInfo = extractRoadAndNumber(normalizedQ);
+    if (roadInfo) {
+      const { data, error } = await supabase
+        .from('elevator_national_cache')
+        .select('*')
+        .ilike('road_name', `%${roadInfo.road}%`)
+        .ilike('main_no', `%${roadInfo.number}%`)
+        .limit(500);
+      if (!error && data) rows = data;
+    }
+
+    // 2차: 시/도·괄호 제거한 문자열로 전체 부분일치 검색
+    if (rows.length === 0) {
+      rows = await runTextSearch(normalizedQ);
+    }
+
+    // 3차: 원문 그대로 한 번 더 검색 (최후 폴백)
     if (rows.length === 0 && normalizedQ !== rawQ) {
-      rows = await runSearch(rawQ);
+      rows = await runTextSearch(rawQ);
     }
 
     setCacheResults(rows);
@@ -343,6 +372,7 @@ async function searchElevatorCache() {
     setCacheSearching(false);
   }
 }
+
 
 
   // ─── 계약종류 옵션 (실제 데이터 기준) ───
