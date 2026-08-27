@@ -31,8 +31,16 @@ interface SiteRow {
   phone: string;
 }
 
+interface ElevatorRow {
+  id: string;
+  siteId: string;
+  dong: string;      // 없으면 '동 미지정'
+  hogiNo: string;     // 예: '1호기'
+  installationPlace: string;
+}
+
 interface UnitInspection {
-  unitNo: number;
+  elevatorId: string;
   completed: boolean;
   completedBy?: string;
   completedAt?: string;
@@ -52,15 +60,15 @@ export default function InspectionPage() {
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [sites, setSites] = useState<SiteRow[]>([]);
+  const [elevators, setElevators] = useState<ElevatorRow[]>([]);
   const [filterTeam, setFilterTeam] = useState('전체');
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
 
-  // site_id -> unit_no -> UnitInspection (실제 DB에 존재하는 행만)
-  const [rawUnits, setRawUnits] = useState<Record<string, Record<number, UnitInspection>>>({});
-  // site_id -> note (site_inspections 테이블)
+  // elevator_id -> UnitInspection
+  const [rawUnits, setRawUnits] = useState<Record<string, UnitInspection>>({});
   const [noteMap, setNoteMap] = useState<Record<string, NoteRow>>({});
 
   const [mapReady, setMapReady] = useState(false);
@@ -136,9 +144,68 @@ export default function InspectionPage() {
     loadSites();
   }, [userInfo, isAdmin]);
 
+  // ── 승강기(호기) 목록 로드: elevators 테이블에서 실제 동/호기 정보 ──
+  useEffect(() => {
+    if (!userInfo) return;
+    const loadElevators = async () => {
+      const { data, error } = await supabase
+        .from('elevators')
+        .select('id, site_id, dong, hogi_no, installation_place')
+        .eq('company_id', userInfo.companyId);
+      if (error) { console.error(error); return; }
+      setElevators((data || []).map((e: any) => ({
+        id: e.id,
+        siteId: e.site_id,
+        dong: e.dong || '동 미지정',
+        hogiNo: e.hogi_no || '',
+        installationPlace: e.installation_place || '',
+      })));
+    };
+    loadElevators();
+  }, [userInfo]);
+
   const filteredSites = isAdmin && filterTeam !== '전체'
     ? sites.filter(s => s.team === filterTeam)
     : sites;
+
+  // ── 현장별 승강기 그룹 (동 -> 호기 배열), 정렬 포함 ──
+  const elevatorsBySite = useMemo(() => {
+    const map: Record<string, ElevatorRow[]> = {};
+    elevators.forEach(e => {
+      if (!map[e.siteId]) map[e.siteId] = [];
+      map[e.siteId].push(e);
+    });
+    const getHogiNum = (h: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
+    Object.values(map).forEach(arr => {
+      arr.sort((a, b) => {
+        if (a.dong !== b.dong) return a.dong.localeCompare(b.dong, 'ko', { numeric: true });
+        return getHogiNum(a.hogiNo) - getHogiNum(b.hogiNo);
+      });
+    });
+    return map;
+  }, [elevators]);
+
+  // 승강기 정보가 아예 없는 현장(=엘리베이터 정보 미등록)은 elevator_count만큼
+  // 가짜 호기로 대체해서 지도 마커/통계가 깨지지 않게 함
+  const siteUnitsBase = useMemo(() => {
+    const map: Record<string, ElevatorRow[]> = {};
+    sites.forEach(site => {
+      const real = elevatorsBySite[site.id];
+      if (real && real.length > 0) {
+        map[site.id] = real;
+      } else {
+        const count = Math.max(site.elevatorCount || 1, 1);
+        map[site.id] = Array.from({ length: count }, (_, i) => ({
+          id: `virtual-${site.id}-${i + 1}`,
+          siteId: site.id,
+          dong: '동 미지정',
+          hogiNo: `${i + 1}호기`,
+          installationPlace: '',
+        }));
+      }
+    });
+    return map;
+  }, [sites, elevatorsBySite]);
 
   // ── 선택된 월의 호기별 점검 기록 + 비고 로드 ──
   const loadInspections = useCallback(async () => {
@@ -150,11 +217,11 @@ export default function InspectionPage() {
         .eq('company_id', userInfo.companyId).eq('year', year).eq('month', month),
     ]);
     if (unitsRes.error) { console.error(unitsRes.error); return; }
-    const raw: Record<string, Record<number, UnitInspection>> = {};
+    const raw: Record<string, UnitInspection> = {};
     (unitsRes.data || []).forEach((r: any) => {
-      if (!raw[r.site_id]) raw[r.site_id] = {};
-      raw[r.site_id][r.unit_no] = {
-        unitNo: r.unit_no,
+      if (!r.elevator_id) return; // 예전 unit_no 방식 레거시 행은 건너뜀
+      raw[r.elevator_id] = {
+        elevatorId: r.elevator_id,
         completed: r.completed,
         completedBy: r.completed_by,
         completedAt: r.completed_at,
@@ -169,20 +236,15 @@ export default function InspectionPage() {
 
   useEffect(() => { loadInspections(); }, [loadInspections]);
 
-  // ── 현장별 호기 배열 (없으면 기본값으로 채움) ──
+  // ── 현장별 호기 배열 (완료 상태 병합) ──
   const inspectionUnitsMap = useMemo(() => {
     const map: Record<string, UnitInspection[]> = {};
     sites.forEach(site => {
-      const count = Math.max(site.elevatorCount || 1, 1);
-      const existing = rawUnits[site.id] || {};
-      const arr: UnitInspection[] = [];
-      for (let i = 1; i <= count; i++) {
-        arr.push(existing[i] || { unitNo: i, completed: false });
-      }
-      map[site.id] = arr;
+      const base = siteUnitsBase[site.id] || [];
+      map[site.id] = base.map(e => rawUnits[e.id] || { elevatorId: e.id, completed: false });
     });
     return map;
-  }, [sites, rawUnits]);
+  }, [sites, siteUnitsBase, rawUnits]);
 
   // ── 카카오맵 SDK 스크립트 로드 ──
   useEffect(() => {
@@ -203,7 +265,6 @@ export default function InspectionPage() {
       center: new w.kakao.maps.LatLng(36.5, 127.8),
       level: 12,
     });
-    // 웹(마우스 환경)에서 터치 확대 없이도 +/- 버튼으로 확대·축소 가능하게
     const zoomControl = new w.kakao.maps.ZoomControl();
     mapObjRef.current.addControl(zoomControl, w.kakao.maps.ControlPosition.RIGHT);
   }, [mapReady, loading]);
@@ -228,13 +289,13 @@ export default function InspectionPage() {
       const total = units.length;
       const doneCount = units.filter(u => u.completed).length;
 
-      let color = '#94a3b8'; // 회색: 미점검
+      let color = '#94a3b8';
       let badge = '';
       if (total > 0 && doneCount === total) {
-        color = '#22c55e'; // 초록: 전체 완료
+        color = '#22c55e';
         badge = '✅ ';
       } else if (doneCount > 0) {
-        color = '#f59e0b'; // 주황: 일부 완료
+        color = '#f59e0b';
         badge = `${doneCount}/${total} `;
       }
 
@@ -264,7 +325,6 @@ export default function InspectionPage() {
       overlaysRef.current.push(overlay);
     });
 
-    // 모바일에서 뷰포트가 늦게 확정되며 배율이 어긋나는 문제 방지
     mapObjRef.current.relayout();
     mapObjRef.current.setBounds(bounds);
   }, [mapReady, filteredSites, inspectionUnitsMap, noteMap]);
@@ -274,20 +334,41 @@ export default function InspectionPage() {
     if (!selectedSite || !userInfo) return;
     setPanelSaving(true);
     try {
-      const unitPayloads = panelUnits.map(u => ({
-        company_id: userInfo.companyId,
-        site_id: selectedSite.id,
-        year, month,
-        unit_no: u.unitNo,
-        completed: u.completed,
-        completed_by: u.completed ? userInfo.name : null,
-        completed_at: u.completed ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-      }));
-      const { error: unitErr } = await supabase
-        .from('site_inspection_units')
-        .upsert(unitPayloads, { onConflict: 'site_id,year,month,unit_no' });
-      if (unitErr) throw unitErr;
+      // 가상 호기(승강기 정보 미등록 현장)는 elevator_id가 DB에 없는 값이라 저장하지 않음
+      const realUnits = panelUnits.filter(u => !u.elevatorId.startsWith('virtual-'));
+      if (realUnits.length > 0) {
+        const unitPayloads = realUnits.map(u => ({
+          company_id: userInfo.companyId,
+          site_id: selectedSite.id,
+          elevator_id: u.elevatorId,
+          year, month,
+          completed: u.completed,
+          completed_by: u.completed ? userInfo.name : null,
+          completed_at: u.completed ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        }));
+        const { error: unitErr } = await supabase
+          .from('site_inspection_units')
+          .upsert(unitPayloads, { onConflict: 'elevator_id,year,month' });
+        if (unitErr) throw unitErr;
+      } else {
+        // 승강기 정보가 없는 현장: 기존 unit_no 방식으로라도 저장(현장당 1행)
+        const allDone = panelUnits.every(u => u.completed);
+        const unitPayloads = panelUnits.map((u, idx) => ({
+          company_id: userInfo.companyId,
+          site_id: selectedSite.id,
+          year, month,
+          unit_no: idx + 1,
+          completed: u.completed,
+          completed_by: u.completed ? userInfo.name : null,
+          completed_at: u.completed ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        }));
+        const { error: unitErr } = await supabase
+          .from('site_inspection_units')
+          .upsert(unitPayloads, { onConflict: 'site_id,year,month,unit_no' });
+        if (unitErr) throw unitErr;
+      }
 
       const { error: noteErr } = await supabase
         .from('site_inspections')
@@ -316,7 +397,6 @@ export default function InspectionPage() {
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
 
-  // ── 통계: 현장 수가 아니라 호기 수 기준 ──
   const stats = useMemo(() => {
     let total = 0, done = 0;
     filteredSites.forEach(site => {
@@ -327,6 +407,20 @@ export default function InspectionPage() {
     return { total, done };
   }, [filteredSites, inspectionUnitsMap]);
   const rate = stats.total > 0 ? Math.round(stats.done / stats.total * 100) : 0;
+
+  // 선택된 현장의 승강기를 동별로 그룹 (패널 표시용)
+  const selectedElevators = selectedSite ? (siteUnitsBase[selectedSite.id] || []) : [];
+  const panelGroups = useMemo(() => {
+    const groups: Record<string, { elevator: ElevatorRow; unit: UnitInspection }[]> = {};
+    selectedElevators.forEach((e, idx) => {
+      const unit = panelUnits[idx];
+      if (!unit) return;
+      const key = e.dong || '동 미지정';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push({ elevator: e, unit });
+    });
+    return groups;
+  }, [selectedElevators, panelUnits]);
 
   if (loading) {
     return (
@@ -417,7 +511,7 @@ export default function InspectionPage() {
                 )}
               </div>
 
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs font-bold text-gray-500">{year}년 {MONTHS[month - 1]} 호기별 점검 상태</p>
                   {panelUnits.length > 1 && (
@@ -428,18 +522,28 @@ export default function InspectionPage() {
                   )}
                 </div>
 
-                {panelUnits.map((u, idx) => (
-                  <button
-                    key={u.unitNo}
-                    type="button"
-                    onClick={() => setPanelUnits(prev => prev.map((p, i) => i === idx ? { ...p, completed: !p.completed } : p))}
-                    className={`w-full flex items-center justify-between py-2.5 px-3 rounded-xl font-bold text-sm transition ${
-                      u.completed ? 'bg-green-500 text-white' : 'bg-white text-gray-500 border-2 border-dashed border-gray-300'
-                    }`}
-                  >
-                    <span>{panelUnits.length > 1 ? `${u.unitNo}호기` : '점검 상태'}</span>
-                    <span>{u.completed ? '✅ 완료' : '미완료'}</span>
-                  </button>
+                {Object.entries(panelGroups).map(([dong, list]) => (
+                  <div key={dong} className="space-y-1.5">
+                    {dong !== '동 미지정' && (
+                      <p className="text-[11px] font-bold text-indigo-500 px-1">📍 {dong}</p>
+                    )}
+                    {list.map(({ elevator, unit }) => {
+                      const idx = panelUnits.findIndex(u => u.elevatorId === unit.elevatorId);
+                      return (
+                        <button
+                          key={unit.elevatorId}
+                          type="button"
+                          onClick={() => setPanelUnits(prev => prev.map((p, i) => i === idx ? { ...p, completed: !p.completed } : p))}
+                          className={`w-full flex items-center justify-between py-2.5 px-3 rounded-xl font-bold text-sm transition ${
+                            unit.completed ? 'bg-green-500 text-white' : 'bg-white text-gray-500 border-2 border-dashed border-gray-300'
+                          }`}
+                        >
+                          <span>{elevator.hogiNo || '호기'}{elevator.installationPlace ? ` (${elevator.installationPlace})` : ''}</span>
+                          <span>{unit.completed ? '✅ 완료' : '미완료'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ))}
               </div>
 
