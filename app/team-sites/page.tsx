@@ -35,6 +35,8 @@ interface SiteItem {
   createdAt?: string;
   managerName?: string;
   memo?: string;
+  lat?: number;
+  lng?: number;
 }
 
 interface ElevatorItem {
@@ -72,6 +74,77 @@ type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'region' | 'contractType'
 
 // 계약종류 고정 옵션 (입력 폼용)
 const CONTRACT_TYPES = ['종합계약', '일반계약', '분담종합계약', '분담일반계약', '종합SMART계약'];
+
+// 시/도 이름 접두어 제거 (정식명 먼저, 축약형 나중 순서 중요)
+const SIDO_PREFIXES = [
+  '서울특별시', '서울',
+  '부산광역시', '부산',
+  '대구광역시', '대구',
+  '인천광역시', '인천',
+  '광주광역시', '광주',
+  '대전광역시', '대전',
+  '울산광역시', '울산',
+  '세종특별자치시', '세종',
+  '경기도', '경기',
+  '강원특별자치도', '강원도', '강원',
+  '충청북도', '충북',
+  '충청남도', '충남',
+  '전북특별자치도', '전라북도', '전북',
+  '전라남도', '전남',
+  '경상북도', '경북',
+  '경상남도', '경남',
+  '제주특별자치도', '제주도', '제주',
+];
+
+// 괄호 안 내용 제거 (예: "가람로 113 (당하동)" → "가람로 113")
+function cleanAddressInput(raw: string): string {
+  return raw.replace(/\([^)]*\)/g, '').trim();
+}
+
+function stripSidoPrefix(raw: string): string {
+  const q = raw.trim();
+  for (const prefix of SIDO_PREFIXES) {
+    if (q.startsWith(prefix)) {
+      return q.slice(prefix.length).trim();
+    }
+  }
+  return q;
+}
+
+// 도로명 + 번지 추출 (예: "파주시 가람로 113" → { road: '가람로', number: '113' })
+function extractRoadAndNumber(q: string): { road: string; number: string } | null {
+  const match = q.match(/([가-힣0-9]+(?:로|길))\s*(\d+(?:-\d+)?)/);
+  if (!match) return null;
+  return { road: match[1], number: match[2] };
+}
+
+// 주소 → 좌표 변환 (카카오 지오코더)
+function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  return new Promise((resolve) => {
+    const w = window as any;
+    if (!address?.trim() || !w.kakao?.maps?.services) { resolve(null); return; }
+    const geocoder = new w.kakao.maps.services.Geocoder();
+    const cleaned = stripSidoPrefix(cleanAddressInput(address));
+    geocoder.addressSearch(cleaned, (result: any[], status: string) => {
+      if (status === w.kakao.maps.services.Status.OK && result[0]) {
+        resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) });
+      } else {
+        // 정제된 주소로 실패하면 원문으로 한 번 더 시도
+        if (cleaned !== address.trim()) {
+          geocoder.addressSearch(address.trim(), (result2: any[], status2: string) => {
+            if (status2 === w.kakao.maps.services.Status.OK && result2[0]) {
+              resolve({ lat: parseFloat(result2[0].y), lng: parseFloat(result2[0].x) });
+            } else {
+              resolve(null);
+            }
+          });
+        } else {
+          resolve(null);
+        }
+      }
+    });
+  });
+}
 
 export default function TeamSitesPage() {
   const router = useRouter();
@@ -148,6 +221,20 @@ export default function TeamSitesPage() {
     return () => subscription.unsubscribe();
   }, [router]);
 
+  // ─── 카카오 지오코더 SDK 로드 (좌표 변환용, 지도 표시는 하지 않음) ───
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const w = window as any;
+    if (w.kakao?.maps?.services) return;
+    const existing = document.getElementById('kakao-geocoder-sdk');
+    if (existing) return;
+    const script = document.createElement('script');
+    script.id = 'kakao-geocoder-sdk';
+    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_KEY}&autoload=false&libraries=services`;
+    script.onload = () => { w.kakao.maps.load(() => {}); };
+    document.head.appendChild(script);
+  }, []);
+
   // ─── 현장 목록 로드 ───
   const reloadSites = async (companyId?: string) => {
     const cid = companyId ?? userInfo?.companyId;
@@ -165,7 +252,7 @@ export default function TeamSitesPage() {
 
     let query = supabase
       .from('sites')
-      .select('id, name, address, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, email, note, region, team, source, created_at, manager_name, memo')
+      .select('id, name, address, lat, lng, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, email, note, region, team, source, created_at, manager_name, memo')
       .eq('company_id', cid);
 
     if (!isAdminUser) {
@@ -180,6 +267,8 @@ export default function TeamSitesPage() {
       id: d.id,
       name: d.name || '',
       address: d.address || '',
+      lat: d.lat ?? undefined,
+      lng: d.lng ?? undefined,
       elevatorCount: d.elevator_count || 0,
       phone: d.phone || '',
       emergencyPhone: d.emergency_phone || '',
@@ -259,121 +348,76 @@ export default function TeamSitesPage() {
     }
   }
 
-  // 시/도 이름 접두어 제거 (정식명 먼저, 축약형 나중 순서 중요)
-const SIDO_PREFIXES = [
-  '서울특별시', '서울',
-  '부산광역시', '부산',
-  '대구광역시', '대구',
-  '인천광역시', '인천',
-  '광주광역시', '광주',
-  '대전광역시', '대전',
-  '울산광역시', '울산',
-  '세종특별자치시', '세종',
-  '경기도', '경기',
-  '강원특별자치도', '강원도', '강원',
-  '충청북도', '충북',
-  '충청남도', '충남',
-  '전북특별자치도', '전라북도', '전북',
-  '전라남도', '전남',
-  '경상북도', '경북',
-  '경상남도', '경남',
-  '제주특별자치도', '제주도', '제주',
-];
+  async function searchElevatorCache() {
+    const rawQ = (addForm.address || '').trim();
+    if (!rawQ) {
+      alert('먼저 주소나 건물명을 입력해주세요.');
+      return;
+    }
 
-// 괄호 안 내용 제거 (예: "가람로 113 (당하동)" → "가람로 113")
-function cleanAddressInput(raw: string): string {
-  return raw.replace(/\([^)]*\)/g, '').trim();
-}
+    setCacheSearching(true);
+    setCacheResults([]);
+    setCacheGrouped([]);
 
-function stripSidoPrefix(raw: string): string {
-  const q = raw.trim();
-  for (const prefix of SIDO_PREFIXES) {
-    if (q.startsWith(prefix)) {
-      return q.slice(prefix.length).trim();
+    try {
+      const cleaned = cleanAddressInput(rawQ);
+      const normalizedQ = stripSidoPrefix(cleaned);
+
+      const runTextSearch = async (q: string) => {
+        const { data, error } = await supabase
+          .from('elevator_national_cache')
+          .select('*')
+          .or(`address1.ilike.%${q}%,address2.ilike.%${q}%,building.ilike.%${q}%`)
+          .limit(500);
+        if (error) throw error;
+        return data || [];
+      };
+
+      let rows: CacheRow[] = [];
+
+      // 1차: 도로명 + 번지를 정확한 컬럼으로 검색 (가장 정확)
+      const roadInfo = extractRoadAndNumber(normalizedQ);
+      if (roadInfo) {
+        const { data, error } = await supabase
+          .from('elevator_national_cache')
+          .select('*')
+          .ilike('road_name', `%${roadInfo.road}%`)
+          .ilike('main_no', `%${roadInfo.number}%`)
+          .limit(500);
+        if (!error && data) rows = data;
+      }
+
+      // 2차: 시/도·괄호 제거한 문자열로 전체 부분일치 검색
+      if (rows.length === 0) {
+        rows = await runTextSearch(normalizedQ);
+      }
+
+      // 3차: 원문 그대로 한 번 더 검색 (최후 폴백)
+      if (rows.length === 0 && normalizedQ !== rawQ) {
+        rows = await runTextSearch(rawQ);
+      }
+
+      setCacheResults(rows);
+
+      const groupMap = new Map<string, number>();
+      rows.forEach((r) => {
+        const key = r.dong && String(r.dong).trim() ? `${r.dong}동` : '동 정보 없음';
+        groupMap.set(key, (groupMap.get(key) || 0) + 1);
+      });
+      setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
+
+      setAddForm(prev => ({ ...prev, elevatorCount: rows.length }));
+
+      if (rows.length === 0) {
+        alert('일치하는 승강기 정보를 찾지 못했어요. 주소나 건물명을 다시 확인해주세요.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('조회 중 오류가 발생했어요.');
+    } finally {
+      setCacheSearching(false);
     }
   }
-  return q;
-}
-
-// 도로명 + 번지 추출 (예: "파주시 가람로 113" → { road: '가람로', number: '113' })
-function extractRoadAndNumber(q: string): { road: string; number: string } | null {
-  const match = q.match(/([가-힣0-9]+(?:로|길))\s*(\d+(?:-\d+)?)/);
-  if (!match) return null;
-  return { road: match[1], number: match[2] };
-}
-
-async function searchElevatorCache() {
-  const rawQ = (addForm.address || '').trim();
-  if (!rawQ) {
-    alert('먼저 주소나 건물명을 입력해주세요.');
-    return;
-  }
-
-  setCacheSearching(true);
-  setCacheResults([]);
-  setCacheGrouped([]);
-
-  try {
-    const cleaned = cleanAddressInput(rawQ);
-    const normalizedQ = stripSidoPrefix(cleaned);
-
-    const runTextSearch = async (q: string) => {
-      const { data, error } = await supabase
-        .from('elevator_national_cache')
-        .select('*')
-        .or(`address1.ilike.%${q}%,address2.ilike.%${q}%,building.ilike.%${q}%`)
-        .limit(500);
-      if (error) throw error;
-      return data || [];
-    };
-
-    let rows: CacheRow[] = [];
-
-    // 1차: 도로명 + 번지를 정확한 컬럼으로 검색 (가장 정확)
-    const roadInfo = extractRoadAndNumber(normalizedQ);
-    if (roadInfo) {
-      const { data, error } = await supabase
-        .from('elevator_national_cache')
-        .select('*')
-        .ilike('road_name', `%${roadInfo.road}%`)
-        .ilike('main_no', `%${roadInfo.number}%`)
-        .limit(500);
-      if (!error && data) rows = data;
-    }
-
-    // 2차: 시/도·괄호 제거한 문자열로 전체 부분일치 검색
-    if (rows.length === 0) {
-      rows = await runTextSearch(normalizedQ);
-    }
-
-    // 3차: 원문 그대로 한 번 더 검색 (최후 폴백)
-    if (rows.length === 0 && normalizedQ !== rawQ) {
-      rows = await runTextSearch(rawQ);
-    }
-
-    setCacheResults(rows);
-
-    const groupMap = new Map<string, number>();
-    rows.forEach((r) => {
-      const key = r.dong && String(r.dong).trim() ? `${r.dong}동` : '동 정보 없음';
-      groupMap.set(key, (groupMap.get(key) || 0) + 1);
-    });
-    setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
-
-    setAddForm(prev => ({ ...prev, elevatorCount: rows.length }));
-
-    if (rows.length === 0) {
-      alert('일치하는 승강기 정보를 찾지 못했어요. 주소나 건물명을 다시 확인해주세요.');
-    }
-  } catch (e) {
-    console.error(e);
-    alert('조회 중 오류가 발생했어요.');
-  } finally {
-    setCacheSearching(false);
-  }
-}
-
-
 
   // ─── 계약종류 옵션 (실제 데이터 기준) ───
   const contractTypeOptions = Array.from(
@@ -437,16 +481,21 @@ async function searchElevatorCache() {
     return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
 
-  // ─── 현장 추가 (+ 자동 조회된 호기 정보 함께 저장) ───
+  // ─── 현장 추가 (+ 자동 조회된 호기 정보 + 좌표 함께 저장) ───
   async function handleAddSite() {
     if (!addForm.name?.trim() || !userInfo?.companyId) return;
     setAddLoading(true);
     try {
+      // 주소가 있으면 좌표 계산 시도 (지도 표시를 위해 필요)
+      const coords = addForm.address ? await geocodeAddress(addForm.address) : null;
+
       const { data: newSite, error } = await supabase
         .from('sites')
         .insert({
           name: addForm.name,
           address: addForm.address || '',
+          lat: coords?.lat ?? null,
+          lng: coords?.lng ?? null,
           phone: addForm.phone || '',
           emergency_phone: addForm.emergencyPhone || '',
           contract_type: addForm.contractType || '',
@@ -468,6 +517,10 @@ async function searchElevatorCache() {
         .single();
 
       if (error) throw error;
+
+      if (!coords && addForm.address) {
+        console.warn('좌표를 찾지 못했습니다. 지도에 표시되지 않을 수 있어요:', addForm.address);
+      }
 
       if (newSite?.id && cacheResults.length > 0) {
         const elevatorRows = cacheResults.map((r) => ({
@@ -521,15 +574,25 @@ async function searchElevatorCache() {
     }
   }
 
-  // ─── 현장 수정 ───
+  // ─── 현장 수정 (주소가 바뀌면 좌표도 재계산) ───
   async function handleEditSave() {
     if (!selectedSite || !userInfo?.companyId) return;
     try {
+      const addressChanged = (editForm.address || '') !== (selectedSite.address || '');
+      const coords = addressChanged && editForm.address
+        ? await geocodeAddress(editForm.address)
+        : null;
+
+      if (addressChanged && editForm.address && !coords) {
+        console.warn('좌표를 찾지 못했습니다. 지도에 표시되지 않을 수 있어요:', editForm.address);
+      }
+
       const { error } = await supabase
         .from('sites')
         .update({
           name: editForm.name,
           address: editForm.address || '',
+          ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
           phone: editForm.phone || '',
           emergency_phone: editForm.emergencyPhone || '',
           contract_type: editForm.contractType || '',
@@ -548,7 +611,11 @@ async function searchElevatorCache() {
 
       if (error) throw error;
 
-      const updated = { ...selectedSite, ...editForm };
+      const updated = {
+        ...selectedSite,
+        ...editForm,
+        ...(addressChanged ? { lat: coords?.lat, lng: coords?.lng } : {}),
+      };
       setEditMode(false);
       setSelectedSite(updated);
       setSites(prev => prev.map(s => s.id === selectedSite.id ? updated : s));
@@ -655,39 +722,39 @@ async function searchElevatorCache() {
             <table className="w-full min-w-[1100px] text-sm table-fixed">
 
               <thead>
-  <tr className="bg-gray-50 border-b">
-    <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-40">
-      <button onClick={() => handleSort('name')} className="flex items-center hover:text-blue-600">
-        현장명 <SortIcon k="name" />
-      </button>
-    </th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">
-      <button onClick={() => handleSort('teamName')} className="flex items-center justify-center hover:text-blue-600">
-        팀 <SortIcon k="teamName" />
-      </button>
-    </th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
-      <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
-        대수 <SortIcon k="elevatorCount" />
-      </button>
-    </th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">담당자</th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">전화번호</th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">비통번호</th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-28">
-      <button onClick={() => handleSort('contractType')} className="flex items-center justify-center hover:text-blue-600">
-        계약종류 <SortIcon k="contractType" />
-      </button>
-    </th>
-    <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
-      <button onClick={() => handleSort('region')} className="flex items-center justify-center hover:text-blue-600">
-        지역 <SortIcon k="region" />
-      </button>
-    </th>
-    <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-64">주소</th>
-    {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">관리</th>}
-  </tr>
-</thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-56">
+                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-blue-600">
+                      현장명 <SortIcon k="name" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">
+                    <button onClick={() => handleSort('teamName')} className="flex items-center justify-center hover:text-blue-600">
+                      팀 <SortIcon k="teamName" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
+                    <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
+                      대수 <SortIcon k="elevatorCount" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">담당자</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">전화번호</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">비통번호</th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-28">
+                    <button onClick={() => handleSort('contractType')} className="flex items-center justify-center hover:text-blue-600">
+                      계약종류 <SortIcon k="contractType" />
+                    </button>
+                  </th>
+                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
+                    <button onClick={() => handleSort('region')} className="flex items-center justify-center hover:text-blue-600">
+                      지역 <SortIcon k="region" />
+                    </button>
+                  </th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-64">주소</th>
+                  {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">관리</th>}
+                </tr>
+              </thead>
 
               <tbody>
                 {filteredSites.length === 0 ? (
@@ -932,6 +999,9 @@ async function searchElevatorCache() {
                       <span className="font-medium text-gray-800">{value}</span>
                     </div>
                   ))}
+                  {!selectedSite.lat && selectedSite.address && (
+                    <p className="text-xs text-orange-500 pt-1">⚠️ 좌표가 없어 지도에 표시되지 않아요. 수정 후 저장하면 다시 시도돼요.</p>
+                  )}
                 </div>
 
                 {/* 호기 목록 */}
@@ -1081,7 +1151,8 @@ function SiteRow({
       onClick={onClick}
       className={`border-b last:border-0 cursor-pointer hover:bg-blue-50 transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`}
     >
-      <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-nowrap">{site.name}</td>
+      <td className="px-3 py-2.5 font-medium text-gray-800 whitespace-normal break-words leading-snug">{site.name}</td>
+
       <td className="px-3 py-2.5 text-center whitespace-nowrap">
         {site.teamName ? (
           <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{site.teamName}</span>
@@ -1091,8 +1162,8 @@ function SiteRow({
         {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
       </td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.managerName || '-'}</td>
-<td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.phone || '-'}</td>
-<td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.emergencyPhone || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.phone || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.emergencyPhone || '-'}</td>
 
       <td className="px-3 py-2.5 text-center whitespace-nowrap">
         {site.contractType ? (
