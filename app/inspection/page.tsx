@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -31,13 +31,15 @@ interface SiteRow {
   phone: string;
 }
 
-interface InspectionRow {
-  id?: string;
-  siteId: string;
+interface UnitInspection {
+  unitNo: number;
   completed: boolean;
-  note: string;
   completedBy?: string;
   completedAt?: string;
+}
+
+interface NoteRow {
+  note: string;
 }
 
 const MONTHS = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
@@ -56,7 +58,10 @@ export default function InspectionPage() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
 
-  const [inspectionMap, setInspectionMap] = useState<Record<string, InspectionRow>>({});
+  // site_id -> unit_no -> UnitInspection (실제 DB에 존재하는 행만)
+  const [rawUnits, setRawUnits] = useState<Record<string, Record<number, UnitInspection>>>({});
+  // site_id -> note (site_inspections 테이블)
+  const [noteMap, setNoteMap] = useState<Record<string, NoteRow>>({});
 
   const [mapReady, setMapReady] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -64,7 +69,7 @@ export default function InspectionPage() {
   const overlaysRef = useRef<any[]>([]);
 
   const [selectedSite, setSelectedSite] = useState<SiteRow | null>(null);
-  const [panelChecked, setPanelChecked] = useState(false);
+  const [panelUnits, setPanelUnits] = useState<UnitInspection[]>([]);
   const [panelNote, setPanelNote] = useState('');
   const [panelSaving, setPanelSaving] = useState(false);
 
@@ -95,7 +100,7 @@ export default function InspectionPage() {
     init();
   }, [router]);
 
-  // ── 팀 목록 (운영자만 조회, 필터용) ──────────
+  // ── 팀 목록 ──────────────────────
   useEffect(() => {
     if (!userInfo || !isAdmin) return;
     const loadTeams = async () => {
@@ -106,7 +111,7 @@ export default function InspectionPage() {
     loadTeams();
   }, [userInfo, isAdmin]);
 
-  // ── 현장 목록 (운영자=전체 / 팀원=본인 팀만) ──
+  // ── 현장 목록 ──────────────────────
   useEffect(() => {
     if (!userInfo) return;
     const loadSites = async () => {
@@ -135,33 +140,51 @@ export default function InspectionPage() {
     ? sites.filter(s => s.team === filterTeam)
     : sites;
 
-  // ── 선택된 월의 점검 기록 로드 ────────────────
+  // ── 선택된 월의 호기별 점검 기록 + 비고 로드 ──
   const loadInspections = useCallback(async () => {
     if (!userInfo) return;
-    const { data, error } = await supabase
-      .from('site_inspections')
-      .select('*')
-      .eq('company_id', userInfo.companyId)
-      .eq('year', year)
-      .eq('month', month);
-    if (error) { console.error(error); return; }
-    const map: Record<string, InspectionRow> = {};
-    (data || []).forEach((r: any) => {
-      map[r.site_id] = {
-        id: r.id,
-        siteId: r.site_id,
+    const [unitsRes, notesRes] = await Promise.all([
+      supabase.from('site_inspection_units').select('*')
+        .eq('company_id', userInfo.companyId).eq('year', year).eq('month', month),
+      supabase.from('site_inspections').select('site_id, note')
+        .eq('company_id', userInfo.companyId).eq('year', year).eq('month', month),
+    ]);
+    if (unitsRes.error) { console.error(unitsRes.error); return; }
+    const raw: Record<string, Record<number, UnitInspection>> = {};
+    (unitsRes.data || []).forEach((r: any) => {
+      if (!raw[r.site_id]) raw[r.site_id] = {};
+      raw[r.site_id][r.unit_no] = {
+        unitNo: r.unit_no,
         completed: r.completed,
-        note: r.note || '',
         completedBy: r.completed_by,
         completedAt: r.completed_at,
       };
     });
-    setInspectionMap(map);
+    setRawUnits(raw);
+
+    const notes: Record<string, NoteRow> = {};
+    (notesRes.data || []).forEach((r: any) => { notes[r.site_id] = { note: r.note || '' }; });
+    setNoteMap(notes);
   }, [userInfo, year, month]);
 
   useEffect(() => { loadInspections(); }, [loadInspections]);
 
-  // ── 카카오맵 SDK 스크립트 로드 ────────────────
+  // ── 현장별 호기 배열 (없으면 기본값으로 채움) ──
+  const inspectionUnitsMap = useMemo(() => {
+    const map: Record<string, UnitInspection[]> = {};
+    sites.forEach(site => {
+      const count = Math.max(site.elevatorCount || 1, 1);
+      const existing = rawUnits[site.id] || {};
+      const arr: UnitInspection[] = [];
+      for (let i = 1; i <= count; i++) {
+        arr.push(existing[i] || { unitNo: i, completed: false });
+      }
+      map[site.id] = arr;
+    });
+    return map;
+  }, [sites, rawUnits]);
+
+  // ── 카카오맵 SDK 스크립트 로드 ──
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const w = window as any;
@@ -172,18 +195,20 @@ export default function InspectionPage() {
     document.head.appendChild(script);
   }, []);
 
-  // ── 지도 최초 1회 생성 ────────────────────────
-useEffect(() => {
-  if (!mapReady || !mapContainerRef.current || mapObjRef.current) return;
-  const w = window as any;
-  mapObjRef.current = new w.kakao.maps.Map(mapContainerRef.current, {
-    center: new w.kakao.maps.LatLng(36.5, 127.8),
-    level: 12,
-  });
-}, [mapReady, loading]);
+  // ── 지도 최초 1회 생성 (줌 컨트롤 추가) ──
+  useEffect(() => {
+    if (!mapReady || !mapContainerRef.current || mapObjRef.current) return;
+    const w = window as any;
+    mapObjRef.current = new w.kakao.maps.Map(mapContainerRef.current, {
+      center: new w.kakao.maps.LatLng(36.5, 127.8),
+      level: 12,
+    });
+    // 웹(마우스 환경)에서 터치 확대 없이도 +/- 버튼으로 확대·축소 가능하게
+    const zoomControl = new w.kakao.maps.ZoomControl();
+    mapObjRef.current.addControl(zoomControl, w.kakao.maps.ControlPosition.RIGHT);
+  }, [mapReady, loading]);
 
-
-  // ── 현장이나 점검현황이 바뀔 때마다 마커 갱신 ──
+  // ── 현장/점검현황이 바뀔 때마다 마커 갱신 (완료/일부완료/미완료 3색) ──
   useEffect(() => {
     if (!mapReady || !mapObjRef.current) return;
     const w = window as any;
@@ -199,8 +224,19 @@ useEffect(() => {
       const position = new w.kakao.maps.LatLng(site.lat, site.lng);
       bounds.extend(position);
 
-      const done = !!inspectionMap[site.id]?.completed;
-      const color = done ? '#22c55e' : '#94a3b8';
+      const units = inspectionUnitsMap[site.id] || [];
+      const total = units.length;
+      const doneCount = units.filter(u => u.completed).length;
+
+      let color = '#94a3b8'; // 회색: 미점검
+      let badge = '';
+      if (total > 0 && doneCount === total) {
+        color = '#22c55e'; // 초록: 전체 완료
+        badge = '✅ ';
+      } else if (doneCount > 0) {
+        color = '#f59e0b'; // 주황: 일부 완료
+        badge = `${doneCount}/${total} `;
+      }
 
       const el = document.createElement('div');
       el.style.cursor = 'pointer';
@@ -209,14 +245,14 @@ useEffect(() => {
       el.style.alignItems = 'center';
       el.innerHTML = `
         <div style="background:${color};color:#fff;font-size:11px;font-weight:700;padding:4px 9px;border-radius:9999px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3);">
-          ${done ? '✅ ' : ''}${site.name}
+          ${badge}${site.name}
         </div>
         <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color};margin-top:-1px;"></div>
       `;
       el.addEventListener('click', () => {
         setSelectedSite(site);
-        setPanelChecked(!!inspectionMap[site.id]?.completed);
-        setPanelNote(inspectionMap[site.id]?.note || '');
+        setPanelUnits((inspectionUnitsMap[site.id] || []).map(u => ({ ...u })));
+        setPanelNote(noteMap[site.id]?.note || '');
       });
 
       const overlay = new w.kakao.maps.CustomOverlay({
@@ -228,28 +264,42 @@ useEffect(() => {
       overlaysRef.current.push(overlay);
     });
 
+    // 모바일에서 뷰포트가 늦게 확정되며 배율이 어긋나는 문제 방지
+    mapObjRef.current.relayout();
     mapObjRef.current.setBounds(bounds);
-  }, [mapReady, filteredSites, inspectionMap]);
+  }, [mapReady, filteredSites, inspectionUnitsMap, noteMap]);
 
-  // ── 점검 상태 + 비고 저장 ─────────────────────
+  // ── 호기별 완료 + 비고 저장 ──
   const savePanel = async () => {
     if (!selectedSite || !userInfo) return;
     setPanelSaving(true);
     try {
-      const payload = {
+      const unitPayloads = panelUnits.map(u => ({
         company_id: userInfo.companyId,
         site_id: selectedSite.id,
         year, month,
-        completed: panelChecked,
-        note: panelNote.trim(),
-        completed_by: panelChecked ? userInfo.name : null,
-        completed_at: panelChecked ? new Date().toISOString() : null,
+        unit_no: u.unitNo,
+        completed: u.completed,
+        completed_by: u.completed ? userInfo.name : null,
+        completed_at: u.completed ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
-      };
-      const { error } = await supabase
+      }));
+      const { error: unitErr } = await supabase
+        .from('site_inspection_units')
+        .upsert(unitPayloads, { onConflict: 'site_id,year,month,unit_no' });
+      if (unitErr) throw unitErr;
+
+      const { error: noteErr } = await supabase
         .from('site_inspections')
-        .upsert(payload, { onConflict: 'site_id,year,month' });
-      if (error) throw error;
+        .upsert({
+          company_id: userInfo.companyId,
+          site_id: selectedSite.id,
+          year, month,
+          note: panelNote.trim(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'site_id,year,month' });
+      if (noteErr) throw noteErr;
+
       await loadInspections();
       setSelectedSite(null);
     } catch (e: any) {
@@ -259,13 +309,23 @@ useEffect(() => {
     }
   };
 
+  const toggleAllUnits = (value: boolean) => {
+    setPanelUnits(prev => prev.map(u => ({ ...u, completed: value })));
+  };
+
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
 
-  const stats = {
-    total: filteredSites.length,
-    done: filteredSites.filter(s => inspectionMap[s.id]?.completed).length,
-  };
+  // ── 통계: 현장 수가 아니라 호기 수 기준 ──
+  const stats = useMemo(() => {
+    let total = 0, done = 0;
+    filteredSites.forEach(site => {
+      const units = inspectionUnitsMap[site.id] || [];
+      total += units.length;
+      done += units.filter(u => u.completed).length;
+    });
+    return { total, done };
+  }, [filteredSites, inspectionUnitsMap]);
   const rate = stats.total > 0 ? Math.round(stats.done / stats.total * 100) : 0;
 
   if (loading) {
@@ -299,14 +359,13 @@ useEffect(() => {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-5 space-y-4">
-        {/* 통계 + 팀 필터 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-2 text-sm">
-              전체 <strong className="text-gray-800">{stats.total}</strong>곳
+              전체 <strong className="text-gray-800">{stats.total}</strong>호기
             </div>
             <div className="bg-green-50 rounded-xl border border-green-100 shadow-sm px-4 py-2 text-sm text-green-700">
-              완료 <strong>{stats.done}</strong>곳 ({rate}%)
+              완료 <strong>{stats.done}</strong>호기 ({rate}%)
             </div>
           </div>
           {isAdmin && (
@@ -326,16 +385,14 @@ useEffect(() => {
           )}
         </div>
 
-        {/* 지도 */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div ref={mapContainerRef} style={{ width: '100%', height: '65vh' }} />
         </div>
         <p className="text-xs text-gray-400 text-center">
-          🟢 이번 달 점검완료 · ⚪ 미점검 &nbsp;|&nbsp; 현장 마커를 클릭하면 점검 처리를 할 수 있어요.
+          🟢 전체완료 · 🟠 일부완료 · ⚪ 미점검 &nbsp;|&nbsp; 현장 마커를 클릭하면 점검 처리를 할 수 있어요.
         </p>
       </main>
 
-      {/* ── 현장 상세 / 점검 처리 패널 ── */}
       {selectedSite && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[85vh] overflow-y-auto">
@@ -360,25 +417,30 @@ useEffect(() => {
                 )}
               </div>
 
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-xs font-bold text-gray-500 mb-2">{year}년 {MONTHS[month - 1]} 점검 상태</p>
-                <button
-                  type="button"
-                  onClick={() => setPanelChecked(v => !v)}
-                  className={`w-full py-3 rounded-xl font-bold text-sm transition ${
-                    panelChecked
-                      ? 'bg-green-500 text-white'
-                      : 'bg-white text-gray-500 border-2 border-dashed border-gray-300'
-                  }`}
-                >
-                  {panelChecked ? '✅ 점검완료' : '점검완료로 표시하기'}
-                </button>
-                {inspectionMap[selectedSite.id]?.completedBy && panelChecked && (
-                  <p className="text-xs text-gray-400 mt-2">
-                    {inspectionMap[selectedSite.id]?.completedBy} ·{' '}
-                    {(inspectionMap[selectedSite.id]?.completedAt || '').slice(0, 16).replace('T', ' ')}
-                  </p>
-                )}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-bold text-gray-500">{year}년 {MONTHS[month - 1]} 호기별 점검 상태</p>
+                  {panelUnits.length > 1 && (
+                    <div className="flex gap-1">
+                      <button onClick={() => toggleAllUnits(true)} className="text-[11px] px-2 py-1 rounded-lg bg-green-100 text-green-700 font-semibold">전체완료</button>
+                      <button onClick={() => toggleAllUnits(false)} className="text-[11px] px-2 py-1 rounded-lg bg-gray-200 text-gray-600 font-semibold">전체취소</button>
+                    </div>
+                  )}
+                </div>
+
+                {panelUnits.map((u, idx) => (
+                  <button
+                    key={u.unitNo}
+                    type="button"
+                    onClick={() => setPanelUnits(prev => prev.map((p, i) => i === idx ? { ...p, completed: !p.completed } : p))}
+                    className={`w-full flex items-center justify-between py-2.5 px-3 rounded-xl font-bold text-sm transition ${
+                      u.completed ? 'bg-green-500 text-white' : 'bg-white text-gray-500 border-2 border-dashed border-gray-300'
+                    }`}
+                  >
+                    <span>{panelUnits.length > 1 ? `${u.unitNo}호기` : '점검 상태'}</span>
+                    <span>{u.completed ? '✅ 완료' : '미완료'}</span>
+                  </button>
+                ))}
               </div>
 
               <div>
