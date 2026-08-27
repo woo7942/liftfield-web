@@ -538,7 +538,8 @@ export default function InspectionPage() {
                             unit.completed ? 'bg-green-500 text-white' : 'bg-white text-gray-500 border-2 border-dashed border-gray-300'
                           }`}
                         >
-                          <span>{elevator.hogiNo || '호기'}{elevator.installationPlace ? ` (${elevator.installationPlace})` : ''}</span>
+                          <span>{elevator.installationPlace ? `(${elevator.installationPlace})` : (elevator.hogiNo || '호기')}</span>
+
                           <span>{unit.completed ? '✅ 완료' : '미완료'}</span>
                         </button>
                       );
