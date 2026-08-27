@@ -87,6 +87,14 @@ async function fetchPage(sido, sigungu, pageNo) {
   return parseItems(xml);
 }
 
+// 먼저 처리하고 싶은 지역 (원하는 순서대로 나열)
+const PRIORITY_REGIONS = [
+  { sido: '경기도', sigungu: '고양시 덕양구' },
+  { sido: '경기도', sigungu: '고양시 일산동구' },
+  { sido: '경기도', sigungu: '고양시 일산서구' },
+  { sido: '경기도', sigungu: '파주시' },
+];
+
 function buildFlatRegionList() {
   const flat = [];
   for (const r of REGIONS) {
@@ -94,8 +102,18 @@ function buildFlatRegionList() {
       flat.push({ sido: r.sido, sigungu: s });
     }
   }
-  return flat;
+
+  const isPriority = (item) =>
+    PRIORITY_REGIONS.some((p) => p.sido === item.sido && p.sigungu === item.sigungu);
+
+  const priorityList = PRIORITY_REGIONS.filter((p) =>
+    flat.some((f) => f.sido === p.sido && f.sigungu === p.sigungu)
+  );
+  const restList = flat.filter((item) => !isPriority(item));
+
+  return [...priorityList, ...restList];
 }
+
 
 async function upsertRows(items, sido, sigungu) {
   if (items.length === 0) return;
