@@ -75,6 +75,14 @@ export default function TeamPage() {
   const [inviteLoading, setInviteLoading]     = useState(false);
   const [selectedMember, setSelectedMember]   = useState<TeamMember | null>(null);
 
+  // 팀 이름 변경 / 삭제 상태
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameTeam, setRenameTeam]           = useState<TeamItem | null>(null);
+  const [renameValue, setRenameValue]         = useState('');
+  const [renameLoading, setRenameLoading]     = useState(false);
+  const [renameError, setRenameError]         = useState('');
+  const [deleteLoading, setDeleteLoading]     = useState(false);
+
   // ── 인증 ──
   useEffect(() => {
     const init = async () => {
@@ -234,6 +242,89 @@ export default function TeamPage() {
     }
   };
 
+  // ── 팀 이름 변경 (연관 테이블 자동 동기화: users, sites, invitations) ──
+  const handleRenameTeam = async () => {
+    if (!renameTeam || !userInfo) return;
+    const newName = renameValue.trim();
+    if (!newName) { setRenameError('팀 이름을 입력해주세요.'); return; }
+    if (newName === renameTeam.name) { setShowRenameModal(false); return; }
+    if (teams.find(t => t.name === newName)) {
+      setRenameError('이미 존재하는 팀 이름이에요.');
+      return;
+    }
+    setRenameLoading(true);
+    setRenameError('');
+    try {
+      const { error } = await supabase.rpc('rename_team', {
+        p_company_id: userInfo.companyId,
+        p_old_name: renameTeam.name,
+        p_new_name: newName,
+      });
+      if (error) throw error;
+
+      const oldName = renameTeam.name;
+      setTeams(prev => prev.map(t => t.id === renameTeam.id ? { ...t, name: newName } : t));
+      setMembers(prev => prev.map(m => m.team === oldName ? { ...m, team: newName } : m));
+      setInvitations(prev => {
+        const next = { ...prev };
+        if (next[oldName]) {
+          next[newName] = next[oldName];
+          delete next[oldName];
+        }
+        return next;
+      });
+      if (selectedTeam?.id === renameTeam.id) {
+        setSelectedTeam({ ...renameTeam, name: newName });
+      }
+      if (selectedMember?.team === oldName) {
+        setSelectedMember({ ...selectedMember, team: newName });
+      }
+
+      setShowRenameModal(false);
+      setRenameTeam(null);
+      setRenameValue('');
+    } catch (e: any) {
+      setRenameError('이름 변경 중 오류: ' + e.message);
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  // ── 팀 삭제 (소속 멤버·현장 미배정 처리 + 초대코드 만료 후 삭제) ──
+  const handleDeleteTeam = async (team: TeamItem) => {
+    if (!userInfo) return;
+    const count = members.filter(m => m.team === team.name).length;
+    const msg = count > 0
+      ? `"${team.name}" 팀을 삭제할까요?\n소속된 멤버 ${count}명은 팀 미배정 상태로 전환되고, 배정된 현장도 함께 미배정 처리돼요.`
+      : `"${team.name}" 팀을 삭제할까요?`;
+    if (!confirm(msg)) return;
+
+    setDeleteLoading(true);
+    try {
+      const { error } = await supabase.rpc('delete_team', {
+        p_company_id: userInfo.companyId,
+        p_team_name: team.name,
+      });
+      if (error) throw error;
+
+      setTeams(prev => prev.filter(t => t.id !== team.id));
+      setMembers(prev => prev.map(m => m.team === team.name ? { ...m, team: '' } : m));
+      setInvitations(prev => {
+        const next = { ...prev };
+        delete next[team.name];
+        return next;
+      });
+      if (selectedTeam?.id === team.id) setSelectedTeam(null);
+      if (selectedMember?.team === team.name) {
+        setSelectedMember({ ...selectedMember, team: '' });
+      }
+    } catch (e: any) {
+      alert('팀 삭제 중 오류: ' + e.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   // ── 초대코드 발급 ──
   const handleIssueInvite = async () => {
     if (!inviteTeam || !userInfo) return;
@@ -375,7 +466,7 @@ export default function TeamPage() {
     }
   };
 
-  // ── 멤버 팀 변경 ──
+  // ── 멤버 팀 변경 (본인 포함, '' 값으로 미배정 처리 가능) ──
   const handleChangeTeam = async (uid: string, newTeam: string) => {
     const { error } = await supabase
       .from('users')
@@ -531,20 +622,42 @@ export default function TeamPage() {
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h2 className="text-xl font-black text-gray-800">{selectedTeam.name}</h2>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-black text-gray-800">{selectedTeam.name}</h2>
+                        <button
+                          onClick={() => {
+                            setRenameTeam(selectedTeam);
+                            setRenameValue(selectedTeam.name);
+                            setRenameError('');
+                            setShowRenameModal(true);
+                          }}
+                          className="text-xs text-gray-400 hover:text-blue-600 transition"
+                        >
+                          ✏️ 이름변경
+                        </button>
+                      </div>
                       <p className="text-xs text-gray-400 mt-0.5">생성일: {formatDate(selectedTeam.createdAt)}</p>
                     </div>
-                    <button
-                      onClick={() => {
-                        const currentMax = invitations[selectedTeam.name]?.maxMembers || 5;
-                        setInviteMaxMembers(currentMax);
-                        setInviteTeam(selectedTeam);
-                        setShowInviteModal(true);
-                      }}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
-                    >
-                      🔗 초대코드 {invitations[selectedTeam.name] ? '갱신' : '발급'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleDeleteTeam(selectedTeam)}
+                        disabled={deleteLoading}
+                        className="text-xs text-red-400 hover:text-red-600 border border-red-200 hover:border-red-300 px-3 py-2 rounded-xl transition disabled:opacity-50"
+                      >
+                        🗑 삭제
+                      </button>
+                      <button
+                        onClick={() => {
+                          const currentMax = invitations[selectedTeam.name]?.maxMembers || 5;
+                          setInviteMaxMembers(currentMax);
+                          setInviteTeam(selectedTeam);
+                          setShowInviteModal(true);
+                        }}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
+                      >
+                        🔗 초대코드 {invitations[selectedTeam.name] ? '갱신' : '발급'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* 초대코드 현황 */}
@@ -799,6 +912,48 @@ export default function TeamPage() {
         </div>
       )}
 
+      {/* 팀 이름 변경 모달 */}
+      {showRenameModal && renameTeam && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-800">✏️ 팀 이름 변경</h3>
+              <button onClick={() => setShowRenameModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">새 팀 이름 *</label>
+              <input
+                type="text"
+                value={renameValue}
+                onChange={e => setRenameValue(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleRenameTeam()}
+                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                autoFocus
+              />
+              {renameError && <p className="text-red-500 text-xs mt-1">{renameError}</p>}
+            </div>
+            <p className="text-xs text-gray-400">
+              이름을 바꾸면 소속 멤버, 배정된 현장, 초대코드까지 전부 새 이름으로 자동 반영돼요.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowRenameModal(false)}
+                className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50 transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleRenameTeam}
+                disabled={renameLoading}
+                className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {renameLoading ? '변경 중...' : '변경하기'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 멤버 상세 모달 */}
       {selectedMember && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -830,10 +985,20 @@ export default function TeamPage() {
                 </div>
               ))}
             </div>
-            {selectedMember.uid !== userInfo?.uid && teams.length > 0 && (
+            {teams.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">팀 변경</label>
                 <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => handleChangeTeam(selectedMember.uid, '')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all ${
+                      !selectedMember.team
+                        ? 'border-orange-400 bg-orange-500 text-white'
+                        : 'border-gray-200 text-gray-600 hover:border-orange-300'
+                    }`}
+                  >
+                    미배정
+                  </button>
                   {teams.map(t => (
                     <button
                       key={t.id}
@@ -848,6 +1013,9 @@ export default function TeamPage() {
                     </button>
                   ))}
                 </div>
+                {selectedMember.uid === userInfo?.uid && (
+                  <p className="text-xs text-gray-400 mt-2">⚠️ 본인 계정의 팀을 변경하고 있어요.</p>
+                )}
               </div>
             )}
             <button
