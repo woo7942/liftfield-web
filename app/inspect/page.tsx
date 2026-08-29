@@ -92,25 +92,22 @@ export default function InspectPage() {
         };
         setUserInfo(info);
 
-        // 현장 목록 로드 — source='member' 팀별현장만
+        // 현장 목록 로드 — source='team' 팀별현장만
         const { data: allSites, error: sitesError } = await supabase
-  .from('sites')
-  .select('id, site_name, name, source, team')
-  .eq('company_id', userData.company_id)
-  .eq('source', 'team');
-
-
+          .from('sites')
+          .select('id, site_name, name, source, team')
+          .eq('company_id', userData.company_id)
+          .eq('source', 'team');
 
         if (sitesError) throw sitesError;
 
         const mapped: Site[] = (allSites || []).map((s: any) => ({
-  id: s.id,
-  siteName: s.site_name,
-  name: s.name,
-  source: s.source,
-  teamName: s.team,
-}));
-
+          id: s.id,
+          siteName: s.site_name,
+          name: s.name,
+          source: s.source,
+          teamName: s.team,
+        }));
 
         const isAdmin =
           userData.role === 'admin' || userData.super_admin === true;
@@ -444,20 +441,6 @@ export default function InspectPage() {
     }));
   };
 
-  const resultColor = (r: string) =>
-    r === '합격'
-      ? 'text-green-600 bg-green-50'
-      : r === '조건부합격'
-      ? 'text-yellow-600 bg-yellow-50'
-      : 'text-red-600 bg-red-50';
-
-  const resultBorder = (r: string) =>
-    r === '합격'
-      ? 'border-green-400'
-      : r === '조건부합격'
-      ? 'border-yellow-400'
-      : 'border-red-400';
-
   const filteredSites =
     siteSearch.trim().length >= 1
       ? sites
@@ -477,9 +460,9 @@ export default function InspectPage() {
     );
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 print:bg-white">
       {/* 헤더 */}
-      <header className="bg-white border-b px-4 py-3 flex items-center gap-2 sticky top-0 z-10">
+      <header className="bg-white border-b px-4 py-3 flex items-center gap-2 sticky top-0 z-10 print:hidden">
         <button
           onClick={() => router.push('/dashboard')}
           className="text-gray-500 hover:text-gray-700 text-lg"
@@ -499,7 +482,7 @@ export default function InspectPage() {
         )}
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 py-4">
+      <div className="max-w-5xl mx-auto px-4 py-4 print:px-0 print:py-0 print:max-w-none">
         {/* ── 현장 검색 ── */}
         {!selectedSite && (
           <div className="max-w-xl mx-auto mt-8">
@@ -554,9 +537,9 @@ export default function InspectPage() {
 
         {/* ── 현장 선택됨 ── */}
         {selectedSite && (
-          <div className="flex gap-4">
+          <div className="flex gap-4 print:block">
             {/* 왼쪽: 호기 목록 */}
-            <div className="w-56 shrink-0">
+            <div className="w-56 shrink-0 print:hidden">
               <div className="bg-white border rounded-xl overflow-hidden">
                 <div className="px-3 py-2.5 border-b bg-gray-50 flex items-center justify-between">
                   <span className="text-sm font-bold text-gray-700">
@@ -632,9 +615,9 @@ export default function InspectPage() {
               )}
 
               {selectedElev && (
-                <div className="bg-white border rounded-xl overflow-hidden">
-                  {/* 호기 정보 헤더 */}
-                  <div className="px-4 py-3 bg-purple-50 border-b flex items-center justify-between">
+                <div className="bg-white border rounded-xl overflow-hidden print:border-none print:rounded-none">
+                  {/* 화면에서만 보이는 헤더 */}
+                  <div className="px-4 py-3 bg-purple-50 border-b flex items-center justify-between print:hidden">
                     <div>
                       <span className="font-bold text-purple-700">
                         {selectedElev.dong ? `${selectedElev.dong} ` : ''}
@@ -652,9 +635,22 @@ export default function InspectPage() {
                     </span>
                   </div>
 
+                  {/* 인쇄 시에만 보이는 제목 */}
+                  <div className="hidden print:block px-4 pt-4">
+                    <h2 className="text-lg font-bold">
+                      {selectedSite?.siteName || selectedSite?.name} ·{' '}
+                      {selectedElev.dong ? `${selectedElev.dong} ` : ''}
+                      {String(selectedElev.hogiNo || '').replace(/[^0-9]/g, '')}호기 검사이력
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-1">
+                      승강기번호 {selectedElev.elevatorNo || '없음'} · 출력일{' '}
+                      {new Date().toLocaleDateString('ko-KR')}
+                    </p>
+                  </div>
+
                   <div className="p-4">
                     {apiLoading && (
-                      <div className="py-16 text-center">
+                      <div className="py-16 text-center print:hidden">
                         <div className="inline-block w-8 h-8 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin mb-3" />
                         <p className="text-gray-500 text-sm">
                           검사이력 조회 중...
@@ -663,43 +659,51 @@ export default function InspectPage() {
                     )}
 
                     {apiError && (
-                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm">
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm print:hidden">
                         {apiError}
                       </div>
                     )}
 
                     {!apiLoading && !apiError && history.length === 0 && (
-                      <div className="py-16 text-center text-gray-400">
+                      <div className="py-16 text-center text-gray-400 print:hidden">
                         <p className="text-3xl mb-3">📄</p>
                         <p className="text-sm">검사이력이 없습니다</p>
                       </div>
                     )}
 
-                    {/* 데이터 출처 안내 + 새로고침 */}
+                    {/* 데이터 출처 안내 + 새로고침 + PDF 저장 */}
                     {!apiLoading && !apiError && history.length > 0 && dataSource && (
-                      <div className="mb-3 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+                      <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 print:hidden">
                         <span className="text-xs text-blue-600">
                           {dataSource === 'cache'
-                            ? `📦 저장된 데이터입니다${
+                            ? `저장된 데이터입니다${
                                 lastSyncedAt
                                   ? ` (최근 확인: ${new Date(lastSyncedAt).toLocaleDateString('ko-KR')})`
                                   : ''
                               }`
-                            : '✅ 방금 최신 정보를 가져와 저장했습니다'}
+                            : '방금 최신 정보를 가져와 저장했습니다'}
                         </span>
-                        <button
-                          onClick={() => handleElevClick(selectedElev, true)}
-                          className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shrink-0"
-                        >
-                          🔄 새로고침
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => window.print()}
+                            className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium"
+                          >
+                            PDF 저장
+                          </button>
+                          <button
+                            onClick={() => handleElevClick(selectedElev, true)}
+                            className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                          >
+                            새로고침
+                          </button>
+                        </div>
                       </div>
                     )}
 
                     {!apiLoading && history.length > 0 && (
-                      <div className="space-y-4">
-                        <h3 className="font-bold text-gray-700 text-sm">
-                          📋 최근 검사이력 ({history.length}건)
+                      <div className="space-y-3">
+                        <h3 className="font-bold text-gray-700 text-sm print:hidden">
+                          최근 검사이력 ({history.length}건)
                         </h3>
                         {history.map((h, i) => {
                           const key = `${selectedElev.id}_${h.inspctDe}`;
@@ -711,73 +715,75 @@ export default function InspectPage() {
                           const fails = failList.filter(
                             (f) => f.examYmd === h.inspctDe
                           );
+                          const dotColor =
+                            h.dispWords === '합격'
+                              ? 'bg-green-500'
+                              : h.dispWords === '조건부합격'
+                              ? 'bg-yellow-500'
+                              : 'bg-red-500';
+                          const textColor =
+                            h.dispWords === '합격'
+                              ? 'text-green-600'
+                              : h.dispWords === '조건부합격'
+                              ? 'text-yellow-600'
+                              : 'text-red-600';
                           return (
                             <div
                               key={i}
-                              className={`border-l-4 ${resultBorder(h.dispWords)} bg-gray-50 rounded-r-xl p-4`}
+                              className="border-b border-gray-200 pb-4 last:border-0 print:break-inside-avoid"
                             >
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="font-bold text-gray-700">
-                                  {fmtYmd(h.inspctDe)} · {h.inspctKindNm}
+                              <div className="flex items-center gap-2 mb-1">
+                                <span
+                                  className={`w-2 h-2 rounded-full ${dotColor} shrink-0`}
+                                />
+                                <span className="font-semibold text-gray-800 text-sm">
+                                  {fmtYmd(h.inspctDe)}
+                                </span>
+                                <span className="text-xs text-gray-400">
+                                  {h.inspctKindNm}
                                 </span>
                                 <span
-                                  className={`text-xs px-2 py-0.5 rounded-full font-bold ${resultColor(h.dispWords)}`}
+                                  className={`text-xs font-bold ml-auto ${textColor}`}
                                 >
                                   {h.dispWords}
                                 </span>
                               </div>
-                              <p className="text-xs text-gray-500 mb-1">
-                                기관: 한국승강기안전공단 {h.inspctInsttNm}
-                              </p>
-                              <p className="text-xs text-gray-500 mb-3">
-                                유효기간: {fmtYmd(h.applcBeDt)} ~{' '}
+                              <p className="text-xs text-gray-400 mb-2 pl-4">
+                                {h.inspctInsttNm} · 유효기간 {fmtYmd(h.applcBeDt)} ~{' '}
                                 {fmtYmd(h.applcEnDt)}
                               </p>
 
                               {/* 부적합 내역 */}
                               {fails.length > 0 && (
-                                <div className="mb-3 bg-red-50 border border-red-200 rounded-xl p-3">
-                                  <p className="text-xs font-bold text-red-600 mb-2">
-                                    ⚠️ 부적합 내역 ({fails.length}건)
-                                  </p>
-                                  <div className="space-y-2">
-                                    {fails.map((f, fi) => (
-                                      <div
-                                        key={fi}
-                                        className="text-xs text-gray-700 border-b border-red-100 pb-2 last:border-0 last:pb-0"
-                                      >
-                                        <p className="font-semibold text-red-600">
-                                          {f.standardArticle} {f.standardTitle1}
+                                <div className="pl-4 mb-2 space-y-1.5">
+                                  {fails.map((f, fi) => (
+                                    <div key={fi} className="text-xs text-gray-600">
+                                      <p className="font-medium text-red-500">
+                                        {f.standardArticle} {f.standardTitle1}
+                                      </p>
+                                      <p>{f.failDesc}</p>
+                                      {f.failDescInspector && (
+                                        <p className="text-gray-400 italic">
+                                          👤 {f.failDescInspector}
                                         </p>
-                                        <p className="mt-0.5">{f.failDesc}</p>
-                                        {f.failDescInspector && (
-                                          <p className="text-gray-400 italic mt-0.5">
-                                            👤 {f.failDescInspector}
-                                          </p>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
+                                      )}
+                                    </div>
+                                  ))}
                                 </div>
                               )}
 
-                              {/* 대응 메모 */}
-                              <div className="bg-white border rounded-xl p-3">
-                                <p className="text-xs font-bold text-gray-600 mb-2">
-                                  📝 대응 메모
-                                </p>
-                                <div className="flex gap-1.5 mb-2">
+                              {/* 화면용 대응 메모 편집 */}
+                              <div className="pl-4 print:hidden">
+                                <div className="flex gap-1.5 mb-1.5">
                                   {['미대응', '대응중', '완료'].map((s) => (
                                     <button
                                       key={s}
-                                      onClick={() =>
-                                        updateMemo(key, 'status', s)
-                                      }
-                                      className={`flex-1 text-xs py-1 rounded-lg font-medium transition-colors
+                                      onClick={() => updateMemo(key, 'status', s)}
+                                      className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors
                                         ${
                                           memoData.status === s
                                             ? 'bg-purple-600 text-white'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                                         }`}
                                     >
                                       {s}
@@ -790,14 +796,14 @@ export default function InspectPage() {
                                     updateMemo(key, 'memo', e.target.value)
                                   }
                                   placeholder="대응 내역, 특이사항 등을 입력하세요"
-                                  className="w-full text-xs border rounded-lg px-3 py-2 resize-none h-20
+                                  className="w-full text-xs border border-gray-200 rounded-md px-3 py-2 resize-none h-16
                                              focus:outline-none focus:ring-1 focus:ring-purple-300"
                                 />
                                 <button
                                   onClick={() => saveMemo(h)}
                                   disabled={isSaving}
-                                  className="mt-2 w-full text-xs py-2 bg-purple-600 hover:bg-purple-700
-                                             text-white rounded-lg font-bold disabled:opacity-50 transition-colors"
+                                  className="mt-1.5 text-xs px-4 py-1.5 bg-purple-600 hover:bg-purple-700
+                                             text-white rounded-md font-medium disabled:opacity-50"
                                 >
                                   {isSaving
                                     ? '저장 중...'
@@ -806,6 +812,14 @@ export default function InspectPage() {
                                     : '저장'}
                                 </button>
                               </div>
+
+                              {/* 인쇄용 대응 메모(읽기 전용) */}
+                              {(memoData.memo || memoData.status !== '미대응') && (
+                                <div className="hidden print:block pl-4 text-xs text-gray-600">
+                                  상태: {memoData.status}
+                                  {memoData.memo ? ` · 메모: ${memoData.memo}` : ''}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
