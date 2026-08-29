@@ -97,7 +97,8 @@ export default function InspectPage() {
   .from('sites')
   .select('id, site_name, name, source, team')
   .eq('company_id', userData.company_id)
-  .eq('source', 'member');
+  .eq('source', 'team');
+
 
 
         if (sitesError) throw sitesError;
