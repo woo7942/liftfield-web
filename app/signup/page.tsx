@@ -104,6 +104,13 @@ function SignupContent() {
         return;
       }
 
+       // Supabase는 이미 가입 + 인증 완료된 이메일로 signUp을 호출해도
+      // 에러 없이 성공한 것처럼 응답하면서 identities를 빈 배열로 돌려준다.
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        setError('이미 가입된 이메일이에요. 로그인해주세요.');
+        return;
+      }
+
       const uid = data.user?.id;
       if (!uid) { setError('계정 생성에 실패했어요. 다시 시도해주세요.'); return; }
 
