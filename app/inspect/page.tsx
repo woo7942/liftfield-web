@@ -734,6 +734,28 @@ export default function InspectPage() {
     {}
   );
 
+  // ── 조건부합격/불합격 호기만 모아서 동 → 호기 순으로 정렬한 지적사항 요약 목록 ──
+  const conditionalSummaryRows = siteReportRows
+    .filter((r) => r.latest?.disp_words && r.latest.disp_words !== '합격')
+    .map((r) => {
+      // 지적사항은 '최신 건'이 아니라 '지적사항이 기록된 가장 최근 건'에서 가져옴
+      const failSourceRow = r.latest?._failSource || r.latest;
+      const fails: any[] = Array.isArray(failSourceRow?.fail_detail)
+        ? failSourceRow.fail_detail
+        : [];
+      return { ...r, failSourceRow, fails };
+    })
+    .filter((r) => r.fails.length > 0)
+    .sort((a, b) => {
+      const dongA = a.elev.dong || '';
+      const dongB = b.elev.dong || '';
+      if (dongA !== dongB) return dongA.localeCompare(dongB, 'ko');
+      return (
+        parseInt(String(a.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0') -
+        parseInt(String(b.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0')
+      );
+    });
+
   if (loading)
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -1021,6 +1043,43 @@ export default function InspectPage() {
                       </table>
                     </div>
                   ))}
+
+                  {/* ── 조건부합격/불합격 호기별 지적사항 요약 (동 → 호기 순 정렬) ── */}
+                  {conditionalSummaryRows.length > 0 && (
+                    <div className="mt-6 pt-4 border-t-2 border-gray-400 print:break-inside-avoid">
+                      <h3 className="font-bold text-sm mb-3">
+                        ⚠ 조건부합격 / 불합격 호기별 지적사항 요약
+                      </h3>
+                      {conditionalSummaryRows.map((r) => {
+                        const failDateNote =
+                          r.failSourceRow && r.failSourceRow.inspct_de !== r.latest?.inspct_de
+                            ? ` (${fmtYmd(r.failSourceRow.inspct_de)} 검사 기준)`
+                            : '';
+                        return (
+                          <div key={r.elev.id} className="mb-3 text-xs print:break-inside-avoid">
+                            <p className="font-semibold text-gray-800 mb-0.5">
+                              {r.elev.dong ? `${r.elev.dong} ` : ''}
+                              {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                              <span className="ml-2 text-red-600">{r.latest?.disp_words}</span>
+                              <span className="ml-2 text-gray-400 font-normal">
+                                {failDateNote}
+                              </span>
+                            </p>
+                            <ul className="pl-4 space-y-0.5">
+                              {r.fails.map((f: any, fi: number) => (
+                                <li key={fi} className="text-gray-600">
+                                  <span className="text-red-500 font-medium">
+                                    {f.standardArticle} {f.standardTitle1}
+                                  </span>
+                                  {f.failDesc ? ` — ${f.failDesc}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
