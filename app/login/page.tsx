@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
+import { completeOnboarding } from '@/lib/onboarding';
 
 function LoginContent() {
   const router = useRouter();
@@ -18,7 +19,6 @@ function LoginContent() {
     setError('');
 
     try {
-      // Supabase 로그인
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -32,7 +32,6 @@ function LoginContent() {
       const uid = data.user?.id;
       if (!uid) { setError('로그인 정보를 확인할 수 없습니다.'); return; }
 
-      // users 테이블에서 사용자 정보 조회
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('*')
@@ -40,17 +39,34 @@ function LoginContent() {
         .single();
 
       if (userError || !userData) {
+        // 프로필이 아직 없음 → 이메일 인증 후 첫 로그인일 가능성이 높음
+        const meta: any = data.user?.user_metadata || {};
+        if (meta.pending_invite_code || meta.pending_company_name) {
+          try {
+            await completeOnboarding(uid, data.user?.email || email, {
+              name: meta.name,
+              phone: meta.pending_phone,
+              pending_invite_code: meta.pending_invite_code,
+              pending_company_name: meta.pending_company_name,
+              agree_marketing: meta.pending_agree_marketing,
+            });
+            router.push('/dashboard');
+            return;
+          } catch (e: any) {
+            setError(e.message || '가입 처리 중 오류가 발생했어요.');
+            await supabase.auth.signOut();
+            return;
+          }
+        }
         setError('사용자 정보를 찾을 수 없습니다.');
         await supabase.auth.signOut();
         return;
       }
 
-      const plan = userData.subscription_plan || 'trial';
       const isSuperAdmin = userData.super_admin === true;
       const isAdmin = userData.role === 'admin';
       const isMember = userData.role === 'member';
 
-      // join 페이지로 리다이렉트 예외 처리
       const redirectUrl = searchParams.get('redirect') || '/dashboard';
       if (redirectUrl.startsWith('/join')) {
         router.push(redirectUrl);
@@ -76,14 +92,12 @@ function LoginContent() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg w-full max-w-md p-8">
 
-        {/* 로고 */}
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🛗</div>
           <h1 className="text-2xl font-bold text-gray-900">LiftField</h1>
           <p className="text-gray-500 text-sm mt-1">엘리베이터 관리 시스템</p>
         </div>
 
-        {/* redirect 안내 */}
         {searchParams.get('redirect') && (
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4">
             <p className="text-xs text-blue-700 text-center">
@@ -92,7 +106,6 @@ function LoginContent() {
           </div>
         )}
 
-        {/* 로그인 폼 */}
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -138,7 +151,18 @@ function LoginContent() {
         </form>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          LiftField 관리자 전용
+          계정이 없으신가요?{' '}
+          <button
+            onClick={() => {
+              const redirect = searchParams.get('redirect') || '';
+              const codeMatch = redirect.match(/code=([^&]+)/);
+              const code = codeMatch ? codeMatch[1] : '';
+              router.push(code ? `/signup?code=${code}` : '/signup');
+            }}
+            className="text-blue-500 hover:underline"
+          >
+            회원가입
+          </button>
         </p>
       </div>
     </div>

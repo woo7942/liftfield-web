@@ -435,7 +435,8 @@ export default function TeamPage() {
 
   // ── 링크 복사 ──
   const copyInviteLink = async (code: string) => {
-    const link = `${window.location.origin}/join?code=${code}`;
+    const link = `${window.location.origin}/signup?code=${code}`;
+
     try {
       await navigator.clipboard.writeText(link);
       alert('초대 링크가 복사됐어요! 🔗\n카카오톡, 문자 등에 붙여넣기 하세요.');
@@ -446,14 +447,16 @@ export default function TeamPage() {
 
   // ── 문자 공유 ──
   const shareViaSms = (code: string, teamName: string) => {
-    const link = `${window.location.origin}/join?code=${code}`;
+    const link = `${window.location.origin}/signup?code=${code}`;
+
     const text = `[LiftField] ${userInfo?.companyDisplayName || '회사'} · ${teamName} 팀 초대\n\n아래 링크로 접속해 팀에 합류하세요!\n${link}`;
     window.open(`sms:?body=${encodeURIComponent(text)}`);
   };
 
   // ── 공유 API ──
   const shareLink = async (code: string) => {
-    const link = `${window.location.origin}/join?code=${code}`;
+    const link = `${window.location.origin}/signup?code=${code}`;
+
     if (navigator.share) {
       try { await navigator.share({ title: 'LiftField 팀 초대', url: link }); return; }
       catch { return; }
