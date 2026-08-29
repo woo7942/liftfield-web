@@ -63,6 +63,10 @@ export default function InspectPage() {
   }>({});
   const [savingKey, setSavingKey] = useState('');
 
+  // 데이터 출처(캐시 or API) 표시용
+  const [dataSource, setDataSource] = useState<'cache' | 'api' | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
   // ── 인증 ──
   useEffect(() => {
     const loadUser = async (uid: string) => {
@@ -179,8 +183,70 @@ export default function InspectPage() {
     }
   };
 
-  // ── 호기 클릭 → API 조회 ──
-  const handleElevClick = async (elev: Elevator) => {
+  // ── 검사 데이터 자동 저장 (원본 이력 + 부적합 상세) ──
+  const saveInspectionData = async (
+    elev: Elevator,
+    histData: any[],
+    allFails: any[]
+  ) => {
+    if (!userInfo) return;
+    try {
+      const { data: existingRows } = await supabase
+        .from('safety_inspections')
+        .select('id, inspct_de')
+        .eq('company_id', userInfo.companyId)
+        .eq('elevator_id', elev.id);
+
+      const existingMap: Record<string, string> = {};
+      (existingRows || []).forEach((r: any) => {
+        existingMap[r.inspct_de] = r.id;
+      });
+
+      for (const h of histData) {
+        const fails = allFails
+          .filter((f) => f.examYmd === h.inspctDe)
+          .map(({ examYmd, ...rest }) => rest);
+
+        const payload = {
+          company_id: userInfo.companyId,
+          site_id: selectedSite?.id || '',
+          site_name: selectedSite?.siteName || selectedSite?.name || '',
+          elevator_id: elev.id,
+          hogi_no: String(elev.hogiNo || ''),
+          elevator_no: elev.elevatorNo || '',
+          inspct_de: h.inspctDe,
+          inspct_kind_nm: h.inspctKindNm || '',
+          disp_words: h.dispWords || '',
+          fail_cd: h.failCd || '',
+          fail_detail: fails,
+          inspct_instt_nm: h.inspctInsttNm || '',
+          applc_be_dt: h.applcBeDt || '',
+          applc_en_dt: h.applcEnDt || '',
+          updated_at: new Date().toISOString(),
+        };
+
+        const existingId = existingMap[h.inspctDe];
+        if (existingId) {
+          await supabase
+            .from('safety_inspections')
+            .update(payload)
+            .eq('id', existingId);
+        } else {
+          await supabase.from('safety_inspections').insert({
+            ...payload,
+            user_memo: '',
+            status: '미대응',
+            created_at: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (e) {
+      console.error('검사 데이터 자동 저장 실패', e);
+    }
+  };
+
+  // ── 호기 클릭 → 저장된 데이터 우선 조회, 없으면 API 조회 ──
+  const handleElevClick = async (elev: Elevator, forceRefresh = false) => {
     if (!elev.elevatorNo) {
       alert('승강기번호가 없어 검사이력을 조회할 수 없습니다.');
       return;
@@ -191,32 +257,59 @@ export default function InspectPage() {
     setFailList([]);
     setApiError('');
     setMemos({});
+    setDataSource(null);
+    setLastSyncedAt(null);
 
-    // 메모 로드
     try {
-      const { data: memoRows, error: memoError } = await supabase
-        .from('safety_inspections')
-        .select('id, inspct_de, user_memo, status')
-        .eq('company_id', userInfo!.companyId)
-        .eq('elevator_id', elev.id);
+      // 1) 저장된 데이터 우선 조회 (새로고침이 아닐 때만)
+      if (!forceRefresh) {
+        const { data: cachedRows, error: cacheError } = await supabase
+          .from('safety_inspections')
+          .select('*')
+          .eq('company_id', userInfo!.companyId)
+          .eq('elevator_id', elev.id)
+          .order('inspct_de', { ascending: false })
+          .limit(5);
 
-      if (memoError) throw memoError;
+        if (cacheError) throw cacheError;
 
-      const memoMap: typeof memos = {};
-      (memoRows || []).forEach((row: any) => {
-        memoMap[`${elev.id}_${row.inspct_de}`] = {
-          memo: row.user_memo || '',
-          status: row.status || '미대응',
-          docId: row.id,
-        };
-      });
-      setMemos(memoMap);
-    } catch (e) {
-      console.error(e);
-    }
+        if (cachedRows && cachedRows.length > 0) {
+          const histData = cachedRows.map((row: any) => ({
+            inspctDe: row.inspct_de,
+            inspctKindNm: row.inspct_kind_nm,
+            dispWords: row.disp_words,
+            inspctInsttNm: row.inspct_instt_nm || '',
+            applcBeDt: row.applc_be_dt || '',
+            applcEnDt: row.applc_en_dt || '',
+            failCd: row.fail_cd,
+          }));
 
-    // 공공 API 조회
-    try {
+          const allFails: any[] = [];
+          const memoMap: typeof memos = {};
+          cachedRows.forEach((row: any) => {
+            memoMap[`${elev.id}_${row.inspct_de}`] = {
+              memo: row.user_memo || '',
+              status: row.status || '미대응',
+              docId: row.id,
+            };
+            if (row.fail_detail && Array.isArray(row.fail_detail)) {
+              row.fail_detail.forEach((f: any) =>
+                allFails.push({ ...f, examYmd: row.inspct_de })
+              );
+            }
+          });
+
+          setHistory(histData);
+          setFailList(allFails);
+          setMemos(memoMap);
+          setDataSource('cache');
+          setLastSyncedAt(cachedRows[0].updated_at || null);
+          setApiLoading(false);
+          return; // 저장된 데이터가 있으면 API 호출 없이 종료
+        }
+      }
+
+      // 2) 저장된 데이터가 없거나 새로고침 요청 → 공공 API 호출
       const histRes = await fetch(
         `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectsafeList` +
           `?serviceKey=${SERVICE_KEY}&elevator_no=${elev.elevatorNo}&numOfRows=50&pageNo=1`
@@ -256,6 +349,28 @@ export default function InspectPage() {
         );
       }
       setFailList(allFails);
+      setDataSource('api');
+      setLastSyncedAt(new Date().toISOString());
+
+      // 3) 조회 결과 자동 저장 (메모를 남기지 않아도 원본 데이터는 저장)
+      await saveInspectionData(elev, histData, allFails);
+
+      // 저장 후 docId 매핑을 위해 다시 조회
+      const { data: savedRows } = await supabase
+        .from('safety_inspections')
+        .select('id, inspct_de, user_memo, status')
+        .eq('company_id', userInfo!.companyId)
+        .eq('elevator_id', elev.id);
+
+      const memoMap: typeof memos = {};
+      (savedRows || []).forEach((row: any) => {
+        memoMap[`${elev.id}_${row.inspct_de}`] = {
+          memo: row.user_memo || '',
+          status: row.status || '미대응',
+          docId: row.id,
+        };
+      });
+      setMemos(memoMap);
     } catch (e: any) {
       setApiError(`조회 실패: ${e.message}`);
     } finally {
@@ -554,6 +669,27 @@ export default function InspectPage() {
                       <div className="py-16 text-center text-gray-400">
                         <p className="text-3xl mb-3">📄</p>
                         <p className="text-sm">검사이력이 없습니다</p>
+                      </div>
+                    )}
+
+                    {/* 데이터 출처 안내 + 새로고침 */}
+                    {!apiLoading && !apiError && history.length > 0 && dataSource && (
+                      <div className="mb-3 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+                        <span className="text-xs text-blue-600">
+                          {dataSource === 'cache'
+                            ? `📦 저장된 데이터입니다${
+                                lastSyncedAt
+                                  ? ` (최근 확인: ${new Date(lastSyncedAt).toLocaleDateString('ko-KR')})`
+                                  : ''
+                              }`
+                            : '✅ 방금 최신 정보를 가져와 저장했습니다'}
+                        </span>
+                        <button
+                          onClick={() => handleElevClick(selectedElev, true)}
+                          className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shrink-0"
+                        >
+                          🔄 새로고침
+                        </button>
                       </div>
                     )}
 
