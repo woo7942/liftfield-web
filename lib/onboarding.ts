@@ -8,6 +8,10 @@ interface OnboardingMeta {
   agree_marketing?: boolean;
 }
 
+const TRIAL_DAYS = 15;
+const GRACE_DAYS = 90; // 체험 종료 후 데이터가 보존되는 유예 기간(관리자 수동 확인 전까지 삭제하지 않음)
+
+
 export async function completeOnboarding(uid: string, email: string, meta: OnboardingMeta) {
   const { data: existing } = await supabase
     .from('users')
@@ -67,8 +71,27 @@ export async function completeOnboarding(uid: string, email: string, meta: Onboa
     return { ok: true, companyId: inv.company_id, team: inv.team_name };
   }
 
-  // 초대코드 없음 → 신규 회사 관리자로 가입
+  // ── 초대코드 없음 → 신규 회사 관리자로 가입 ──
+  const companyName = (meta.pending_company_name || '').trim();
+  if (!companyName) {
+    throw new Error('회사명이 입력되지 않았어요. 다시 시도해주세요.');
+  }
+
   const newCompanyId = crypto.randomUUID();
+  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const dataDeletionAt = new Date(trialEndsAt.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000);
+
+  // 1) 테넌트(회사) 생성 — 구독/체험 상태의 단일 진실 공급원
+  const { error: tenantError } = await supabase.from('tenants').insert({
+    id: newCompanyId,
+    display_name: companyName,
+    subscription_status: 'trial',
+    trial_ends_at: trialEndsAt.toISOString(),
+    data_deletion_at: dataDeletionAt.toISOString(),
+  });
+  if (tenantError) throw tenantError;
+
+  // 2) 관리자 계정 생성
   const { error: insertError } = await supabase.from('users').insert({
     id: uid,
     email,
@@ -79,10 +102,10 @@ export async function completeOnboarding(uid: string, email: string, meta: Onboa
     status: 'approved',
     permissions: {},
     company_id: newCompanyId,
-    company_display_name: meta.pending_company_name || '',
+    company_display_name: companyName,
     super_admin: false,
     subscription_plan: 'trial',
-    subscription_status: 'active',
+    subscription_status: 'active', // users 테이블의 이 필드는 더 이상 신뢰하지 않음(참고용으로만 유지)
     subscription: 'trial',
     max_members: 5,
     joined_at: now,

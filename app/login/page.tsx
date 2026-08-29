@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { completeOnboarding } from '@/lib/onboarding';
+import { checkTenantGate } from '@/lib/tenantGate';
 
 function LoginContent() {
   const router = useRouter();
@@ -12,11 +13,13 @@ function LoginContent() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [trialBanner, setTrialBanner] = useState('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setTrialBanner('');
 
     try {
       const { data, error: authError } = await supabase.auth.signInWithPassword({
@@ -63,6 +66,17 @@ function LoginContent() {
         return;
       }
 
+      // ── 회사(테넌트) 구독/체험 상태 확인 ──
+      const gate = await checkTenantGate(userData.company_id, userData.super_admin === true);
+      if (!gate.ok) {
+        setError(gate.message);
+        await supabase.auth.signOut();
+        return;
+      }
+      if (gate.banner) {
+        setTrialBanner(gate.banner);
+      }
+
       const isSuperAdmin = userData.super_admin === true;
       const isAdmin = userData.role === 'admin';
       const isMember = userData.role === 'member';
@@ -106,6 +120,14 @@ function LoginContent() {
           </div>
         )}
 
+        {trialBanner && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4">
+            <p className="text-xs text-yellow-700 text-center font-semibold">
+              ⏳ {trialBanner}
+            </p>
+          </div>
+        )}
+
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -137,7 +159,7 @@ function LoginContent() {
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-              <p className="text-red-600 text-sm">{error}</p>
+              <p className="text-red-600 text-sm whitespace-pre-line">{error}</p>
             </div>
           )}
 
