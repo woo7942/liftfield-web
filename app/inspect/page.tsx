@@ -103,6 +103,7 @@ export default function InspectPage() {
   const [siteReportRows, setSiteReportRows] = useState<
     { elev: Elevator; latest: any | null }[]
   >([]);
+  const [reportProgress, setReportProgress] = useState('');
 
   // 임박 검사 알림(전체 현장 대상)
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -566,10 +567,72 @@ export default function InspectPage() {
     }));
   };
 
-  // ── 현장 전체 보고서: 동별로 그룹핑해 각 호기 최신 검사 1건씩 뽑아 인쇄 ──
+    // ── 현장 전체 보고서: 동별로 그룹핑해 각 호기 최신 검사 1건씩 뽑아 인쇄 ──
+  // 캐시에 없는 호기는 이 자리에서 자동으로 API 호출 후 저장까지 수행
+  const fetchAndSaveForReport = async (elev: Elevator, site: Site) => {
+    if (!elev.elevatorNo) return null;
+    try {
+      const histRes = await fetch(
+        `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectsafeList` +
+          `?serviceKey=${SERVICE_KEY}&elevator_no=${elev.elevatorNo}&numOfRows=50&pageNo=1`
+      );
+      const histText = await histRes.text();
+      const histData = getItems(histText)
+        .map((xml) => ({
+          inspctDe: getTag(xml, 'inspctDe'),
+          inspctKindNm: getTag(xml, 'inspctKindNm'),
+          dispWords: getTag(xml, 'dispWords'),
+          inspctInsttNm: getTag(xml, 'inspctInsttNm'),
+          applcBeDt: getTag(xml, 'applcBeDt'),
+          applcEnDt: getTag(xml, 'applcEnDt'),
+          failCd: getTag(xml, 'failCd'),
+        }))
+        .filter((h) => h.inspctDe)
+        .sort((a, b) => b.inspctDe.localeCompare(a.inspctDe))
+        .slice(0, 5);
+
+      if (histData.length === 0) return null;
+
+      const allFails: any[] = [];
+      for (const h of histData.filter((h) => h.failCd)) {
+        const failRes = await fetch(
+          `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectFailList` +
+            `?serviceKey=${SERVICE_KEY}&fail_cd=${h.failCd}&numOfRows=50&pageNo=1`
+        );
+        const failText = await failRes.text();
+        getItems(failText).forEach((xml) =>
+          allFails.push({
+            examYmd: h.inspctDe,
+            standardArticle: getTag(xml, 'standardArticle'),
+            standardTitle1: getTag(xml, 'standardTitle1'),
+            failDesc: getTag(xml, 'failDesc'),
+            failDescInspector: getTag(xml, 'failDescInspector'),
+          })
+        );
+      }
+
+      await saveInspectionData(elev, histData, allFails, site);
+
+      const latest = histData[0];
+      return {
+        elevator_id: elev.id,
+        inspct_de: latest.inspctDe,
+        inspct_kind_nm: latest.inspctKindNm,
+        disp_words: latest.dispWords,
+        fail_cd: latest.failCd,
+        status: '미대응',
+        user_memo: '',
+      };
+    } catch (e) {
+      console.error(`${elev.elevatorNo} 조회 실패`, e);
+      return null;
+    }
+  };
+
   const loadSiteReportAndPrint = async () => {
     if (!selectedSite || !userInfo || elevators.length === 0) return;
     setSiteReportLoading(true);
+    setReportProgress('');
     try {
       const elevIds = elevators.map((e) => e.id);
       const { data, error } = await supabase
@@ -586,12 +649,23 @@ export default function InspectPage() {
         if (!latestMap[row.elevator_id]) latestMap[row.elevator_id] = row;
       });
 
+      const missing = elevators.filter((e) => !latestMap[e.id] && e.elevatorNo);
+
+      if (missing.length > 0) {
+        for (let i = 0; i < missing.length; i++) {
+          setReportProgress(`검사이력 미조회 승강기 확인 중 (${i + 1}/${missing.length})`);
+          const result = await fetchAndSaveForReport(missing[i], selectedSite);
+          if (result) latestMap[missing[i].id] = result;
+        }
+      }
+
       const rows = elevators.map((e) => ({
         elev: e,
         latest: latestMap[e.id] || null,
       }));
 
       setSiteReportRows(rows);
+      setReportProgress('');
       setTimeout(() => window.print(), 300);
     } catch (e) {
       console.error(e);
@@ -600,6 +674,7 @@ export default function InspectPage() {
       setSiteReportLoading(false);
     }
   };
+
 
   const filteredSites =
     siteSearch.trim().length >= 1
@@ -783,7 +858,10 @@ export default function InspectPage() {
                       className="w-full text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-800
                                  text-white rounded-lg font-medium disabled:opacity-50"
                     >
-                      {siteReportLoading ? '준비 중...' : '📄 전체 보고서 PDF (동별)'}
+                                            {siteReportLoading
+                        ? reportProgress || '준비 중...'
+                        : '📄 전체 보고서 PDF (동별)'}
+
                     </button>
                   </div>
                 )}
