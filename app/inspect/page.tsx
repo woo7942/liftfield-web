@@ -94,20 +94,22 @@ export default function InspectPage() {
 
         // 현장 목록 로드 — source='member' 팀별현장만
         const { data: allSites, error: sitesError } = await supabase
-          .from('sites')
-          .select('id, site_name, name, source, team_name')
-          .eq('company_id', userData.company_id)
-          .eq('source', 'member');
+  .from('sites')
+  .select('id, site_name, name, source, team')
+  .eq('company_id', userData.company_id)
+  .eq('source', 'member');
+
 
         if (sitesError) throw sitesError;
 
         const mapped: Site[] = (allSites || []).map((s: any) => ({
-          id: s.id,
-          siteName: s.site_name,
-          name: s.name,
-          source: s.source,
-          teamName: s.team_name,
-        }));
+  id: s.id,
+  siteName: s.site_name,
+  name: s.name,
+  source: s.source,
+  teamName: s.team,
+}));
+
 
         const isAdmin =
           userData.role === 'admin' || userData.super_admin === true;
