@@ -611,18 +611,24 @@ export default function InspectPage() {
         );
       }
 
-      await saveInspectionData(elev, histData, allFails, site);
+            await saveInspectionData(elev, histData, allFails, site);
 
       const latest = histData[0];
+      const latestFails = allFails
+        .filter((f) => f.examYmd === latest.inspctDe)
+        .map(({ examYmd, ...rest }) => rest);
+
       return {
         elevator_id: elev.id,
         inspct_de: latest.inspctDe,
         inspct_kind_nm: latest.inspctKindNm,
         disp_words: latest.dispWords,
         fail_cd: latest.failCd,
+        fail_detail: latestFails,
         status: '미대응',
         user_memo: '',
       };
+
     } catch (e) {
       console.error(`${elev.elevatorNo} 조회 실패`, e);
       return null;
@@ -635,12 +641,13 @@ export default function InspectPage() {
     setReportProgress('');
     try {
       const elevIds = elevators.map((e) => e.id);
-      const { data, error } = await supabase
+            const { data, error } = await supabase
         .from('safety_inspections')
-        .select('elevator_id, inspct_de, inspct_kind_nm, disp_words, fail_cd, status, user_memo')
+        .select('elevator_id, inspct_de, inspct_kind_nm, disp_words, fail_cd, fail_detail, status, user_memo')
         .eq('company_id', userInfo.companyId)
         .in('elevator_id', elevIds)
         .order('inspct_de', { ascending: false });
+
 
       if (error) throw error;
 
@@ -935,26 +942,50 @@ export default function InspectPage() {
                             <th className="text-left py-1">대응상태</th>
                           </tr>
                         </thead>
-                        <tbody>
+                                                <tbody>
                           {rows
                             .sort(
                               (a, b) =>
                                 parseInt(String(a.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0') -
                                 parseInt(String(b.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0')
                             )
-                            .map((r) => (
-                              <tr key={r.elev.id} className="border-b">
-                                <td className="py-1">
-                                  {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                                </td>
-                                <td className="py-1">
-                                  {r.latest ? fmtYmd(r.latest.inspct_de) : '-'}
-                                </td>
-                                <td className="py-1">{r.latest?.inspct_kind_nm || '-'}</td>
-                                <td className="py-1">{r.latest?.disp_words || '-'}</td>
-                                <td className="py-1">{r.latest?.status || '-'}</td>
-                              </tr>
-                            ))}
+                            .map((r) => {
+                              const isConditional =
+                                r.latest?.disp_words && r.latest.disp_words !== '합격';
+                              const fails: any[] = Array.isArray(r.latest?.fail_detail)
+                                ? r.latest.fail_detail
+                                : [];
+                              const failSummary = fails
+                                .map(
+                                  (f) =>
+                                    f.standardTitle1 || f.failDesc || f.standardArticle
+                                )
+                                .filter(Boolean)
+                                .join(' / ');
+
+                              return (
+                                <>
+                                  <tr key={r.elev.id} className="border-b">
+                                    <td className="py-1">
+                                      {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                                    </td>
+                                    <td className="py-1">
+                                      {r.latest ? fmtYmd(r.latest.inspct_de) : '-'}
+                                    </td>
+                                    <td className="py-1">{r.latest?.inspct_kind_nm || '-'}</td>
+                                    <td className="py-1">{r.latest?.disp_words || '-'}</td>
+                                    <td className="py-1">{r.latest?.status || '-'}</td>
+                                  </tr>
+                                  {isConditional && failSummary && (
+                                    <tr key={`${r.elev.id}-fail`} className="border-b">
+                                      <td colSpan={5} className="py-1 pl-4 text-[11px] text-red-600">
+                                        지적사항: {failSummary}
+                                      </td>
+                                    </tr>
+                                  )}
+                                </>
+                              );
+                            })}
                         </tbody>
                       </table>
                     </div>
