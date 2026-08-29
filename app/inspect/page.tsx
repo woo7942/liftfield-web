@@ -41,11 +41,18 @@ interface Elevator {
   ncStatus?: string | null;
 }
 
+interface DdayInfo {
+  label: string;
+  color: string; // text/bg 클래스 조합
+  urgent: boolean;
+  diffDays?: number;
+}
+
 // ── 다음 예상 검사일 계산 (exam_date + 1년 기준) ──
-function getDdayInfo(elev: Elevator) {
+function getDdayInfo(elev: Elevator): DdayInfo | null {
   const { examDate, installDate, ncStatus } = elev;
   if (ncStatus && !ncStatus.includes('운행중')) {
-    return { label: ncStatus, color: 'text-gray-400 bg-gray-100', urgent: false };
+    return { label: ncStatus, color: 'text-gray-500 bg-gray-100', urgent: false };
   }
   const baseStr = examDate || installDate;
   if (!baseStr) return null;
@@ -56,10 +63,10 @@ function getDdayInfo(elev: Elevator) {
   const today = new Date();
   const diffDays = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays < 0) return { label: '검사기한초과', color: 'text-red-600 bg-red-50', urgent: true, diffDays };
+  if (diffDays < 0) return { label: '검사기한초과', color: 'text-white bg-red-600', urgent: true, diffDays };
   if (diffDays <= 30) return { label: `D-${diffDays}`, color: 'text-red-600 bg-red-50', urgent: true, diffDays };
   if (diffDays <= 90) return { label: `D-${diffDays}`, color: 'text-orange-600 bg-orange-50', urgent: true, diffDays };
-  return null; // 90일 이상 남으면 뱃지 표시 안 함
+  return null; // 90일 이상 남으면 표시 안 함
 }
 
 export default function InspectPage() {
@@ -95,6 +102,12 @@ export default function InspectPage() {
   const [siteReportLoading, setSiteReportLoading] = useState(false);
   const [siteReportRows, setSiteReportRows] = useState<
     { elev: Elevator; latest: any | null }[]
+  >([]);
+
+  // 임박 검사 알림(전체 현장 대상)
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewList, setOverviewList] = useState<
+    { elev: Elevator; site: Site; dday: DdayInfo }[]
   >([]);
 
   // ── 인증 ──
@@ -154,7 +167,6 @@ export default function InspectPage() {
       }
     };
 
-    // 현재 세션 확인
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
         router.push('/login');
@@ -164,7 +176,6 @@ export default function InspectPage() {
       loadUser(session.user.id);
     });
 
-    // 인증 상태 변경 구독
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -175,6 +186,73 @@ export default function InspectPage() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // ── 팀 소속 전체 현장 대상 임박 검사 알림 로드 ──
+  useEffect(() => {
+    if (!userInfo || sites.length === 0) return;
+    loadOverview();
+  }, [userInfo, sites]);
+
+  const loadOverview = async () => {
+    if (!userInfo) return;
+    setOverviewLoading(true);
+    try {
+      const siteIds = sites.map((s) => s.id);
+      const { data: allElevs, error } = await supabase
+        .from('elevators')
+        .select('id, hogi_no, elevator_no, dong, installation_place, site_id')
+        .in('site_id', siteIds)
+        .eq('company_id', userInfo.companyId);
+
+      if (error) throw error;
+
+      const elevNos = (allElevs || [])
+        .map((e: any) => e.elevator_no)
+        .filter(Boolean) as string[];
+
+      let cacheMap: Record<string, any> = {};
+      if (elevNos.length > 0) {
+        const { data: cacheRows } = await supabase
+          .from('elevator_national_cache')
+          .select('elevator_no, exam_date, install_date, status')
+          .in('elevator_no', elevNos);
+        (cacheRows || []).forEach((c: any) => {
+          cacheMap[c.elevator_no] = c;
+        });
+      }
+
+      const siteMap: Record<string, Site> = {};
+      sites.forEach((s) => {
+        siteMap[s.id] = s;
+      });
+
+      const rows = (allElevs || [])
+        .map((e: any) => {
+          const c = e.elevator_no ? cacheMap[e.elevator_no] : null;
+          const elev: Elevator = {
+            id: e.id,
+            hogiNo: e.hogi_no,
+            elevatorNo: e.elevator_no,
+            dong: e.dong,
+            installationPlace: e.installation_place,
+            examDate: c?.exam_date || null,
+            installDate: c?.install_date || null,
+            ncStatus: c?.status || null,
+          };
+          const dday = getDdayInfo(elev);
+          const site = siteMap[e.site_id];
+          return dday && dday.urgent && site ? { elev, site, dday } : null;
+        })
+        .filter(Boolean) as { elev: Elevator; site: Site; dday: DdayInfo }[];
+
+      rows.sort((a, b) => (a.dday.diffDays ?? 9999) - (b.dday.diffDays ?? 9999));
+      setOverviewList(rows);
+    } catch (e) {
+      console.error('임박 검사 알림 로드 실패', e);
+    } finally {
+      setOverviewLoading(false);
+    }
+  };
 
   // ── 현장 클릭 → 호기 로드 (국가 캐시 병합: exam_date, install_date, status) ──
   const handleSiteClick = async (site: Site) => {
@@ -201,7 +279,6 @@ export default function InspectPage() {
         installationPlace: e.installation_place,
       }));
 
-      // 국가 캐시(elevator_national_cache)에서 exam_date/install_date/status 병합
       const elevNos = elevList.map((e) => e.elevatorNo).filter(Boolean) as string[];
       let cacheMap: Record<string, any> = {};
       if (elevNos.length > 0) {
@@ -236,7 +313,8 @@ export default function InspectPage() {
   const saveInspectionData = async (
     elev: Elevator,
     histData: any[],
-    allFails: any[]
+    allFails: any[],
+    site: Site | null
   ) => {
     if (!userInfo) return;
     try {
@@ -258,8 +336,8 @@ export default function InspectPage() {
 
         const payload = {
           company_id: userInfo.companyId,
-          site_id: selectedSite?.id || '',
-          site_name: selectedSite?.siteName || selectedSite?.name || '',
+          site_id: site?.id || '',
+          site_name: site?.siteName || site?.name || '',
           elevator_id: elev.id,
           hogi_no: String(elev.hogiNo || ''),
           elevator_no: elev.elevatorNo || '',
@@ -292,7 +370,13 @@ export default function InspectPage() {
   };
 
   // ── 호기 클릭 → 저장된 데이터 우선 조회, 없으면 API 조회 ──
-  const handleElevClick = async (elev: Elevator, forceRefresh = false) => {
+  // siteOverride: 임박 알림 카드에서 바로 진입할 때 명시적으로 현장을 넘겨받기 위함
+  const handleElevClick = async (
+    elev: Elevator,
+    forceRefresh = false,
+    siteOverride?: Site | null
+  ) => {
+    const site = siteOverride ?? selectedSite;
     if (!elev.elevatorNo) {
       alert('승강기번호가 없어 검사이력을 조회할 수 없습니다.');
       return;
@@ -307,7 +391,6 @@ export default function InspectPage() {
     setLastSyncedAt(null);
 
     try {
-      // 1) 저장된 데이터 우선 조회 (새로고침이 아닐 때만)
       if (!forceRefresh) {
         const { data: cachedRows, error: cacheError } = await supabase
           .from('safety_inspections')
@@ -351,11 +434,10 @@ export default function InspectPage() {
           setDataSource('cache');
           setLastSyncedAt(cachedRows[0].updated_at || null);
           setApiLoading(false);
-          return; // 저장된 데이터가 있으면 API 호출 없이 종료
+          return;
         }
       }
 
-      // 2) 저장된 데이터가 없거나 새로고침 요청 → 공공 API 호출
       const histRes = await fetch(
         `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectsafeList` +
           `?serviceKey=${SERVICE_KEY}&elevator_no=${elev.elevatorNo}&numOfRows=50&pageNo=1`
@@ -376,7 +458,6 @@ export default function InspectPage() {
         .slice(0, 5);
       setHistory(histData);
 
-      // 부적합 목록 조회
       const allFails: any[] = [];
       for (const h of histData.filter((h) => h.failCd)) {
         const failRes = await fetch(
@@ -398,10 +479,8 @@ export default function InspectPage() {
       setDataSource('api');
       setLastSyncedAt(new Date().toISOString());
 
-      // 3) 조회 결과 자동 저장 (메모를 남기지 않아도 원본 데이터는 저장)
-      await saveInspectionData(elev, histData, allFails);
+      await saveInspectionData(elev, histData, allFails, site);
 
-      // 저장 후 docId 매핑을 위해 다시 조회
       const { data: savedRows } = await supabase
         .from('safety_inspections')
         .select('id, inspct_de, user_memo, status')
@@ -422,6 +501,12 @@ export default function InspectPage() {
     } finally {
       setApiLoading(false);
     }
+  };
+
+  // ── 임박 알림 카드 클릭 → 현장 선택 + 호기 상세 진입 ──
+  const goToElevator = async (site: Site, elev: Elevator) => {
+    await handleSiteClick(site);
+    await handleElevClick(elev, false, site);
   };
 
   // ── 메모 저장 ──
@@ -449,14 +534,12 @@ export default function InspectPage() {
       };
 
       if (current.docId) {
-        // 기존 레코드 수정
         const { error } = await supabase
           .from('safety_inspections')
           .update(payload)
           .eq('id', current.docId);
         if (error) throw error;
       } else {
-        // 신규 레코드 삽입
         const { data: newRow, error } = await supabase
           .from('safety_inspections')
           .insert({ ...payload, created_at: new Date().toISOString() })
@@ -498,7 +581,6 @@ export default function InspectPage() {
 
       if (error) throw error;
 
-      // 승강기별 최신 1건만 추출
       const latestMap: Record<string, any> = {};
       (data || []).forEach((row: any) => {
         if (!latestMap[row.elevator_id]) latestMap[row.elevator_id] = row;
@@ -534,7 +616,6 @@ export default function InspectPage() {
       parseInt(String(b.hogiNo || '0').replace(/[^0-9]/g, '') || '0')
   );
 
-  // 동별 그룹핑 (전체 보고서용)
   const groupedByDong = siteReportRows.reduce(
     (acc: Record<string, typeof siteReportRows>, r) => {
       const key = r.elev.dong || '동 정보 없음';
@@ -554,7 +635,6 @@ export default function InspectPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 print:bg-white">
-      {/* 헤더 */}
       <header className="bg-white border-b px-4 py-3 flex items-center gap-2 sticky top-0 z-10 print:hidden">
         <button onClick={() => router.push('/dashboard')} className="text-gray-500 hover:text-gray-700 text-lg">
           ←
@@ -568,65 +648,115 @@ export default function InspectPage() {
         {selectedElev && (
           <span className="text-sm text-gray-400">/ {selectedElev.hogiNo}호기</span>
         )}
+        {selectedSite && (
+          <button
+            onClick={() => {
+              setSelectedSite(null);
+              setSelectedElev(null);
+              setElevators([]);
+            }}
+            className="ml-auto text-xs text-gray-400 hover:text-gray-600"
+          >
+            처음으로
+          </button>
+        )}
       </header>
 
       <div className="max-w-5xl mx-auto px-4 py-4 print:px-0 print:py-0 print:max-w-none">
-        {/* ── 현장 검색 ── */}
+        {/* ── 초기 화면: 임박 검사 알림 + 현장 검색 ── */}
         {!selectedSite && (
-          <div className="max-w-xl mx-auto mt-8">
-            <p className="text-gray-500 text-sm mb-3 text-center">
-              팀별현장 목록에서 검사이력을 조회할 현장을 선택하세요
-            </p>
-            <div className="relative">
-              <input
-                value={siteSearch}
-                onChange={(e) => setSiteSearch(e.target.value)}
-                placeholder="🔍 현장명 검색..."
-                className="w-full border rounded-xl px-4 py-3 text-sm bg-white shadow-sm
-                           focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
-              {siteSearch && (
-                <button
-                  onClick={() => setSiteSearch('')}
-                  className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-                >
-                  ✕
-                </button>
+          <div className="max-w-2xl mx-auto mt-6">
+            <div className="mb-8">
+              <h2 className="text-sm font-bold text-gray-600 mb-2">⏰ 검사 예정 알림</h2>
+              <p className="text-xs text-gray-400 mb-3">
+                다음 예상 검사일이 90일 이내로 임박한 승강기입니다. 클릭하면 바로 상세 이력으로 이동합니다.
+              </p>
+
+              {overviewLoading ? (
+                <div className="text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
+                  불러오는 중...
+                </div>
+              ) : overviewList.length === 0 ? (
+                <div className="text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
+                  90일 이내 예정된 검사가 없습니다
+                </div>
+              ) : (
+                <div className="bg-white border rounded-xl overflow-hidden divide-y">
+                  {overviewList.map((r) => (
+                    <button
+                      key={r.elev.id}
+                      onClick={() => goToElevator(r.site, r.elev)}
+                      className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center justify-between gap-3 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-800 truncate">
+                          🏢 {r.site.siteName || r.site.name}
+                        </div>
+                        <div className="text-xs text-gray-400 truncate">
+                          {r.elev.dong ? `${r.elev.dong} ` : ''}
+                          {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                        </div>
+                      </div>
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full font-bold shrink-0 ${r.dday.color}`}
+                      >
+                        {r.dday.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
 
-            {filteredSites.length > 0 ? (
-              <div className="mt-2 bg-white border rounded-xl shadow-sm overflow-hidden">
-                {!siteSearch && (
-                  <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-400">
-                    팀별현장 전체 ({sites.length}개)
-                  </div>
-                )}
-                {filteredSites.map((site) => (
+            <div className="border-t pt-6">
+              <p className="text-gray-500 text-sm mb-3 text-center">
+                또는 현장을 직접 검색해서 확인할 수 있습니다
+              </p>
+              <div className="relative">
+                <input
+                  value={siteSearch}
+                  onChange={(e) => setSiteSearch(e.target.value)}
+                  placeholder="🔍 현장명 검색..."
+                  className="w-full border rounded-xl px-4 py-3 text-sm bg-white shadow-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+                {siteSearch && (
                   <button
-                    key={site.id}
-                    onClick={() => handleSiteClick(site)}
-                    className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b
-                               last:border-0 text-sm font-medium text-gray-700 transition-colors"
+                    onClick={() => setSiteSearch('')}
+                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
                   >
-                    🏢 {site.siteName || site.name}
+                    ✕
                   </button>
-                ))}
+                )}
               </div>
-            ) : (
-              <div className="mt-4 text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
-                {siteSearch
-                  ? '검색 결과가 없습니다'
-                  : '팀별현장이 없어요. 팀별현장에서 현장을 등록해 주세요.'}
-              </div>
-            )}
+
+              {siteSearch && (
+                filteredSites.length > 0 ? (
+                  <div className="mt-2 bg-white border rounded-xl shadow-sm overflow-hidden">
+                    {filteredSites.map((site) => (
+                      <button
+                        key={site.id}
+                        onClick={() => handleSiteClick(site)}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b
+                                   last:border-0 text-sm font-medium text-gray-700 transition-colors"
+                      >
+                        🏢 {site.siteName || site.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4 text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
+                    검색 결과가 없습니다
+                  </div>
+                )
+              )}
+            </div>
           </div>
         )}
 
         {/* ── 현장 선택됨 ── */}
         {selectedSite && (
           <div className="flex gap-4 print:block">
-            {/* 왼쪽: 호기 목록 */}
             <div className="w-56 shrink-0 print:hidden">
               <div className="bg-white border rounded-xl overflow-hidden">
                 <div className="px-3 py-2.5 border-b bg-gray-50 flex items-center justify-between">
@@ -698,7 +828,6 @@ export default function InspectPage() {
               </div>
             </div>
 
-            {/* 오른쪽: 검사 상세 or 전체 보고서 */}
             <div className="flex-1">
               {!selectedElev && siteReportRows.length === 0 && (
                 <div className="bg-white border rounded-xl py-20 text-center text-gray-400">
@@ -707,7 +836,6 @@ export default function InspectPage() {
                 </div>
               )}
 
-              {/* 인쇄 전용: 현장 전체 보고서 (동별 그룹) */}
               {siteReportRows.length > 0 && (
                 <div className="hidden print:block p-4">
                   <h2 className="text-lg font-bold mb-1">
@@ -758,7 +886,6 @@ export default function InspectPage() {
 
               {selectedElev && (
                 <div className="bg-white border rounded-xl overflow-hidden print:border-none print:rounded-none">
-                  {/* 화면에서만 보이는 헤더 */}
                   <div className="px-4 py-3 bg-purple-50 border-b flex items-center justify-between print:hidden">
                     <div>
                       <span className="font-bold text-purple-700">
@@ -776,7 +903,6 @@ export default function InspectPage() {
                     </span>
                   </div>
 
-                  {/* 인쇄 시에만 보이는 제목 */}
                   <div className="hidden print:block px-4 pt-4">
                     <h2 className="text-lg font-bold">
                       {selectedSite?.siteName || selectedSite?.name} ·{' '}
@@ -810,7 +936,6 @@ export default function InspectPage() {
                       </div>
                     )}
 
-                    {/* 데이터 출처 안내 + 새로고침 + PDF 저장 */}
                     {!apiLoading && !apiError && history.length > 0 && dataSource && (
                       <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 print:hidden">
                         <span className="text-xs text-blue-600">
@@ -882,7 +1007,6 @@ export default function InspectPage() {
                                 {fmtYmd(h.applcEnDt)}
                               </p>
 
-                              {/* 부적합 내역 */}
                               {fails.length > 0 && (
                                 <div className="pl-4 mb-2 space-y-1.5">
                                   {fails.map((f, fi) => (
@@ -901,7 +1025,6 @@ export default function InspectPage() {
                                 </div>
                               )}
 
-                              {/* 화면용 대응 메모 편집 */}
                               <div className="pl-4 print:hidden">
                                 <div className="flex gap-1.5 mb-1.5">
                                   {['미대응', '대응중', '완료'].map((s) => (
@@ -936,7 +1059,6 @@ export default function InspectPage() {
                                 </button>
                               </div>
 
-                              {/* 인쇄용 대응 메모(읽기 전용) */}
                               {(memoData.memo || memoData.status !== '미대응') && (
                                 <div className="hidden print:block pl-4 text-xs text-gray-600">
                                   상태: {memoData.status}
