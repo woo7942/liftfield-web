@@ -735,6 +735,7 @@ export default function InspectPage() {
   );
 
   // ── 조건부합격/불합격 호기만 모아서 동 → 호기 순으로 정렬한 지적사항 요약 목록 ──
+  // (법령 조문은 여기서 사용하지 않고, 실제 지적 내용만 뽑아 fails 배열로 담아둠)
   const conditionalSummaryRows = siteReportRows
     .filter((r) => r.latest?.disp_words && r.latest.disp_words !== '합격')
     .map((r) => {
@@ -968,6 +969,7 @@ export default function InspectPage() {
                 </div>
               )}
 
+              {/* ── 전체 보고서 PDF (동별) : 개별 호기 상세 PDF와는 완전히 별개의 렌더링/state 사용 ── */}
               {siteReportRows.length > 0 && (
                 <div className="hidden print:block p-4">
                   <h2 className="text-lg font-bold mb-1">
@@ -976,6 +978,8 @@ export default function InspectPage() {
                   <p className="text-xs text-gray-500 mb-4">
                     출력일 {new Date().toLocaleDateString('ko-KR')}
                   </p>
+
+                  {/* 동별 표 : 검사일/종류/결과/대응상태만 표시, 지적사항 원문·법령 조문은 표에서 제외 */}
                   {Object.entries(groupedByDong).map(([dong, rows]) => (
                     <div key={dong} className="mb-4 print:break-inside-avoid">
                       <h3 className="font-bold text-sm border-b pb-1 mb-2">{dong}</h3>
@@ -996,82 +1000,49 @@ export default function InspectPage() {
                                 parseInt(String(a.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0') -
                                 parseInt(String(b.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0')
                             )
-                            .map((r) => {
-                              const isConditional =
-                                r.latest?.disp_words && r.latest.disp_words !== '합격';
-                              // 지적사항은 '최신 건'이 아니라 '지적사항이 기록된 가장 최근 건'에서 가져옴
-                              const failSourceRow = r.latest?._failSource || r.latest;
-                              const fails: any[] = Array.isArray(failSourceRow?.fail_detail)
-                                ? failSourceRow.fail_detail
-                                : [];
-                              const failDateNote =
-                                failSourceRow && failSourceRow.inspct_de !== r.latest?.inspct_de
-                                  ? ` (${fmtYmd(failSourceRow.inspct_de)} 검사 기준)`
-                                  : '';
-                              const failSummary = fails
-                                .map(
-                                  (f) =>
-                                    f.standardTitle1 || f.failDesc || f.standardArticle
-                                )
-                                .filter(Boolean)
-                                .join(' / ');
-
-                              return (
-                                <>
-                                  <tr key={r.elev.id} className="border-b">
-                                    <td className="py-1">
-                                      {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                                    </td>
-                                    <td className="py-1">
-                                      {r.latest ? fmtYmd(r.latest.inspct_de) : '-'}
-                                    </td>
-                                    <td className="py-1">{r.latest?.inspct_kind_nm || '-'}</td>
-                                    <td className="py-1">{r.latest?.disp_words || '-'}</td>
-                                    <td className="py-1">{r.latest?.status || '-'}</td>
-                                  </tr>
-                                  {isConditional && failSummary && (
-                                    <tr key={`${r.elev.id}-fail`} className="border-b">
-                                      <td colSpan={5} className="py-1 pl-4 text-[11px] text-red-600">
-                                        지적사항{failDateNote}: {failSummary}
-                                      </td>
-                                    </tr>
-                                  )}
-                                </>
-                              );
-                            })}
+                            .map((r) => (
+                              <tr key={r.elev.id} className="border-b">
+                                <td className="py-1">
+                                  {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                                </td>
+                                <td className="py-1">
+                                  {r.latest ? fmtYmd(r.latest.inspct_de) : '-'}
+                                </td>
+                                <td className="py-1">{r.latest?.inspct_kind_nm || '-'}</td>
+                                <td className="py-1">{r.latest?.disp_words || '-'}</td>
+                                <td className="py-1">{r.latest?.status || '-'}</td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>
                   ))}
 
-                  {/* ── 조건부합격/불합격 호기별 지적사항 요약 (동 → 호기 순 정렬) ── */}
+                  {/* ── 조건부합격/불합격 호기별 지적사항만 간단히 요약 (동 → 호기 순, 법령 조문 제외) ── */}
                   {conditionalSummaryRows.length > 0 && (
                     <div className="mt-6 pt-4 border-t-2 border-gray-400 print:break-inside-avoid">
                       <h3 className="font-bold text-sm mb-3">
-                        ⚠ 조건부합격 / 불합격 호기별 지적사항 요약
+                        ⚠ 조건부합격 / 불합격 지적사항
                       </h3>
                       {conditionalSummaryRows.map((r) => {
-                        const failDateNote =
+                        const dateNote =
                           r.failSourceRow && r.failSourceRow.inspct_de !== r.latest?.inspct_de
                             ? ` (${fmtYmd(r.failSourceRow.inspct_de)} 검사 기준)`
                             : '';
                         return (
-                          <div key={r.elev.id} className="mb-3 text-xs print:break-inside-avoid">
-                            <p className="font-semibold text-gray-800 mb-0.5">
+                          <div key={r.elev.id} className="mb-2 text-xs print:break-inside-avoid">
+                            <p className="font-semibold text-gray-800">
                               {r.elev.dong ? `${r.elev.dong} ` : ''}
                               {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
                               <span className="ml-2 text-red-600">{r.latest?.disp_words}</span>
                               <span className="ml-2 text-gray-400 font-normal">
-                                {failDateNote}
+                                {dateNote}
                               </span>
                             </p>
-                            <ul className="pl-4 space-y-0.5">
+                            <ul className="pl-4 list-disc text-gray-600">
                               {r.fails.map((f: any, fi: number) => (
-                                <li key={fi} className="text-gray-600">
-                                  <span className="text-red-500 font-medium">
-                                    {f.standardArticle} {f.standardTitle1}
-                                  </span>
-                                  {f.failDesc ? ` — ${f.failDesc}` : ''}
+                                <li key={fi}>
+                                  {f.failDescInspector || f.failDesc || '내용 없음'}
                                 </li>
                               ))}
                             </ul>
@@ -1083,6 +1054,7 @@ export default function InspectPage() {
                 </div>
               )}
 
+              {/* ── 개별 호기 상세 PDF : 위 전체 보고서와 완전히 독립적으로 동작 (state: history/failList) ── */}
               {selectedElev && (
                 <div className="bg-white border rounded-xl overflow-hidden print:border-none print:rounded-none">
                   <div className="px-4 py-3 bg-purple-50 border-b flex items-center justify-between print:hidden">
