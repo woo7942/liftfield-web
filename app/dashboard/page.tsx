@@ -171,27 +171,34 @@ export default function DashboardPage() {
 
   // ── 인증 ──────────────────────────────────────────
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!session?.user) { router.push('/login'); return; }
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    if (!session?.user) { router.push('/login'); return; }
 
-      const { data: userData, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
+    const { data: userData, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.user.id)
+      .single();
 
-      if (error || !userData) { router.push('/login'); return; }
+    if (error || !userData) { router.push('/login'); return; }
 
-      const isSuperAdmin = userData.super_admin === true;
-      const isAdmin = userData.role === 'admin';
+    const isSuperAdmin = userData.super_admin === true;
+    const isAdmin = userData.role === 'admin';
 
-      if (!isSuperAdmin && !isAdmin) { router.push('/'); return; }
+    if (!isSuperAdmin && !isAdmin) { router.push('/'); return; }
 
-      setUserInfo({ id: session.user.id, ...userData });
-      setLoading(false);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+    // 슈퍼 관리자는 이 회사용 대시보드를 아예 거치지 않고 바로 관리자 화면으로
+    if (isSuperAdmin) {
+  router.replace('/admin/companies');
+  return;
+}
+
+    setUserInfo({ id: session.user.id, ...userData });
+    setLoading(false);
+  });
+  return () => subscription.unsubscribe();
+}, []);
+
 
   // ── 현장 로드 ──────────────────────────────────────
   useEffect(() => {
@@ -411,7 +418,7 @@ setCounts(p => ({ ...p, quote: quoteCount || 0 }));
             );
           })}
           {isSuperAdmin && (
-            <button onClick={() => router.push('/admin')} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: 'none', borderLeft: '2px solid transparent', background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+            <button onClick={() => router.push('/admin/companie')} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: 'none', borderLeft: '2px solid transparent', background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
               <div style={{ width: 26, height: 26, borderRadius: 6, background: '#fef9c3', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>👑</div>
               <span style={{ fontSize: 13, color: '#a16207', fontWeight: 500 }}>슈퍼관리자</span>
             </button>
