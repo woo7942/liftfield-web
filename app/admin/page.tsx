@@ -273,6 +273,11 @@ export default function AdminPage() {
             <h1 className="text-lg font-black text-gray-800">👑 슈퍼어드민</h1>
             <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full font-bold">ADMIN ONLY</span>
           </div>
+          <button onClick={() => router.push('/admin/companies')}
+  className="text-sm bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl font-semibold transition mr-2">
+  🏢 회사 관리 대시보드
+</button>
+
           <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
             className="text-sm text-gray-400 hover:text-gray-600 transition">로그아웃</button>
         </div>
