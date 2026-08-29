@@ -567,7 +567,7 @@ export default function InspectPage() {
     }));
   };
 
-    // ── 현장 전체 보고서: 동별로 그룹핑해 각 호기 최신 검사 1건씩 뽑아 인쇄 ──
+  // ── 현장 전체 보고서: 동별로 그룹핑해 각 호기 최신 검사 1건씩 뽑아 인쇄 ──
   // 캐시에 없는 호기는 이 자리에서 자동으로 API 호출 후 저장까지 수행
   const fetchAndSaveForReport = async (elev: Elevator, site: Site) => {
     if (!elev.elevatorNo) return null;
@@ -611,12 +611,27 @@ export default function InspectPage() {
         );
       }
 
-            await saveInspectionData(elev, histData, allFails, site);
+      await saveInspectionData(elev, histData, allFails, site);
 
       const latest = histData[0];
       const latestFails = allFails
         .filter((f) => f.examYmd === latest.inspctDe)
         .map(({ examYmd, ...rest }) => rest);
+
+      // 최신 건에 지적사항이 없으면, 최근 5건 중 지적사항이 있는 가장 최근 건을 대신 참고
+      let finalFails = latestFails;
+      let failSourceDe = latest.inspctDe;
+      if (finalFails.length === 0) {
+        const failRecord = histData.find((h) =>
+          allFails.some((f) => f.examYmd === h.inspctDe)
+        );
+        if (failRecord) {
+          finalFails = allFails
+            .filter((f) => f.examYmd === failRecord.inspctDe)
+            .map(({ examYmd, ...rest }) => rest);
+          failSourceDe = failRecord.inspctDe;
+        }
+      }
 
       return {
         elevator_id: elev.id,
@@ -627,8 +642,8 @@ export default function InspectPage() {
         fail_detail: latestFails,
         status: '미대응',
         user_memo: '',
+        _failSource: { inspct_de: failSourceDe, fail_detail: finalFails },
       };
-
     } catch (e) {
       console.error(`${elev.elevatorNo} 조회 실패`, e);
       return null;
@@ -641,19 +656,31 @@ export default function InspectPage() {
     setReportProgress('');
     try {
       const elevIds = elevators.map((e) => e.id);
-            const { data, error } = await supabase
+      const { data, error } = await supabase
         .from('safety_inspections')
         .select('elevator_id, inspct_de, inspct_kind_nm, disp_words, fail_cd, fail_detail, status, user_memo')
         .eq('company_id', userInfo.companyId)
         .in('elevator_id', elevIds)
         .order('inspct_de', { ascending: false });
 
-
       if (error) throw error;
 
-      const latestMap: Record<string, any> = {};
+      // 승강기별로 이력을 그룹핑 (원본 쿼리가 inspct_de desc 정렬이라 그룹 내부도 최신순 유지됨)
+      const rowsByElev: Record<string, any[]> = {};
       (data || []).forEach((row: any) => {
-        if (!latestMap[row.elevator_id]) latestMap[row.elevator_id] = row;
+        if (!rowsByElev[row.elevator_id]) rowsByElev[row.elevator_id] = [];
+        rowsByElev[row.elevator_id].push(row);
+      });
+
+      const latestMap: Record<string, any> = {};
+      Object.keys(rowsByElev).forEach((elevId) => {
+        const rows = rowsByElev[elevId];
+        const latestRow = rows[0];
+        // 지적사항(fail_detail)이 기록된 가장 최근 건을 찾음 (최신 건 자체일 수도 있음)
+        const failRow = rows.find(
+          (r) => Array.isArray(r.fail_detail) && r.fail_detail.length > 0
+        );
+        latestMap[elevId] = { ...latestRow, _failSource: failRow || null };
       });
 
       const missing = elevators.filter((e) => !latestMap[e.id] && e.elevatorNo);
@@ -681,7 +708,6 @@ export default function InspectPage() {
       setSiteReportLoading(false);
     }
   };
-
 
   const filteredSites =
     siteSearch.trim().length >= 1
@@ -865,10 +891,9 @@ export default function InspectPage() {
                       className="w-full text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-800
                                  text-white rounded-lg font-medium disabled:opacity-50"
                     >
-                                            {siteReportLoading
+                      {siteReportLoading
                         ? reportProgress || '준비 중...'
                         : '📄 전체 보고서 PDF (동별)'}
-
                     </button>
                   </div>
                 )}
@@ -942,7 +967,7 @@ export default function InspectPage() {
                             <th className="text-left py-1">대응상태</th>
                           </tr>
                         </thead>
-                                                <tbody>
+                        <tbody>
                           {rows
                             .sort(
                               (a, b) =>
@@ -952,9 +977,15 @@ export default function InspectPage() {
                             .map((r) => {
                               const isConditional =
                                 r.latest?.disp_words && r.latest.disp_words !== '합격';
-                              const fails: any[] = Array.isArray(r.latest?.fail_detail)
-                                ? r.latest.fail_detail
+                              // 지적사항은 '최신 건'이 아니라 '지적사항이 기록된 가장 최근 건'에서 가져옴
+                              const failSourceRow = r.latest?._failSource || r.latest;
+                              const fails: any[] = Array.isArray(failSourceRow?.fail_detail)
+                                ? failSourceRow.fail_detail
                                 : [];
+                              const failDateNote =
+                                failSourceRow && failSourceRow.inspct_de !== r.latest?.inspct_de
+                                  ? ` (${fmtYmd(failSourceRow.inspct_de)} 검사 기준)`
+                                  : '';
                               const failSummary = fails
                                 .map(
                                   (f) =>
@@ -979,7 +1010,7 @@ export default function InspectPage() {
                                   {isConditional && failSummary && (
                                     <tr key={`${r.elev.id}-fail`} className="border-b">
                                       <td colSpan={5} className="py-1 pl-4 text-[11px] text-red-600">
-                                        지적사항: {failSummary}
+                                        지적사항{failDateNote}: {failSummary}
                                       </td>
                                     </tr>
                                   )}
@@ -1078,105 +1109,139 @@ export default function InspectPage() {
                         <h3 className="font-bold text-gray-700 text-sm print:hidden">
                           최근 검사이력 ({history.length}건)
                         </h3>
-                        {history.map((h, i) => {
-                          const key = `${selectedElev.id}_${h.inspctDe}`;
-                          const memoData = memos[key] || { memo: '', status: '미대응' };
-                          const isSaving = savingKey === key;
-                          const fails = failList.filter((f) => f.examYmd === h.inspctDe);
-                          const dotColor =
-                            h.dispWords === '합격'
-                              ? 'bg-green-500'
-                              : h.dispWords === '조건부합격'
-                              ? 'bg-yellow-500'
-                              : 'bg-red-500';
-                          const textColor =
-                            h.dispWords === '합격'
-                              ? 'text-green-600'
-                              : h.dispWords === '조건부합격'
-                              ? 'text-yellow-600'
-                              : 'text-red-600';
-                          return (
-                            <div
-                              key={i}
-                              className={`border-b border-gray-200 pb-4 last:border-0 print:break-inside-avoid
-                                ${i > 0 ? 'print:hidden' : ''}`}
-                            >
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                                <span className="font-semibold text-gray-800 text-sm">
-                                  {fmtYmd(h.inspctDe)}
-                                </span>
-                                <span className="text-xs text-gray-400">{h.inspctKindNm}</span>
-                                <span className={`text-xs font-bold ml-auto ${textColor}`}>
-                                  {h.dispWords}
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-400 mb-2 pl-4">
-                                {h.inspctInsttNm} · 유효기간 {fmtYmd(h.applcBeDt)} ~{' '}
-                                {fmtYmd(h.applcEnDt)}
-                              </p>
-
-                              {fails.length > 0 && (
-                                <div className="pl-4 mb-2 space-y-1.5">
-                                  {fails.map((f, fi) => (
-                                    <div key={fi} className="text-xs text-gray-600">
-                                      <p className="font-medium text-red-500">
-                                        {f.standardArticle} {f.standardTitle1}
-                                      </p>
-                                      <p>{f.failDesc}</p>
-                                      {f.failDescInspector && (
-                                        <p className="text-gray-400 italic">
-                                          👤 {f.failDescInspector}
-                                        </p>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              <div className="pl-4 print:hidden">
-                                <div className="flex gap-1.5 mb-1.5">
-                                  {['미대응', '대응중', '완료'].map((s) => (
-                                    <button
-                                      key={s}
-                                      onClick={() => updateMemo(key, 'status', s)}
-                                      className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors
-                                        ${
-                                          memoData.status === s
-                                            ? 'bg-purple-600 text-white'
-                                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                        }`}
-                                    >
-                                      {s}
-                                    </button>
-                                  ))}
-                                </div>
-                                <textarea
-                                  value={memoData.memo}
-                                  onChange={(e) => updateMemo(key, 'memo', e.target.value)}
-                                  placeholder="대응 내역, 특이사항 등을 입력하세요"
-                                  className="w-full text-xs border border-gray-200 rounded-md px-3 py-2 resize-none h-16
-                                             focus:outline-none focus:ring-1 focus:ring-purple-300"
-                                />
-                                <button
-                                  onClick={() => saveMemo(h)}
-                                  disabled={isSaving}
-                                  className="mt-1.5 text-xs px-4 py-1.5 bg-purple-600 hover:bg-purple-700
-                                             text-white rounded-md font-medium disabled:opacity-50"
-                                >
-                                  {isSaving ? '저장 중...' : memoData.docId ? '수정 저장' : '저장'}
-                                </button>
-                              </div>
-
-                              {(memoData.memo || memoData.status !== '미대응') && (
-                                <div className="hidden print:block pl-4 text-xs text-gray-600">
-                                  상태: {memoData.status}
-                                  {memoData.memo ? ` · 메모: ${memoData.memo}` : ''}
-                                </div>
-                              )}
-                            </div>
+                        {(() => {
+                          // 최신 건에 지적사항이 없을 경우, 가장 최근 지적사항이 있는 건을 찾아둔다
+                          const latestFailRecord = history.find((h) =>
+                            failList.some((f) => f.examYmd === h.inspctDe)
                           );
-                        })}
+                          return history.map((h, i) => {
+                            const key = `${selectedElev.id}_${h.inspctDe}`;
+                            const memoData = memos[key] || { memo: '', status: '미대응' };
+                            const isSaving = savingKey === key;
+                            const fails = failList.filter((f) => f.examYmd === h.inspctDe);
+                            const dotColor =
+                              h.dispWords === '합격'
+                                ? 'bg-green-500'
+                                : h.dispWords === '조건부합격'
+                                ? 'bg-yellow-500'
+                                : 'bg-red-500';
+                            const textColor =
+                              h.dispWords === '합격'
+                                ? 'text-green-600'
+                                : h.dispWords === '조건부합격'
+                                ? 'text-yellow-600'
+                                : 'text-red-600';
+                            return (
+                              <div
+                                key={i}
+                                className={`border-b border-gray-200 pb-4 last:border-0 print:break-inside-avoid
+                                  ${i > 0 ? 'print:hidden' : ''}`}
+                              >
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
+                                  <span className="font-semibold text-gray-800 text-sm">
+                                    {fmtYmd(h.inspctDe)}
+                                  </span>
+                                  <span className="text-xs text-gray-400">{h.inspctKindNm}</span>
+                                  <span className={`text-xs font-bold ml-auto ${textColor}`}>
+                                    {h.dispWords}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-400 mb-2 pl-4">
+                                  {h.inspctInsttNm} · 유효기간 {fmtYmd(h.applcBeDt)} ~{' '}
+                                  {fmtYmd(h.applcEnDt)}
+                                </p>
+
+                                {fails.length > 0 && (
+                                  <div className="pl-4 mb-2 space-y-1.5">
+                                    {fails.map((f, fi) => (
+                                      <div key={fi} className="text-xs text-gray-600">
+                                        <p className="font-medium text-red-500">
+                                          {f.standardArticle} {f.standardTitle1}
+                                        </p>
+                                        <p>{f.failDesc}</p>
+                                        {f.failDescInspector && (
+                                          <p className="text-gray-400 italic">
+                                            👤 {f.failDescInspector}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* 최신 건에 지적사항이 없고 아직 '합격'이 아닐 때, 가장 최근 지적사항을 PDF에만 표시 */}
+                                {i === 0 &&
+                                  fails.length === 0 &&
+                                  h.dispWords !== '합격' &&
+                                  latestFailRecord &&
+                                  latestFailRecord.inspctDe !== h.inspctDe && (
+                                    <div className="hidden print:block pl-4 mb-2 space-y-1.5">
+                                      <p className="text-xs text-gray-400 font-medium">
+                                        ※ {fmtYmd(latestFailRecord.inspctDe)} 검사 지적사항
+                                      </p>
+                                      {failList
+                                        .filter((f) => f.examYmd === latestFailRecord.inspctDe)
+                                        .map((f, fi) => (
+                                          <div key={fi} className="text-xs text-gray-600">
+                                            <p className="font-medium text-red-500">
+                                              {f.standardArticle} {f.standardTitle1}
+                                            </p>
+                                            <p>{f.failDesc}</p>
+                                            {f.failDescInspector && (
+                                              <p className="text-gray-400 italic">
+                                                👤 {f.failDescInspector}
+                                              </p>
+                                            )}
+                                          </div>
+                                        ))}
+                                    </div>
+                                  )}
+
+                                <div className="pl-4 print:hidden">
+                                  <div className="flex gap-1.5 mb-1.5">
+                                    {['미대응', '대응중', '완료'].map((s) => (
+                                      <button
+                                        key={s}
+                                        onClick={() => updateMemo(key, 'status', s)}
+                                        className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors
+                                          ${
+                                            memoData.status === s
+                                              ? 'bg-purple-600 text-white'
+                                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                          }`}
+                                      >
+                                        {s}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <textarea
+                                    value={memoData.memo}
+                                    onChange={(e) => updateMemo(key, 'memo', e.target.value)}
+                                    placeholder="대응 내역, 특이사항 등을 입력하세요"
+                                    className="w-full text-xs border border-gray-200 rounded-md px-3 py-2 resize-none h-16
+                                               focus:outline-none focus:ring-1 focus:ring-purple-300"
+                                  />
+                                  <button
+                                    onClick={() => saveMemo(h)}
+                                    disabled={isSaving}
+                                    className="mt-1.5 text-xs px-4 py-1.5 bg-purple-600 hover:bg-purple-700
+                                               text-white rounded-md font-medium disabled:opacity-50"
+                                  >
+                                    {isSaving ? '저장 중...' : memoData.docId ? '수정 저장' : '저장'}
+                                  </button>
+                                </div>
+
+                                {(memoData.memo || memoData.status !== '미대응') && (
+                                  <div className="hidden print:block pl-4 text-xs text-gray-600">
+                                    상태: {memoData.status}
+                                    {memoData.memo ? ` · 메모: ${memoData.memo}` : ''}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     )}
                   </div>
