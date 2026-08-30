@@ -382,9 +382,8 @@ export default function MaterialPage() {
                       {style.label}
                     </span>
                   </td>
-                                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                    {/* ✅ 신청 → 접수 → 수령 → 교체완료 순차 진행 버튼 */}
-                    {item.status === '신청중' && (
+                                                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    {item.status === '신청중' && userInfo?.role === 'admin' && (
                       <button
                         onClick={() => handleStatusChange(item, '접수')}
                         className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700"
@@ -415,6 +414,7 @@ export default function MaterialPage() {
                       </span>
                     )}
                   </td>
+
 
                 </tr>
               );
@@ -513,8 +513,8 @@ export default function MaterialPage() {
               </div>
 
               {/* ✅ 웹 운영자 액션 버튼 */}
-                            <div className="mt-6 space-y-2">
-                {detailItem.status === '신청중' && (
+                                          <div className="mt-6 space-y-2">
+                {detailItem.status === '신청중' && userInfo?.role === 'admin' && (
                   <button
                     onClick={() => handleStatusChange(detailItem, '접수')}
                     disabled={actionLoading}
@@ -541,7 +541,7 @@ export default function MaterialPage() {
                     🔧 교체완료 처리
                   </button>
                 )}
-                {(detailItem.status === '신청중' || detailItem.status === '접수') && (
+                {(detailItem.status === '신청중' || detailItem.status === '접수') && userInfo?.role === 'admin' && (
                   <button
                     onClick={() => handleStatusChange(detailItem, '반려')}
                     disabled={actionLoading}
@@ -550,6 +550,7 @@ export default function MaterialPage() {
                     ✕ 반려 처리
                   </button>
                 )}
+
 
                 <button
                   onClick={() => handleDelete(detailItem.id)}
