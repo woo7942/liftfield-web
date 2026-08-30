@@ -41,12 +41,23 @@ interface SiteItem {
 
 interface ElevatorItem {
   id: string;
+  dong?: string;
   hogiNo?: string;
   type?: string;
   status?: string;
   installDate?: string;
   inspectionDate?: string;
+  model?: string;            // elvtr_model
+  manufacturer?: string;     // manufacturer_name
+  mntCompany?: string;       // mnt_cpny_nm (관리업체)
+  subCompany?: string;       // subcntr_cpny (하도급업체)
+  liveLoad?: string;         // 정원/적재하중
+  ratedSpeed?: string;       // 정격속도
+  shuttleSection?: string;   // 운행구간
+  lastResult?: string;       // 최근 검사결과
+  installationPlace?: string;
 }
+
 
 interface CacheRow {
   elevator_no: string;
@@ -179,6 +190,8 @@ export default function TeamSitesPage() {
   const [selectedSite, setSelectedSite] = useState<SiteItem | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<SiteItem>>({});
+  const [expandedElevatorId, setExpandedElevatorId] = useState<string | null>(null);
+
 
   // 승강기 자동 조회 (elevator_national_cache)
   const [cacheSearching, setCacheSearching] = useState(false);
@@ -327,34 +340,56 @@ export default function TeamSitesPage() {
 
   // ─── 현장 클릭 시 호기 로드 ───
   async function handleSiteClick(site: SiteItem) {
-    setSelectedSite(site);
-    setEditForm(site);
-    setEditMode(false);
-    setSiteElevators([]);
-    setElevatorsLoading(true);
+  setSelectedSite(site);
+  setEditForm(site);
+  setEditMode(false);
+  setSiteElevators([]);
+  setElevatorsLoading(true);
 
-    try {
-      const { data, error } = await supabase
-        .from('elevators')
-        .select('id, hogi_no, type, status, install_date, inspection_date')
-        .eq('site_id', site.id);
+  try {
+    const { data, error } = await supabase
+      .from('elevators')
+      .select(`
+        id, dong, hogi_no, type, status, install_date, inspection_date,
+        elvtr_model, manufacturer_name, mnt_cpny_nm, subcntr_cpny,
+        live_load, rated_speed, shuttle_section, last_result_nm, installation_place
+      `)
+      .eq('site_id', site.id)
+      .order('dong', { ascending: true });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      setSiteElevators((data || []).map(d => ({
-        id: d.id,
-        hogiNo: d.hogi_no || '',
-        type: d.type || '',
-        status: d.status || '',
-        installDate: d.install_date || '',
-        inspectionDate: d.inspection_date || '',
-      })));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setElevatorsLoading(false);
-    }
+    const getHogiNum = (h: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
+    const sorted = (data || []).sort((a: any, b: any) => {
+      if ((a.dong || '') !== (b.dong || '')) return (a.dong || '').localeCompare(b.dong || '', 'ko', { numeric: true });
+      return getHogiNum(a.hogi_no) - getHogiNum(b.hogi_no);
+    });
+
+    setSiteElevators(sorted.map((d: any) => ({
+      id: d.id,
+      dong: d.dong || '',
+      hogiNo: d.hogi_no || '',
+      type: d.type || '',
+      status: d.status || '',
+      installDate: d.install_date || '',
+      inspectionDate: d.inspection_date || '',
+      model: d.elvtr_model || '',
+      manufacturer: d.manufacturer_name || '',
+      mntCompany: d.mnt_cpny_nm || '',
+      subCompany: d.subcntr_cpny || '',
+      liveLoad: d.live_load || '',
+      ratedSpeed: d.rated_speed || '',
+      shuttleSection: d.shuttle_section || '',
+      lastResult: d.last_result_nm || '',
+      installationPlace: d.installation_place || '',
+    })));
+  } catch (e) {
+    console.error(e);
+  } finally {
+    setElevatorsLoading(false);
   }
+}
+
 
   async function searchElevatorCache() {
     const rawQ = (addForm.address || '').trim();
@@ -1084,7 +1119,8 @@ export default function TeamSitesPage() {
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg">{selectedSite.name}</h2>
-              <button onClick={() => setSelectedSite(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <button onClick={() => { setSelectedSite(null); setExpandedElevatorId(null); }} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+
             </div>
 
             {!editMode ? (
@@ -1120,30 +1156,69 @@ export default function TeamSitesPage() {
                 </div>
 
                 {/* 호기 목록 */}
-                <div className="mt-4">
-                  <h3 className="font-semibold text-sm text-gray-700 mb-2">
-                    🔧 호기 목록 ({siteElevators.length}대)
-                  </h3>
-                  {elevatorsLoading ? (
-                    <p className="text-sm text-gray-400 text-center py-3">로딩 중...</p>
-                  ) : siteElevators.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-3">등록된 호기가 없어요</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {siteElevators.map(elev => (
-                        <div key={elev.id} className="bg-gray-50 rounded-xl px-3 py-2 text-sm flex justify-between items-center">
-                          <span className="font-medium">{elev.hogiNo || elev.id}</span>
-                          <span className="text-gray-500">{elev.type || '-'}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                          }`}>
-                            {elev.status || '-'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+<div className="mt-4">
+  <h3 className="font-semibold text-sm text-gray-700 mb-2">
+    🔧 호기 목록 ({siteElevators.length}대)
+  </h3>
+  {elevatorsLoading ? (
+    <p className="text-sm text-gray-400 text-center py-3">로딩 중...</p>
+  ) : siteElevators.length === 0 ? (
+    <p className="text-sm text-gray-400 text-center py-3">등록된 호기가 없어요</p>
+  ) : (
+    <div className="space-y-1.5">
+      {siteElevators.map(elev => {
+        const isOpen = expandedElevatorId === elev.id;
+        return (
+          <div key={elev.id} className="bg-gray-50 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setExpandedElevatorId(isOpen ? null : elev.id)}
+              className="w-full px-3 py-2 text-sm flex justify-between items-center"
+            >
+              <span className="font-medium text-left">
+                {elev.dong ? `${elev.dong} ` : ''}{elev.hogiNo || elev.id}
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="text-gray-500 text-xs">{elev.type || '-'}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                  elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                }`}>
+                  {elev.status || '-'}
+                </span>
+                <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="px-3 pb-3 pt-1 text-xs text-gray-600 space-y-1 border-t border-gray-200">
+                {[
+                  { label: '모델', value: elev.model },
+                  { label: '제조사', value: elev.manufacturer },
+                  { label: '관리업체', value: elev.mntCompany },
+                  { label: '하도급업체', value: elev.subCompany },
+                  { label: '정원/적재하중', value: elev.liveLoad },
+                  { label: '정격속도', value: elev.ratedSpeed },
+                  { label: '운행구간', value: elev.shuttleSection },
+                  { label: '설치장소', value: elev.installationPlace },
+                  { label: '설치일', value: elev.installDate },
+                  { label: '최근 검사일', value: elev.inspectionDate },
+                  { label: '최근 검사결과', value: elev.lastResult },
+                ].filter(i => i.value).map(({ label, value }) => (
+                  <div key={label} className="flex justify-between py-0.5">
+                    <span className="text-gray-400">{label}</span>
+                    <span className="font-medium text-gray-700">{value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  )}
+</div>
+
+
 
                 {canManageThisSite && (
                   <div className="flex gap-2 mt-4">
