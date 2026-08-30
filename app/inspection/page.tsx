@@ -44,6 +44,7 @@ interface UnitInspection {
   completed: boolean;
   completedBy?: string;
   completedAt?: string;
+  inspectionDate?: string;
 }
 
 interface NoteRow {
@@ -79,6 +80,7 @@ export default function InspectionPage() {
   const [selectedSite, setSelectedSite] = useState<SiteRow | null>(null);
   const [panelUnits, setPanelUnits] = useState<UnitInspection[]>([]);
   const [panelNote, setPanelNote] = useState('');
+  const [panelDate, setPanelDate] = useState(''); // ✅ 누락됐던 상태 선언 추가
   const [panelSaving, setPanelSaving] = useState(false);
 
   // ── 인증 ──────────────────────────────────────
@@ -225,6 +227,7 @@ export default function InspectionPage() {
         completed: r.completed,
         completedBy: r.completed_by,
         completedAt: r.completed_at,
+        inspectionDate: r.inspection_date,
       };
     });
     setRawUnits(raw);
@@ -314,6 +317,7 @@ export default function InspectionPage() {
         setSelectedSite(site);
         setPanelUnits((inspectionUnitsMap[site.id] || []).map(u => ({ ...u })));
         setPanelNote(noteMap[site.id]?.note || '');
+        setPanelDate(new Date().toISOString().slice(0, 10)); // ✅ 패널 열 때 오늘 날짜로 기본 세팅
       });
 
       const overlay = new w.kakao.maps.CustomOverlay({
@@ -329,31 +333,41 @@ export default function InspectionPage() {
     mapObjRef.current.setBounds(bounds);
   }, [mapReady, filteredSites, inspectionUnitsMap, noteMap]);
 
-  // ── 호기별 완료 + 비고 저장 ──
+  // ── 호기별 완료 + 비고 + 점검일 저장 ──
   const savePanel = async () => {
     if (!selectedSite || !userInfo) return;
     setPanelSaving(true);
     try {
-      // 가상 호기(승강기 정보 미등록 현장)는 elevator_id가 DB에 없는 값이라 저장하지 않음
       const realUnits = panelUnits.filter(u => !u.elevatorId.startsWith('virtual-'));
       if (realUnits.length > 0) {
-        const unitPayloads = realUnits.map(u => ({
-          company_id: userInfo.companyId,
-          site_id: selectedSite.id,
-          elevator_id: u.elevatorId,
-          year, month,
-          completed: u.completed,
-          completed_by: u.completed ? userInfo.name : null,
-          completed_at: u.completed ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        }));
+        const unitPayloads = realUnits.map(u => {
+          const prev = rawUnits[u.elevatorId]; // 기존 저장값
+          const wasCompleted = prev?.completed === true;
+          let dateToSave: string | null = null;
+
+          if (u.completed) {
+            // 원래도 완료였다면 기존 날짜 유지, 이번에 새로 완료됐다면 panelDate 적용
+            dateToSave = wasCompleted ? (prev?.inspectionDate ?? panelDate ?? null) : (panelDate || null);
+          }
+
+          return {
+            company_id: userInfo.companyId,
+            site_id: selectedSite.id,
+            elevator_id: u.elevatorId,
+            year, month,
+            completed: u.completed,
+            completed_by: u.completed ? (wasCompleted ? prev?.completedBy : userInfo.name) : null,
+            completed_at: u.completed ? (wasCompleted ? prev?.completedAt : new Date().toISOString()) : null,
+            inspection_date: dateToSave,
+            updated_at: new Date().toISOString(),
+          };
+        });
         const { error: unitErr } = await supabase
           .from('site_inspection_units')
           .upsert(unitPayloads, { onConflict: 'elevator_id,year,month' });
         if (unitErr) throw unitErr;
       } else {
         // 승강기 정보가 없는 현장: 기존 unit_no 방식으로라도 저장(현장당 1행)
-        const allDone = panelUnits.every(u => u.completed);
         const unitPayloads = panelUnits.map((u, idx) => ({
           company_id: userInfo.companyId,
           site_id: selectedSite.id,
@@ -362,6 +376,7 @@ export default function InspectionPage() {
           completed: u.completed,
           completed_by: u.completed ? userInfo.name : null,
           completed_at: u.completed ? new Date().toISOString() : null,
+          inspection_date: u.completed ? (panelDate || null) : null,
           updated_at: new Date().toISOString(),
         }));
         const { error: unitErr } = await supabase
@@ -377,6 +392,7 @@ export default function InspectionPage() {
           site_id: selectedSite.id,
           year, month,
           note: panelNote.trim(),
+          inspection_date: panelDate || null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'site_id,year,month' });
       if (noteErr) throw noteErr;
@@ -511,6 +527,20 @@ export default function InspectionPage() {
                 )}
               </div>
 
+              {/* ✅ 점검일 입력 */}
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">점검일</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  value={panelDate}
+                  onChange={e => setPanelDate(e.target.value)}
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  오늘 체크한 호기에는 이 날짜가 저장돼요. 이미 완료된 호기의 점검일은 바뀌지 않아요.
+                </p>
+              </div>
+
               <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs font-bold text-gray-500">{year}년 {MONTHS[month - 1]} 호기별 점검 상태</p>
@@ -539,8 +569,12 @@ export default function InspectionPage() {
                           }`}
                         >
                           <span>{elevator.installationPlace ? `(${elevator.installationPlace})` : (elevator.hogiNo || '호기')}</span>
-
-                          <span>{unit.completed ? '✅ 완료' : '미완료'}</span>
+                          <span className="flex items-center gap-1.5">
+                            {unit.completed && unit.inspectionDate && (
+                              <span className="text-[10px] font-normal opacity-80">{unit.inspectionDate}</span>
+                            )}
+                            {unit.completed ? '✅ 완료' : '미완료'}
+                          </span>
                         </button>
                       );
                     })}
