@@ -6,11 +6,12 @@ import { supabase } from '@/lib/supabase';
 // ✅ 상태 흐름: 신청중 → 분출(발송) → 수령완료 → 교체완료
 const STATUS_STYLE: Record<string, { bg: string; text: string; border: string; label: string }> = {
   '신청중':   { bg: 'bg-yellow-50',  text: 'text-yellow-800', border: 'border-yellow-300', label: '신청중' },
-  '분출':     { bg: 'bg-purple-50',  text: 'text-purple-800', border: 'border-purple-300', label: '분출(발송)' },
+  '접수':     { bg: 'bg-purple-50',  text: 'text-purple-800', border: 'border-purple-300', label: '접수완료' },
   '수령':     { bg: 'bg-green-50',   text: 'text-green-800',  border: 'border-green-300',  label: '수령완료' },
   '교체완료': { bg: 'bg-blue-50',    text: 'text-blue-800',   border: 'border-blue-300',   label: '교체완료' },
   '반려':     { bg: 'bg-red-50',     text: 'text-red-800',    border: 'border-red-300',    label: '반려' },
 };
+
 
 type MaterialRequest = {
   id: string;
@@ -145,7 +146,7 @@ export default function MaterialPage() {
         updated_at: new Date().toISOString(),
       };
       // 각 상태별 날짜 자동 기록
-      if (newStatus === '분출')     updateData.dispatched_at = new Date().toISOString();
+      if (newStatus === '접수')     updateData.dispatched_at = new Date().toISOString();
       if (newStatus === '수령')     updateData.received_at   = new Date().toISOString();
       if (newStatus === '교체완료') updateData.replaced_at   = new Date().toISOString();
       if (newStatus === '반려')     updateData.note = item.note || '';
@@ -285,7 +286,8 @@ export default function MaterialPage() {
 
       {/* 상태 요약 카드 */}
       <div className="grid grid-cols-5 gap-3 mb-6">
-        {['신청중', '분출', '수령', '교체완료', '반려'].map(s => {
+        {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
+
           const cnt = requests.filter(r => r.status === s).length;
           const style = STATUS_STYLE[s];
           return (
@@ -380,27 +382,31 @@ export default function MaterialPage() {
                       {style.label}
                     </span>
                   </td>
-                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                    {/* ✅ 웹 운영자 전용 분출 버튼 */}
+                                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    {/* ✅ 신청 → 접수 → 수령 → 교체완료 순차 진행 버튼 */}
                     {item.status === '신청중' && (
                       <button
-                        onClick={() => handleStatusChange(item, '분출')}
+                        onClick={() => handleStatusChange(item, '접수')}
                         className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700"
                       >
-                        📦 분출처리
+                        ✅ 접수처리
                       </button>
                     )}
-                    {item.status === '분출' && (
-                      <span className="text-xs text-purple-600 font-medium">
-                        발송완료<br/>
-                        <span className="text-gray-400">{item.dispatched_at ? item.dispatched_at.slice(0,10) : ''}</span>
-                      </span>
+                    {item.status === '접수' && (
+                      <button
+                        onClick={() => handleStatusChange(item, '수령')}
+                        className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700"
+                      >
+                        📥 수령처리
+                      </button>
                     )}
                     {item.status === '수령' && (
-                      <span className="text-xs text-green-600 font-medium">
-                        수령완료<br/>
-                        <span className="text-gray-400">{item.received_at ? item.received_at.slice(0,10) : ''}</span>
-                      </span>
+                      <button
+                        onClick={() => handleStatusChange(item, '교체완료')}
+                        className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700"
+                      >
+                        🔧 교체완료 처리
+                      </button>
                     )}
                     {item.status === '교체완료' && (
                       <span className="text-xs text-blue-600 font-medium">
@@ -409,6 +415,7 @@ export default function MaterialPage() {
                       </span>
                     )}
                   </td>
+
                 </tr>
               );
             })}
@@ -476,10 +483,13 @@ export default function MaterialPage() {
                 <div className="mt-4 pt-4 border-t border-gray-100">
                   <p className="text-xs font-semibold text-gray-400 mb-2">처리 이력</p>
                   <div className="space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">📋 신청일시</span>
-                      <span className="font-medium">{fmtDate(detailItem.request_at || detailItem.created_at)}</span>
+                                        <div className="flex justify-between">
+                      <span className="text-gray-500">✅ 접수일시</span>
+                      <span className={`font-medium ${detailItem.dispatched_at ? 'text-purple-600' : 'text-gray-300'}`}>
+                        {fmtDate(detailItem.dispatched_at)}
+                      </span>
                     </div>
+
                     <div className="flex justify-between">
                       <span className="text-gray-500">📦 분출일시</span>
                       <span className={`font-medium ${detailItem.dispatched_at ? 'text-purple-600' : 'text-gray-300'}`}>
@@ -503,23 +513,23 @@ export default function MaterialPage() {
               </div>
 
               {/* ✅ 웹 운영자 액션 버튼 */}
-              <div className="mt-6 space-y-2">
+                            <div className="mt-6 space-y-2">
                 {detailItem.status === '신청중' && (
                   <button
-                    onClick={() => handleStatusChange(detailItem, '분출')}
+                    onClick={() => handleStatusChange(detailItem, '접수')}
                     disabled={actionLoading}
                     className="w-full py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-50"
                   >
-                    📦 분출처리 (발송)
+                    ✅ 접수처리
                   </button>
                 )}
-                {detailItem.status === '분출' && (
+                {detailItem.status === '접수' && (
                   <button
                     onClick={() => handleStatusChange(detailItem, '수령')}
                     disabled={actionLoading}
                     className="w-full py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50"
                   >
-                    ✅ 수령완료 처리
+                    📥 수령처리
                   </button>
                 )}
                 {detailItem.status === '수령' && (
@@ -531,7 +541,7 @@ export default function MaterialPage() {
                     🔧 교체완료 처리
                   </button>
                 )}
-                {(detailItem.status === '신청중' || detailItem.status === '분출') && (
+                {(detailItem.status === '신청중' || detailItem.status === '접수') && (
                   <button
                     onClick={() => handleStatusChange(detailItem, '반려')}
                     disabled={actionLoading}
@@ -540,6 +550,7 @@ export default function MaterialPage() {
                     ✕ 반려 처리
                   </button>
                 )}
+
                 <button
                   onClick={() => handleDelete(detailItem.id)}
                   className="w-full py-2 text-gray-400 text-sm hover:text-red-500"
