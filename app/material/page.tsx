@@ -74,30 +74,24 @@ export default function MaterialPage() {
   const chanRef = useRef<any>(null);
 
   // ✅ 핵심: site_id 기준으로 조회
-  const loadAll = async (uid?: string, cid?: string) => {
+    const loadAll = async (uid?: string, cid?: string) => {
     try {
       setLoading(true);
       const targetCid = cid || userInfo?.company_id;
       if (!targetCid) return;
 
-      // 1. 내 회사 현장 목록
+      // 1. 내 회사 현장 목록 (PDF 모달 드롭다운용으로만 사용)
       const { data: siteData } = await supabase
         .from('sites')
         .select('id, site_name, company_id')
         .eq('company_id', targetCid);
-      const siteList = siteData || [];
-      setSites(siteList);
-      const siteIds = siteList.map((s: Site) => s.id);
+      setSites(siteData || []);
 
-      // 2. site_id 기준으로 자재신청 조회
-      if (siteIds.length === 0) {
-        setRequests([]);
-        return;
-      }
+      // 2. company_id 기준으로 자재신청 조회 (site_id 매칭 실패로 누락되는 문제 방지)
       const { data, error } = await supabase
         .from('material_requests')
         .select('*')
-        .in('site_id', siteIds)  // ✅ 핵심 변경
+        .eq('company_id', targetCid)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -108,6 +102,7 @@ export default function MaterialPage() {
       setLoading(false);
     }
   };
+
 
   useEffect(() => {
     const init = async () => {
