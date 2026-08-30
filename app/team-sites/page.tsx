@@ -146,6 +146,11 @@ function geocodeAddress(address: string): Promise<{ lat: number; lng: number } |
   });
 }
 
+// 자동 조회 결과 행의 고유 키 (elevator_no가 중복될 가능성을 대비해 idx까지 포함)
+function cacheRowKey(row: CacheRow, idx: number): string {
+  return `${row.elevator_no || 'no'}_${row.hogi_no || ''}_${idx}`;
+}
+
 export default function TeamSitesPage() {
   const router = useRouter();
 
@@ -179,10 +184,13 @@ export default function TeamSitesPage() {
   const [cacheSearching, setCacheSearching] = useState(false);
   const [cacheResults, setCacheResults] = useState<CacheRow[]>([]);
   const [cacheGrouped, setCacheGrouped] = useState<{ dong: string; count: number }[]>([]);
+  const [selectedCacheKeys, setSelectedCacheKeys] = useState<Set<string>>(new Set());
 
   const isAdmin = userInfo?.role === 'admin';
   const isSuperAdmin = userInfo?.superAdmin === true;
-  const canEdit = isAdmin || isSuperAdmin;
+  const canEdit = isAdmin || isSuperAdmin; // 전체 관리 권한 (모든 팀 현장 수정/삭제/팀 재배정)
+  const hasTeam = !!(userInfo?.team && userInfo.team.trim());
+  const canAddSite = canEdit || hasTeam; // 관리자 또는 팀 배정된 팀원은 자기 팀 현장 추가 가능
 
   // ─── 인증 ───
   useEffect(() => {
@@ -358,6 +366,7 @@ export default function TeamSitesPage() {
     setCacheSearching(true);
     setCacheResults([]);
     setCacheGrouped([]);
+    setSelectedCacheKeys(new Set());
 
     try {
       const cleaned = cleanAddressInput(rawQ);
@@ -406,10 +415,21 @@ export default function TeamSitesPage() {
       });
       setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
 
-      setAddForm(prev => ({ ...prev, elevatorCount: rows.length }));
+      // 관리업체명에 우리 회사명이 포함된 항목은 자동으로 체크해줌 (편의 기능)
+      const myCompanyName = (userInfo?.companyDisplayName || '').trim();
+      const autoSelected = new Set<string>();
+      rows.forEach((r, idx) => {
+        if (myCompanyName && r.mnt_cpny_nm && r.mnt_cpny_nm.includes(myCompanyName)) {
+          autoSelected.add(cacheRowKey(r, idx));
+        }
+      });
+      setSelectedCacheKeys(autoSelected);
+      setAddForm(prev => ({ ...prev, elevatorCount: autoSelected.size || 0 }));
 
       if (rows.length === 0) {
         alert('일치하는 승강기 정보를 찾지 못했어요. 주소나 건물명을 다시 확인해주세요.');
+      } else if (autoSelected.size === 0) {
+        alert(`${rows.length}대가 조회됐어요. 이 중 우리 회사가 관리하는 호기만 체크한 뒤 저장해주세요. (같은 주소에 다른 관리업체 승강기가 섞여 있을 수 있어요)`);
       }
     } catch (e) {
       console.error(e);
@@ -417,6 +437,26 @@ export default function TeamSitesPage() {
     } finally {
       setCacheSearching(false);
     }
+  }
+
+  function toggleCacheRow(key: string) {
+    setSelectedCacheKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      setAddForm(f => ({ ...f, elevatorCount: next.size }));
+      return next;
+    });
+  }
+
+  function selectAllCache() {
+    const all = new Set(cacheResults.map((r, idx) => cacheRowKey(r, idx)));
+    setSelectedCacheKeys(all);
+    setAddForm(prev => ({ ...prev, elevatorCount: all.size }));
+  }
+
+  function clearAllCache() {
+    setSelectedCacheKeys(new Set());
+    setAddForm(prev => ({ ...prev, elevatorCount: 0 }));
   }
 
   // ─── 계약종류 옵션 (실제 데이터 기준) ───
@@ -481,13 +521,23 @@ export default function TeamSitesPage() {
     return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
 
-  // ─── 현장 추가 (+ 자동 조회된 호기 정보 + 좌표 함께 저장) ───
+  // ─── 현장 추가 (+ 자동 조회된 호기 중 '체크된 것만' + 좌표 함께 저장) ───
   async function handleAddSite() {
     if (!addForm.name?.trim() || !userInfo?.companyId) return;
+    if (!canEdit && !userInfo?.team) {
+      alert('배정된 팀이 없어 현장을 추가할 수 없어요. 관리자에게 팀 배정을 요청해주세요.');
+      return;
+    }
     setAddLoading(true);
     try {
       // 주소가 있으면 좌표 계산 시도 (지도 표시를 위해 필요)
       const coords = addForm.address ? await geocodeAddress(addForm.address) : null;
+
+      // 체크된 호기만 추려냄 (같은 주소의 다른 관리업체 승강기가 섞이지 않도록)
+      const selectedRows = cacheResults.filter((r, idx) => selectedCacheKeys.has(cacheRowKey(r, idx)));
+
+      // 팀 배정: 관리자는 자유롭게 선택, 일반 팀원은 본인 팀으로 고정
+      const teamToSave = canEdit ? (addForm.teamName || '') : (userInfo.team || '');
 
       const { data: newSite, error } = await supabase
         .from('sites')
@@ -504,8 +554,8 @@ export default function TeamSitesPage() {
           email: addForm.email || '',
           note: addForm.note || '',
           region: addForm.region || '',
-          elevator_count: addForm.elevatorCount || 0,
-          team: addForm.teamName || '',
+          elevator_count: selectedRows.length || addForm.elevatorCount || 0,
+          team: teamToSave,
           manager_name: addForm.managerName || '',
           memo: addForm.memo || '',
           source: 'team',
@@ -522,8 +572,8 @@ export default function TeamSitesPage() {
         console.warn('좌표를 찾지 못했습니다. 지도에 표시되지 않을 수 있어요:', addForm.address);
       }
 
-      if (newSite?.id && cacheResults.length > 0) {
-        const elevatorRows = cacheResults.map((r) => ({
+      if (newSite?.id && selectedRows.length > 0) {
+        const elevatorRows = selectedRows.map((r) => ({
           site_id: newSite.id,
           company_id: userInfo.companyId,
           elevator_no: r.elevator_no,
@@ -566,6 +616,7 @@ export default function TeamSitesPage() {
       setAddForm({});
       setCacheResults([]);
       setCacheGrouped([]);
+      setSelectedCacheKeys(new Set());
       await reloadSites();
     } catch (e) {
       console.error(e);
@@ -662,10 +713,16 @@ export default function TeamSitesPage() {
           <h1 className="font-bold text-lg">🏢 팀별 현장</h1>
           <span className="text-sm text-gray-400">({filteredSites.length}개)</span>
         </div>
-        {canEdit && (
+        {canAddSite && (
           <div className="flex gap-2">
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => {
+                setAddForm(canEdit ? {} : { teamName: userInfo?.team || '' });
+                setCacheResults([]);
+                setCacheGrouped([]);
+                setSelectedCacheKeys(new Set());
+                setShowAddModal(true);
+              }}
               className="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium"
             >
               + 추가
@@ -847,18 +904,63 @@ export default function TeamSitesPage() {
                   </button>
                 </div>
 
-                {cacheGrouped.length > 0 && (
+                {cacheResults.length > 0 && (
                   <div className="mt-2 bg-blue-50 rounded-xl p-3 text-sm">
-                    <p className="font-medium text-blue-700 mb-1">
-                      ✅ 총 {cacheResults.length}대 조회됨
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {cacheGrouped.map(g => (
-                        <span key={g.dong} className="text-xs bg-white border border-blue-200 px-2 py-0.5 rounded-full text-blue-600">
-                          {g.dong} {g.count}대
-                        </span>
-                      ))}
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-medium text-blue-700">
+                        ✅ 총 {cacheResults.length}대 조회됨 · <span className="text-green-700">{selectedCacheKeys.size}대 선택됨</span>
+                      </p>
+                      <div className="flex gap-1">
+                        <button type="button" onClick={selectAllCache}
+                          className="text-xs bg-white border border-blue-300 text-blue-600 px-2 py-0.5 rounded-full">
+                          전체 선택
+                        </button>
+                        <button type="button" onClick={clearAllCache}
+                          className="text-xs bg-white border border-gray-300 text-gray-500 px-2 py-0.5 rounded-full">
+                          전체 해제
+                        </button>
+                      </div>
                     </div>
+
+                    <p className="text-xs text-orange-600 mb-2">
+                      ⚠️ 같은 주소에 다른 관리업체 승강기가 섞여 나올 수 있어요. 관리업체명을 확인해서 우리 회사가 관리하는 호기만 체크해주세요.
+                    </p>
+
+                    <div className="max-h-60 overflow-y-auto space-y-1 bg-white rounded-lg border border-blue-100 p-1.5">
+                      {cacheResults.map((r, idx) => {
+                        const key = cacheRowKey(r, idx);
+                        const checked = selectedCacheKeys.has(key);
+                        return (
+                          <label key={key}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-xs ${
+                              checked ? 'bg-green-50' : 'hover:bg-gray-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCacheRow(key)}
+                              className="shrink-0"
+                            />
+                            <span className="w-14 shrink-0 font-medium text-gray-700">
+                              {r.dong ? `${r.dong}동` : '동 없음'}
+                            </span>
+                            <span className="w-14 shrink-0 text-gray-600">{r.hogi_no || '-'}호기</span>
+                            <span className="flex-1 truncate text-gray-500">{r.mnt_cpny_nm || '관리업체 정보 없음'}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {cacheGrouped.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {cacheGrouped.map(g => (
+                          <span key={g.dong} className="text-xs bg-white border border-blue-200 px-2 py-0.5 rounded-full text-blue-600">
+                            {g.dong} {g.count}대
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -932,14 +1034,23 @@ export default function TeamSitesPage() {
 
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                <select
-                  value={addForm.teamName || ''}
-                  onChange={e => setAddForm(prev => ({ ...prev, teamName: e.target.value }))}
-                  className="w-full border rounded-xl px-3 py-2 text-sm"
-                >
-                  <option value="">팀 미배정</option>
-                  {teams.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                {canEdit ? (
+                  <select
+                    value={addForm.teamName || ''}
+                    onChange={e => setAddForm(prev => ({ ...prev, teamName: e.target.value }))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm"
+                  >
+                    <option value="">팀 미배정</option>
+                    {teams.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={userInfo?.team || ''}
+                    disabled
+                    className="w-full border rounded-xl px-3 py-2 text-sm bg-gray-100 text-gray-500"
+                  />
+                )}
               </div>
             </div>
             <div className="flex gap-2 mt-4">
@@ -949,6 +1060,7 @@ export default function TeamSitesPage() {
                   setAddForm({});
                   setCacheResults([]);
                   setCacheGrouped([]);
+                  setSelectedCacheKeys(new Set());
                 }}
                 className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
               >
@@ -964,7 +1076,10 @@ export default function TeamSitesPage() {
       )}
 
       {/* ─── 현장 상세 모달 ─── */}
-      {selectedSite && (
+      {selectedSite && (() => {
+        const isOwnTeamSite = hasTeam && selectedSite.teamName === userInfo?.team;
+        const canManageThisSite = canEdit || isOwnTeamSite;
+        return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5">
             <div className="flex items-center justify-between mb-4">
@@ -1030,10 +1145,12 @@ export default function TeamSitesPage() {
                   )}
                 </div>
 
-                {canEdit && (
+                {canManageThisSite && (
                   <div className="flex gap-2 mt-4">
-                    <button onClick={() => handleDeleteSite(selectedSite.id)}
-                      className="flex-1 py-2 border border-red-300 text-red-500 rounded-xl text-sm">삭제</button>
+                    {canEdit && (
+                      <button onClick={() => handleDeleteSite(selectedSite.id)}
+                        className="flex-1 py-2 border border-red-300 text-red-500 rounded-xl text-sm">삭제</button>
+                    )}
                     <button onClick={() => setEditMode(true)}
                       className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium">수정</button>
                   </div>
@@ -1113,14 +1230,23 @@ export default function TeamSitesPage() {
 
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">팀 배정</label>
-                    <select
-                      value={editForm.teamName || ''}
-                      onChange={e => setEditForm(prev => ({ ...prev, teamName: e.target.value }))}
-                      className="w-full border rounded-xl px-3 py-2 text-sm"
-                    >
-                      <option value="">팀 미배정</option>
-                      {teams.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    {canEdit ? (
+                      <select
+                        value={editForm.teamName || ''}
+                        onChange={e => setEditForm(prev => ({ ...prev, teamName: e.target.value }))}
+                        className="w-full border rounded-xl px-3 py-2 text-sm"
+                      >
+                        <option value="">팀 미배정</option>
+                        {teams.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={editForm.teamName || ''}
+                        disabled
+                        className="w-full border rounded-xl px-3 py-2 text-sm bg-gray-100 text-gray-500"
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-2 mt-4">
@@ -1131,7 +1257,8 @@ export default function TeamSitesPage() {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
