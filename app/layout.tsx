@@ -13,9 +13,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LiftField - 엘리베이터 관리 시스템",
+  title: "LiftField",
   description: "엘리베이터 현장 관리 시스템",
+  icons: {
+    icon: "/icon-192.png",
+    apple: "/icon-192.png",
+  },
 };
+
 
 export default function RootLayout({
   children,
