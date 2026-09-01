@@ -273,7 +273,8 @@ export default function TeamSitesPage() {
 
     let query = supabase
       .from('sites')
-      .select('id, name, address, lat, lng, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, password, maintenance_fee')
+      .select('id, name, address, lat, lng, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, access_code, maintenance_fee')
+
       .eq('company_id', cid);
 
     if (!isAdminUser) {
@@ -301,7 +302,7 @@ export default function TeamSitesPage() {
       createdAt: d.created_at,
       managerName: d.manager_name || '',
       memo: d.memo || '',
-      password: d.password || '',
+      password: d.access_code || '',
       maintenanceFee: d.maintenance_fee || 0,
     }));
 
@@ -588,7 +589,8 @@ export default function TeamSitesPage() {
           team: teamToSave,
           manager_name: addForm.managerName || '',
           memo: addForm.memo || '',
-          password: addForm.password || '',
+          access_code: addForm.password || '',
+
           maintenance_fee: addForm.maintenanceFee || 0,
           source: 'team',
           company_id: userInfo.companyId,
@@ -685,7 +687,7 @@ export default function TeamSitesPage() {
           team: editForm.teamName || '',
           manager_name: editForm.managerName || '',
           memo: editForm.memo || '',
-          password: editForm.password || '',
+          access_code: editForm.password || '',
           maintenance_fee: editForm.maintenanceFee || 0,
           updated_at: new Date().toISOString(),
         })
