@@ -975,6 +975,7 @@ export default function TeamSitesPage() {
                               {r.dong ? `${r.dong}동` : '동 없음'}
                             </span>
                             <span className="w-14 shrink-0 text-gray-600">{r.hogi_no || '-'}호기</span>
+                            <span className="w-20 shrink-0 text-gray-400 font-mono">{r.elevator_no || '-'}</span>
                             <span className="flex-1 truncate text-gray-500">{r.mnt_cpny_nm || '관리업체 정보 없음'}</span>
                           </label>
                         );
