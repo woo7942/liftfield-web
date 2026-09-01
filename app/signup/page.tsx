@@ -81,6 +81,24 @@ function SignupContent() {
 
     setLoading(true);
     try {
+       if (!codeParam) {
+    const { data: existingCompany, error: companyCheckError } = await supabase
+      .from('companies')
+      .select('id')
+      .ilike('name', companyName.trim())
+      .maybeSingle();
+
+    if (companyCheckError) {
+      setError('회사명 확인 중 오류가 발생했어요. 다시 시도해주세요.');
+      setLoading(false);
+      return;
+    }
+    if (existingCompany) {
+      setError('이미 등록된 회사명이에요. 같은 회사에 합류하려면 관리자에게 초대코드를 요청해주세요.');
+      setLoading(false);
+      return;
+    }
+  }
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password,

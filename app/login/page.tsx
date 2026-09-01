@@ -156,6 +156,7 @@ function LoginContent() {
               required
             />
           </div>
+          
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
@@ -171,6 +172,12 @@ function LoginContent() {
             {loading ? '로그인 중...' : '로그인'}
           </button>
         </form>
+
+        <p className="text-center text-xs text-gray-400 mt-3">
+          <button onClick={() => router.push('/forgot-password')} className="text-blue-500 hover:underline">
+            비밀번호를 잊으셨나요?
+          </button>
+        </p>
 
         <p className="text-center text-xs text-gray-400 mt-6">
           계정이 없으신가요?{' '}
