@@ -58,11 +58,18 @@ function JoinContent() {
 
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('name, email, company_id, team, role, subscription')
+        .select('name, email, company_id, team, role, subscription, status')  // ← status 추가
         .eq('id', session.user.id)
         .single();
 
       if (userError || !userData) { router.push('/login'); return; }
+
+      // ★★★ 여기에 새로 추가 ★★★
+      if (userData.company_id && userData.status === 'approved') {
+        router.replace('/dashboard');
+        return;
+      }
+      // ★★★ 추가 끝 ★★★
 
       setUserInfo({
         uid:          session.user.id,
