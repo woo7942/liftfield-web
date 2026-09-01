@@ -27,14 +27,13 @@ interface SiteItem {
   contractType?: string;     // 계약종류
   contractStart?: string;    // 계약 시작일
   contractEnd?: string;      // 계약 종료일
-  email?: string;            // 이메일
-  note?: string;             // 비고
-  region?: string;
   teamName?: string;
   source?: 'admin' | 'member' | 'team';
   createdAt?: string;
   managerName?: string;
   memo?: string;
+  password?: string;         // 출입/공동현관 비밀번호
+  maintenanceFee?: number;   // 보수료
   lat?: number;
   lng?: number;
 }
@@ -81,7 +80,7 @@ interface CacheRow {
   road_name?: string;
 }
 
-type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'region' | 'contractType';
+type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'contractType';
 
 // 계약종류 고정 옵션 (입력 폼용)
 const CONTRACT_TYPES = ['종합계약', '일반계약', '분담종합계약', '분담일반계약', '종합SMART계약'];
@@ -191,6 +190,7 @@ export default function TeamSitesPage() {
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<SiteItem>>({});
   const [expandedElevatorId, setExpandedElevatorId] = useState<string | null>(null);
+  const [showSitePassword, setShowSitePassword] = useState(false);
 
 
   // 승강기 자동 조회 (elevator_national_cache)
@@ -273,7 +273,7 @@ export default function TeamSitesPage() {
 
     let query = supabase
       .from('sites')
-      .select('id, name, address, lat, lng, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, email, note, region, team, source, created_at, manager_name, memo')
+      .select('id, name, address, lat, lng, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, password, maintenance_fee')
       .eq('company_id', cid);
 
     if (!isAdminUser) {
@@ -296,14 +296,13 @@ export default function TeamSitesPage() {
       contractType: d.contract_type || '',
       contractStart: d.contract_start || '',
       contractEnd: d.contract_end || '',
-      email: d.email || '',
-      note: d.note || '',
-      region: d.region || '',
       teamName: d.team || '',
       source: d.source as 'admin' | 'member' | 'team',
       createdAt: d.created_at,
       managerName: d.manager_name || '',
       memo: d.memo || '',
+      password: d.password || '',
+      maintenanceFee: d.maintenance_fee || 0,
     }));
 
     setSites(list);
@@ -343,6 +342,7 @@ export default function TeamSitesPage() {
   setSelectedSite(site);
   setEditForm(site);
   setEditMode(false);
+  setShowSitePassword(false);
   setSiteElevators([]);
   setElevatorsLoading(true);
 
@@ -510,11 +510,9 @@ export default function TeamSitesPage() {
         return (
           s.name?.toLowerCase().includes(q) ||
           s.teamName?.toLowerCase().includes(q) ||
-          s.region?.toLowerCase().includes(q) ||
           s.managerName?.toLowerCase().includes(q) ||
           s.phone?.toLowerCase().includes(q) ||
-          s.emergencyPhone?.toLowerCase().includes(q) ||
-          s.email?.toLowerCase().includes(q)
+          s.emergencyPhone?.toLowerCase().includes(q)
         );
       }
       return true;
@@ -525,7 +523,6 @@ export default function TeamSitesPage() {
       if (sortKey === 'name') { valA = a.name || ''; valB = b.name || ''; }
       else if (sortKey === 'teamName') { valA = a.teamName || ''; valB = b.teamName || ''; }
       else if (sortKey === 'elevatorCount') { valA = a.elevatorCount || 0; valB = b.elevatorCount || 0; }
-      else if (sortKey === 'region') { valA = a.region || ''; valB = b.region || ''; }
       else if (sortKey === 'contractType') { valA = a.contractType || ''; valB = b.contractType || ''; }
       if (valA < valB) return sortAsc ? -1 : 1;
       if (valA > valB) return sortAsc ? 1 : -1;
@@ -533,6 +530,7 @@ export default function TeamSitesPage() {
     });
 
   const filteredElevatorCount = filteredSites.reduce((sum, s) => sum + (s.elevatorCount || 0), 0);
+  const filteredFeeSum = filteredSites.reduce((sum, s) => sum + (s.maintenanceFee || 0), 0);
 
   // ─── 계약종류별 그룹핑 ───
   const groupedByContract = filteredSites.reduce((acc, s) => {
@@ -586,13 +584,12 @@ export default function TeamSitesPage() {
           contract_type: addForm.contractType || '',
           contract_start: addForm.contractStart || null,
           contract_end: addForm.contractEnd || null,
-          email: addForm.email || '',
-          note: addForm.note || '',
-          region: addForm.region || '',
           elevator_count: selectedRows.length || addForm.elevatorCount || 0,
           team: teamToSave,
           manager_name: addForm.managerName || '',
           memo: addForm.memo || '',
+          password: addForm.password || '',
+          maintenance_fee: addForm.maintenanceFee || 0,
           source: 'team',
           company_id: userInfo.companyId,
           created_by: userInfo.uid,
@@ -684,13 +681,12 @@ export default function TeamSitesPage() {
           contract_type: editForm.contractType || '',
           contract_start: editForm.contractStart || null,
           contract_end: editForm.contractEnd || null,
-          email: editForm.email || '',
-          note: editForm.note || '',
-          region: editForm.region || '',
           elevator_count: editForm.elevatorCount || 0,
           team: editForm.teamName || '',
           manager_name: editForm.managerName || '',
           memo: editForm.memo || '',
+          password: editForm.password || '',
+          maintenance_fee: editForm.maintenanceFee || 0,
           updated_at: new Date().toISOString(),
         })
         .eq('id', selectedSite.id);
@@ -736,8 +732,8 @@ export default function TeamSitesPage() {
     </div>
   );
 
-  // 테이블 컬럼 수 (colSpan용): 현장명,팀,대수,담당자,전화번호,비통번호,계약종류,지역,주소 = 9 (+관리 1)
-  const emptyColSpan = canEdit ? 10 : 9;
+  // 테이블 컬럼 수 (colSpan용): 현장명,팀,대수,담당자,전화번호,비통번호,계약종류 = 7 (+관리 1)
+  const emptyColSpan = canEdit ? 8 : 7;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -773,7 +769,7 @@ export default function TeamSitesPage() {
           <input
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
-            placeholder="현장명, 팀명, 지역, 담당자, 전화번호, 비통번호, 이메일 검색..."
+            placeholder="현장명, 팀명, 담당자, 전화번호, 비통번호 검색..."
             className="flex-1 min-w-48 border rounded-xl px-3 py-2 text-sm bg-white"
           />
           {canEdit && (
@@ -811,7 +807,7 @@ export default function TeamSitesPage() {
         {/* 테이블 */}
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm table-fixed">
+            <table className="w-full min-w-[1000px] text-sm table-fixed">
 
               <thead>
                 <tr className="bg-gray-50 border-b">
@@ -838,12 +834,6 @@ export default function TeamSitesPage() {
                       계약종류 <SortIcon k="contractType" />
                     </button>
                   </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
-                    <button onClick={() => handleSort('region')} className="flex items-center justify-center hover:text-blue-600">
-                      지역 <SortIcon k="region" />
-                    </button>
-                  </th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-64">주소</th>
                   {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">관리</th>}
                 </tr>
               </thead>
@@ -869,7 +859,8 @@ export default function TeamSitesPage() {
                       <tr className="bg-blue-50 border-b">
                         <td colSpan={emptyColSpan} className="px-3 py-2 font-semibold text-blue-700 text-sm">
                           📂 {key} — {groupedByContract[key].length}개 현장 /{' '}
-                          {groupedByContract[key].reduce((sum, s) => sum + (s.elevatorCount || 0), 0)}대
+                          {groupedByContract[key].reduce((sum, s) => sum + (s.elevatorCount || 0), 0)}대 / 보수료{' '}
+                          {groupedByContract[key].reduce((sum, s) => sum + (s.maintenanceFee || 0), 0).toLocaleString()}원
                         </td>
                       </tr>
                       {groupedByContract[key].map((site, idx) => (
@@ -895,6 +886,7 @@ export default function TeamSitesPage() {
             <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
               <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
               <span>승강기 <strong className="text-gray-700">{filteredElevatorCount}</strong>대</span>
+              <span>보수료 <strong className="text-gray-700">{filteredFeeSum.toLocaleString()}</strong>원</span>
             </div>
           )}
         </div>
@@ -1004,9 +996,9 @@ export default function TeamSitesPage() {
                 { label: '담당자', field: 'managerName', type: 'text' },
                 { label: '전화번호', field: 'phone', type: 'text' },
                 { label: '비통번호', field: 'emergencyPhone', type: 'text' },
-                { label: '이메일', field: 'email', type: 'email' },
                 { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
-                { label: '지역', field: 'region', type: 'text' },
+                { label: '비밀번호', field: 'password', type: 'text' },
+                { label: '보수료(원)', field: 'maintenanceFee', type: 'number' },
                 { label: '메모', field: 'memo', type: 'text' },
               ].map(({ label, field, type }) => (
                 <div key={field}>
@@ -1053,18 +1045,6 @@ export default function TeamSitesPage() {
                     className="flex-1 border rounded-xl px-3 py-2 text-sm"
                   />
                 </div>
-              </div>
-
-              {/* 비고 */}
-              <div>
-                <label className="text-sm text-gray-600 mb-0.5 block">비고</label>
-                <textarea
-                  value={addForm.note || ''}
-                  onChange={e => setAddForm(prev => ({ ...prev, note: e.target.value }))}
-                  rows={2}
-                  placeholder="간단한 참고사항을 적어주세요"
-                  className="w-full border rounded-xl px-3 py-2 text-sm resize-none"
-                />
               </div>
 
               <div>
@@ -1131,7 +1111,6 @@ export default function TeamSitesPage() {
                     { label: '담당자', value: selectedSite.managerName },
                     { label: '전화번호', value: selectedSite.phone },
                     { label: '비통번호', value: selectedSite.emergencyPhone },
-                    { label: '이메일', value: selectedSite.email },
                     { label: '계약종류', value: selectedSite.contractType },
                     {
                       label: '계약 기간',
@@ -1140,16 +1119,34 @@ export default function TeamSitesPage() {
                         : undefined,
                     },
                     { label: '승강기 대수', value: selectedSite.elevatorCount ? `${selectedSite.elevatorCount}대` : undefined },
-                    { label: '지역', value: selectedSite.region },
                     { label: '주소', value: selectedSite.address },
                     { label: '메모', value: selectedSite.memo },
-                    { label: '비고', value: selectedSite.note },
+                    { label: '보수료', value: selectedSite.maintenanceFee ? `${selectedSite.maintenanceFee.toLocaleString()}원` : undefined },
                   ].filter(i => i.value).map(({ label, value }) => (
                     <div key={label} className="flex justify-between py-1.5 border-b last:border-0">
                       <span className="text-gray-500">{label}</span>
                       <span className="font-medium text-gray-800">{value}</span>
                     </div>
                   ))}
+
+                  {selectedSite.password && (
+                    <div className="flex justify-between items-center py-1.5 border-b last:border-0">
+                      <span className="text-gray-500">비밀번호</span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium text-gray-800">
+                          {showSitePassword ? selectedSite.password : '•'.repeat(selectedSite.password.length)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowSitePassword(prev => !prev)}
+                          className="text-xs text-blue-500 hover:underline"
+                        >
+                          {showSitePassword ? '숨기기' : '표시'}
+                        </button>
+                      </span>
+                    </div>
+                  )}
+
                   {!selectedSite.lat && selectedSite.address && (
                     <p className="text-xs text-orange-500 pt-1">⚠️ 좌표가 없어 지도에 표시되지 않아요. 수정 후 저장하면 다시 시도돼요.</p>
                   )}
@@ -1240,9 +1237,9 @@ export default function TeamSitesPage() {
                     { label: '담당자', field: 'managerName', type: 'text' },
                     { label: '전화번호', field: 'phone', type: 'text' },
                     { label: '비통번호', field: 'emergencyPhone', type: 'text' },
-                    { label: '이메일', field: 'email', type: 'email' },
                     { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
-                    { label: '지역', field: 'region', type: 'text' },
+                    { label: '비밀번호', field: 'password', type: 'text' },
+                    { label: '보수료(원)', field: 'maintenanceFee', type: 'number' },
                     { label: '메모', field: 'memo', type: 'text' },
                   ].map(({ label, field, type }) => (
                     <div key={field}>
@@ -1289,18 +1286,6 @@ export default function TeamSitesPage() {
                         className="flex-1 border rounded-xl px-3 py-2 text-sm"
                       />
                     </div>
-                  </div>
-
-                  {/* 비고 */}
-                  <div>
-                    <label className="text-sm text-gray-600 mb-0.5 block">비고</label>
-                    <textarea
-                      value={editForm.note || ''}
-                      onChange={e => setEditForm(prev => ({ ...prev, note: e.target.value }))}
-                      rows={2}
-                      placeholder="간단한 참고사항을 적어주세요"
-                      className="w-full border rounded-xl px-3 py-2 text-sm resize-none"
-                    />
                   </div>
 
                   <div>
@@ -1372,8 +1357,6 @@ function SiteRow({
           <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">{site.contractType}</span>
         ) : '-'}
       </td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-nowrap">{site.region || '-'}</td>
-      <td className="px-3 py-2.5 text-gray-600 break-words">{site.address || '-'}</td>
 
       {canEdit && (
         <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
