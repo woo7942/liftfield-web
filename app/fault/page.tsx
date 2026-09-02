@@ -4,12 +4,13 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-// ── 타입 ──────────────────────────────────────────────────
 interface FaultReport {
   id: string;
   site_id: string;
   site_name: string;
   hogi_no: string;
+  elevator_no: string;
+  equip_type: string;
   content: string;
   reporter_phone: string;
   extra: string;
@@ -27,7 +28,6 @@ interface FaultReport {
   fault_note: string;
 }
 
-// ── 날짜 유틸 ─────────────────────────────────────────────
 const toDateStr = (v: string | null): string => {
   if (!v) return '-';
   const d = new Date(v);
@@ -35,16 +35,12 @@ const toDateStr = (v: string | null): string => {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}. ${pad(d.getMonth()+1)}. ${pad(d.getDate())}. ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-
 const toDateObj = (v: string | null): Date => {
   if (!v) return new Date();
   const d = new Date(v);
   return isNaN(d.getTime()) ? new Date() : d;
 };
-
-const formatKoDate = (d: Date) =>
-  `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
-
+const formatKoDate = (d: Date) => `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
 const formatShort = (v: string | null): string => {
   if (!v) return '-';
   const d = new Date(v);
@@ -53,7 +49,6 @@ const formatShort = (v: string | null): string => {
   const yy = String(d.getFullYear()).slice(2);
   return `${yy}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-
 const toDatetimeLocal = (v: string | null): string => {
   if (!v) return '';
   const d = new Date(v);
@@ -61,22 +56,56 @@ const toDatetimeLocal = (v: string | null): string => {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-
 const parseDatetimeInput = (s: string): string | null => {
   if (!s.trim()) return null;
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d.toISOString();
 };
 
-// ── 상태 스타일 ───────────────────────────────────────────
+const isEscalatorType = (t?: string | null): boolean =>
+  !!t && (t.includes('에스컬레이터') || t.includes('무빙워크'));
+
+const ELEVATOR_CAUSE_GROUPS: Record<string, string[]> = {
+  '전기·전원': ['정전·전원 차단', '배선 접촉불량·단선', '누전'],
+  '제어반': ['제어반(인버터) 에러', '기판 소손', '통신·신호 오류'],
+  '도어': ['도어 개폐 불량', '도어 스위치 불량', '도어 레일 이물질 끼임', '도어 벨트 마모·이탈'],
+  '권상기·모터': ['권상기 이상음', '메인모터 과열', '브레이크 라이닝 마모', '브레이크 미개방(작동불량)'],
+  '로프·안전장치': ['로프 장력 불균형', '로프 마모·소선단선', '조속기(과속조절기) 작동', '리미트·안전스위치 오동작', '완충기 이상'],
+  '조작반·표시': ['버튼·조작반 고장', '층수표시기 오류', '인터폰 불량'],
+  '기타': ['정지위치 불량(착상오차)', '승강로 이물질 끼임', '진동·소음 발생', '노후 부품열화', '사용자 과실(비정상 사용)', '원인불명', '기타'],
+};
+const ESCALATOR_CAUSE_GROUPS: Record<string, string[]> = {
+  '스텝·디딤판': ['스텝 변형·파손', '스텝체인 장력불량(늘어짐)', '스텝 롤러 마모', '스텝 정렬 불량'],
+  '핸드레일': ['핸드레일 이탈', '핸드레일 속도불일치', '핸드레일 마모·손상', '핸드레일 급정지'],
+  '구동부': ['구동체인 이상', '감속기 소음·마모', '메인브레이크 이상', '전동기 과열'],
+  '콤플레이트·스커트': ['콤플레이트 파손', '스커트가드 마찰·간섭', '안전브러시(스커트 디플렉터) 이탈'],
+  '안전장치': ['비상정지스위치 작동', '인렛가드 안전스위치 작동', '역행방지장치 작동'],
+  '전기·제어': ['제어반 오류', '릴레이 불량', '정전·전원차단'],
+  '기타': ['이물질 끼임', '소음·진동', '노후 부품열화', '원인불명', '기타'],
+};
+const ACTION_CHIPS = [
+  '리셋 후 정상 작동 확인', '부품 교체', '조정·재조임',
+  '청소·이물질 제거', '부품 주문 후 재방문 예정',
+  '제조사·외주업체 A/S 요청', '고객 안내 후 종료',
+];
+const CHIP_SEP = ' · ';
+const toggleChipValue = (current: string, label: string): string => {
+  const parts = current.split(CHIP_SEP).map(p => p.trim()).filter(Boolean);
+  const idx = parts.indexOf(label);
+  if (idx >= 0) parts.splice(idx, 1); else parts.push(label);
+  return parts.join(CHIP_SEP);
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  '접수대기': '접수대기', '접수': '접수중', '처리중': '처리중', '완료': '완료',
+};
 const STATUS_STYLE: Record<string, string> = {
   '접수대기': 'bg-yellow-100 text-yellow-700',
-  '접수':     'bg-red-100 text-red-600',
-  '처리중':   'bg-orange-100 text-orange-600',
+  '접수':     'bg-orange-100 text-orange-600',
+  '처리중':   'bg-blue-100 text-blue-600',
   '완료':     'bg-green-100 text-green-700',
 };
 
-// ── PDF 출력 ──────────────────────────────────────────────
 const printHtml = (html: string) => {
   const win = window.open('', '_blank');
   if (!win) return;
@@ -95,106 +124,79 @@ export default function FaultPage() {
   const [faults, setFaults] = useState<FaultReport[]>([]);
   const [sites, setSites] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [elevators, setElevators] = useState<any[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [teamFilter, setTeamFilter] = useState(ALL_TEAMS);
   const [statusFilter, setStatusFilter] = useState('전체');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 모달
   const [reportModal, setReportModal] = useState(false);
   const [detailModal, setDetailModal] = useState(false);
   const [selectedFault, setSelectedFault] = useState<FaultReport | null>(null);
   const [pdfModal, setPdfModal] = useState(false);
   const [pdfSiteSearch, setPdfSiteSearch] = useState('');
-
-  // PDF 기간 필터
   const [pdfDateFrom, setPdfDateFrom] = useState('');
   const [pdfDateTo, setPdfDateTo] = useState('');
 
-  // 신고 폼
   const [siteSearch, setSiteSearch] = useState('');
+  const [elevSearch, setElevSearch] = useState('');
+  const [manualHogi, setManualHogi] = useState(false);
   const [form, setForm] = useState({
-    siteId: '', siteName: '', hogiNo: '',
+    siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '',
     content: '', reporterPhone: '', extra: '',
-    assignedTo: '', assignedName: '',
   });
 
-  // 처리 폼
   const [faultCause, setFaultCause] = useState('');
   const [faultAction, setFaultAction] = useState('');
   const [faultNote, setFaultNote] = useState('');
   const [arrivedAtInput, setArrivedAtInput] = useState('');
   const [completedAtInput, setCompletedAtInput] = useState('');
 
-  // ── 인증 + 데이터 로드 ────────────────────────────────
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!session) { router.push('/login'); return; }
-
       const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-
+        .from('users').select('*').eq('id', session.user.id).single();
       if (userError || !userData) { router.push('/login'); return; }
-
-      const plan   = userData.subscription_plan;
+      const plan = userData.subscription_plan;
       const status = userData.subscription_status;
       const isCompany = plan === 'company' && status === 'active';
-      const isPro     = plan === 'pro'     && status === 'active';
-
-      if (
-        !userData.super_admin &&
-        userData.role !== 'admin' &&
-        userData.role !== 'member' &&
-        !isPro && !isCompany
-      ) {
-        router.push('/login');
-        return;
+      const isPro = plan === 'pro' && status === 'active';
+      if (!userData.super_admin && userData.role !== 'admin' && userData.role !== 'member' && !isPro && !isCompany) {
+        router.push('/login'); return;
       }
-
       setUserInfo({ uid: session.user.id, ...userData });
       await loadData(userData);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
   const loadData = async (info: any) => {
     const cid = info.company_id || '';
     if (!cid) { setLoading(false); return; }
-
     try {
-      // fault_reports 로드
       const { data: faultData } = await supabase
-        .from('fault_reports')
-        .select('*')
-        .eq('company_id', cid)
-        .order('created_at', { ascending: false });
-
+        .from('fault_reports').select('*').eq('company_id', cid).order('created_at', { ascending: false });
       const faultList = (faultData || []) as FaultReport[];
       setFaults(faultList);
-
       const teamSet = new Set(faultList.map(f => f.team).filter(Boolean));
       setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
 
-      // sites 로드
       const { data: siteData } = await supabase
-        .from('sites')
-        .select('*')
-        .eq('company_id', cid)
-        .order('site_name');
+        .from('sites').select('*').eq('company_id', cid).order('site_name');
       setSites(siteData || []);
 
-      // users 로드
-      const { data: userData } = await supabase
-        .from('users')
-        .select('*')
-        .eq('company_id', cid);
-      setUsers(userData || []);
+      const siteIds = (siteData || []).map((s: any) => s.id);
+      if (siteIds.length > 0) {
+        const { data: elevData } = await supabase.from('elevators').select('*').in('site_id', siteIds);
+        setElevators(elevData || []);
+      } else {
+        setElevators([]);
+      }
 
+      const { data: userData } = await supabase.from('users').select('*').eq('company_id', cid);
+      setUsers(userData || []);
     } catch (e) {
       console.error('loadData error:', e);
     } finally {
@@ -202,47 +204,31 @@ export default function FaultPage() {
     }
   };
 
-  // ── 고장 신고 접수 ──────────────────────────────────────
   const submitReport = async () => {
     if (isSubmitting) return;
-    if (!form.siteId)         return alert('현장을 선택하세요');
-    if (!form.hogiNo.trim())  return alert('호기를 입력하세요');
+    if (!form.siteId) return alert('현장을 선택하세요');
+    if (!form.hogiNo.trim()) return alert('승강기(설비)를 선택하거나 호기를 입력하세요');
     if (!form.content.trim()) return alert('고장 내용을 입력하세요');
-    if (!form.assignedTo)     return alert('담당자를 선택하세요');
 
     setIsSubmitting(true);
     try {
       const siteTeam = sites.find(s => s.id === form.siteId)?.team || '';
       const now = new Date().toISOString();
-
       const { error } = await supabase.from('fault_reports').insert({
-        site_id:        form.siteId,
-        site_name:      form.siteName,
-        hogi_no:        form.hogiNo,
-        content:        form.content,
-        reporter_phone: form.reporterPhone,
-        extra:          form.extra,
-        assigned_to:    form.assignedTo,
-        assigned_name:  form.assignedName,
-        team:           siteTeam,
-        company_id:     userInfo?.company_id || '',
-        status:         '접수대기',
-        created_at:     now,
-        received_at:    null,
-        arrived_at:     null,
-        completed_at:   null,
-        fault_cause:    '',
-        fault_action:   '',
-        fault_note:     '',
+        site_id: form.siteId, site_name: form.siteName,
+        hogi_no: form.hogiNo, elevator_no: form.elevatorNo || '', equip_type: form.equipType || '',
+        content: form.content, reporter_phone: form.reporterPhone, extra: form.extra,
+        assigned_to: '', assigned_name: '',
+        team: siteTeam, company_id: userInfo?.company_id || '',
+        status: '접수대기', created_at: now,
+        received_at: null, arrived_at: null, completed_at: null,
+        fault_cause: '', fault_action: '', fault_note: '',
       });
-
       if (error) throw error;
-
-      // 목록 새로고침
       await loadData(userInfo);
       setReportModal(false);
       resetForm();
-      alert('고장신고가 접수되었습니다!');
+      alert('고장신고가 접수되었습니다! 해당 팀 전체에게 표시됩니다.');
     } catch (e: any) {
       alert('오류: ' + e.message);
     } finally {
@@ -250,35 +236,33 @@ export default function FaultPage() {
     }
   };
 
-  // ── 접수 처리 ──────────────────────────────────────────
   const handleReceive = async (fault: FaultReport) => {
-    if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 접수 처리하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
+    if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 내가 접수하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('fault_reports')
         .update({
-          status:        '접수',
-          received_at:   new Date().toISOString(),
-          assigned_to:   userInfo?.uid || '',
+          status: '접수',
+          received_at: new Date().toISOString(),
+          assigned_to: userInfo?.uid || '',
           assigned_name: userInfo?.name || '',
         })
-        .eq('id', fault.id);
-
+        .eq('id', fault.id)
+        .eq('status', '접수대기')
+        .select();
       if (error) throw error;
+      if (!data || data.length === 0) {
+        alert('이미 다른 팀원이 접수를 완료했습니다.');
+      }
       await loadData(userInfo);
     } catch (e: any) {
       alert('오류: ' + e.message);
     }
   };
 
-  // ── 처리중 변경 ─────────────────────────────────────────
   const handleSetInProgress = async (fault: FaultReport) => {
     try {
-      const { error } = await supabase
-        .from('fault_reports')
-        .update({ status: '처리중' })
-        .eq('id', fault.id);
-
+      const { error } = await supabase.from('fault_reports').update({ status: '처리중' }).eq('id', fault.id);
       if (error) throw error;
       setSelectedFault(prev => prev ? { ...prev, status: '처리중' } : prev);
       await loadData(userInfo);
@@ -287,29 +271,17 @@ export default function FaultPage() {
     }
   };
 
-  // ── 처리 완료 저장 ──────────────────────────────────────
   const submitComplete = async () => {
     if (!selectedFault) return;
     if (!faultAction.trim()) return alert('처리 내용을 입력하세요');
-
-    const arrivedDate   = parseDatetimeInput(arrivedAtInput)   ?? new Date().toISOString();
+    const arrivedDate = parseDatetimeInput(arrivedAtInput) ?? new Date().toISOString();
     const completedDate = parseDatetimeInput(completedAtInput) ?? new Date().toISOString();
-
     try {
-      const { error } = await supabase
-        .from('fault_reports')
-        .update({
-          fault_cause:  faultCause,
-          fault_action: faultAction,
-          fault_note:   faultNote,
-          arrived_at:   arrivedDate,
-          completed_at: completedDate,
-          status:       '완료',
-        })
-        .eq('id', selectedFault.id);
-
+      const { error } = await supabase.from('fault_reports').update({
+        fault_cause: faultCause, fault_action: faultAction, fault_note: faultNote,
+        arrived_at: arrivedDate, completed_at: completedDate, status: '완료',
+      }).eq('id', selectedFault.id);
       if (error) throw error;
-
       await loadData(userInfo);
       setDetailModal(false);
       resetDetailFields();
@@ -319,15 +291,10 @@ export default function FaultPage() {
     }
   };
 
-  // ── 삭제 ───────────────────────────────────────────────
   const deleteFault = async (fault: FaultReport, closeModal = false) => {
     if (!confirm(`정말 삭제하시겠습니까?\n현장: ${fault.site_name}\n호기: ${fault.hogi_no}`)) return;
     try {
-      const { error } = await supabase
-        .from('fault_reports')
-        .delete()
-        .eq('id', fault.id);
-
+      const { error } = await supabase.from('fault_reports').delete().eq('id', fault.id);
       if (error) throw error;
       if (closeModal) setDetailModal(false);
       await loadData(userInfo);
@@ -337,7 +304,6 @@ export default function FaultPage() {
     }
   };
 
-  // ── 상세 모달 열기 ──────────────────────────────────────
   const openDetail = (fault: FaultReport) => {
     setSelectedFault(fault);
     setFaultCause(fault.fault_cause || '');
@@ -349,24 +315,25 @@ export default function FaultPage() {
   };
 
   const resetForm = () => {
-    setForm({ siteId: '', siteName: '', hogiNo: '', content: '', reporterPhone: '', extra: '', assignedTo: '', assignedName: '' });
-    setSiteSearch('');
+    setForm({ siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '', content: '', reporterPhone: '', extra: '' });
+    setSiteSearch(''); setElevSearch(''); setManualHogi(false);
   };
-
   const resetDetailFields = () => {
     setFaultCause(''); setFaultAction(''); setFaultNote('');
     setArrivedAtInput(''); setCompletedAtInput('');
   };
 
-  // ── 단건 처리내역서 PDF ─────────────────────────────────
+  const safeFileTitle = (s: string) => s.replace(/[\\/:*?"<>|]/g, '').trim();
+
   const exportSinglePDF = (fault: FaultReport) => {
     const reportDate = toDateObj(fault.created_at);
     const todayStr = formatKoDate(new Date());
     const docNo = `LF-${reportDate.getFullYear()}${String(reportDate.getMonth()+1).padStart(2,'0')}${String(reportDate.getDate()).padStart(2,'0')}-${fault.id.toString().slice(-4).toUpperCase()}`;
     const site = sites.find(s => s.id === fault.site_id);
+    const docTitle = safeFileTitle(`${fault.site_name} ${fault.hogi_no} 고장처리보고서`);
 
     printHtml(`<!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8"/>
+<html lang="ko"><head><meta charset="utf-8"/><title>${docTitle}</title>
 <style>
   @page { size: A4 portrait; margin: 20mm 15mm; }
   * { box-sizing: border-box; }
@@ -385,22 +352,22 @@ export default function FaultPage() {
   .section-title { font-size:11pt; font-weight:bold; border-left:4px solid #111; padding-left:8px; margin:14px 0 8px; }
   .content-box { border:1px solid #333; padding:10px 12px; min-height:55px; white-space:pre-wrap; margin-bottom:10px; font-size:10pt; }
   .badge { display:inline-block; padding:2px 10px; border-radius:4px; font-weight:bold; font-size:9pt; color:#fff;
-    background:${fault.status==='완료'?'#16a34a':fault.status==='처리중'?'#ea580c':'#dc2626'}; }
+    background:${fault.status==='완료'?'#16a34a':fault.status==='처리중'?'#2563eb':'#ea580c'}; }
   .footer { margin-top:20px; border-top:1px solid #999; padding-top:8px; font-size:8pt; color:#666; text-align:center; }
   .signature { margin-top:30px; text-align:right; }
 </style></head><body>
   <div class="header">
     <div class="company">L I F T &nbsp; F I E L D</div>
-    <div class="title">고 장 처 리 내 역 서</div>
+    <div class="title">고 장 처 리 보 고 서</div>
   </div>
   <div class="doc-info">
     <div>문서번호: <strong>${docNo}</strong></div>
     <div>출력일자: <strong>${todayStr}</strong></div>
   </div>
   <table class="main">
-    <tr><th>현장명</th><td>${fault.site_name||'-'}</td><th>호기</th><td>${fault.hogi_no||'-'}</td></tr>
+    <tr><th>현장명</th><td>${fault.site_name||'-'}</td><th>호기</th><td>${fault.hogi_no||'-'}${fault.elevator_no?` (${fault.elevator_no})`:''}</td></tr>
     <tr><th>주소</th><td colspan="3">${site?.address||'-'}</td></tr>
-    <tr><th>담당자</th><td>${fault.assigned_name||'-'}</td><th>처리상태</th><td><span class="badge">${fault.status}</span></td></tr>
+    <tr><th>담당자</th><td>${fault.assigned_name||'-'}</td><th>처리상태</th><td><span class="badge">${STATUS_LABEL[fault.status]||fault.status}</span></td></tr>
     ${fault.reporter_phone?`<tr><th>신고자 연락처</th><td colspan="3">${fault.reporter_phone}</td></tr>`:''}
   </table>
   <div class="section-title">📋 시간 내역</div>
@@ -429,32 +396,26 @@ export default function FaultPage() {
 </body></html>`);
   };
 
-  // ── 목록 처리내역서 PDF ─────────────────────────────────
   const exportListPDF = (siteId?: string) => {
     let targetFaults = siteId
       ? faults.filter(f => f.site_id === siteId && f.status === '완료')
       : faults.filter(f => f.status === '완료');
-
     if (pdfDateFrom) {
-      const from = new Date(pdfDateFrom);
-      from.setHours(0, 0, 0, 0);
+      const from = new Date(pdfDateFrom); from.setHours(0,0,0,0);
       targetFaults = targetFaults.filter(f => toDateObj(f.created_at) >= from);
     }
     if (pdfDateTo) {
-      const to = new Date(pdfDateTo);
-      to.setHours(23, 59, 59, 999);
+      const to = new Date(pdfDateTo); to.setHours(23,59,59,999);
       targetFaults = targetFaults.filter(f => toDateObj(f.created_at) <= to);
     }
-
     if (targetFaults.length === 0) return alert('해당 기간에 완료된 고장신고가 없습니다');
 
     const siteName = siteId ? sites.find(s => s.id === siteId)?.site_name || '' : '전체 현장';
     const todayStr = formatKoDate(new Date());
     const now = new Date();
     const docNo = `LF-LIST-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
-    const periodStr = pdfDateFrom || pdfDateTo
-      ? `${pdfDateFrom||'시작'} ~ ${pdfDateTo||'현재'}`
-      : '전체 기간';
+    const periodStr = pdfDateFrom || pdfDateTo ? `${pdfDateFrom||'시작'} ~ ${pdfDateTo||'현재'}` : '전체 기간';
+    const docTitle = safeFileTitle(`${siteName} 고장처리내역서`);
 
     const rows = targetFaults.map((f, idx) => `
       <tr>
@@ -473,7 +434,7 @@ export default function FaultPage() {
       </tr>`).join('');
 
     printHtml(`<!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8"/>
+<html lang="ko"><head><meta charset="utf-8"/><title>${docTitle}</title>
 <style>
   @page { size: A4 landscape; margin: 12mm 8mm; }
   * { box-sizing: border-box; }
@@ -518,15 +479,12 @@ export default function FaultPage() {
 </body></html>`);
   };
 
-  // ── 필터 ───────────────────────────────────────────────
   const filteredFaults = faults.filter(f => {
-    const matchTeam   = teamFilter === ALL_TEAMS || f.team === teamFilter;
-    const matchStatus = statusFilter === '전체'  || f.status === statusFilter;
+    const matchTeam = teamFilter === ALL_TEAMS || f.team === teamFilter;
+    const matchStatus = statusFilter === '전체' || f.status === statusFilter;
     const matchSearch =
-      f.site_name?.includes(search)     ||
-      f.hogi_no?.includes(search)       ||
-      f.assigned_name?.includes(search) ||
-      f.content?.includes(search);
+      f.site_name?.includes(search) || f.hogi_no?.includes(search) ||
+      f.assigned_name?.includes(search) || f.content?.includes(search);
     return matchTeam && matchStatus && matchSearch;
   });
 
@@ -536,32 +494,26 @@ export default function FaultPage() {
         s.address?.toLowerCase().includes(siteSearch.toLowerCase()))
     : sites;
 
-  const selectedSite = sites.find(s => s.id === form.siteId);
-  const teamUsers = selectedSite
-    ? users.filter(u =>
-        u.team === selectedSite.team ||
-        u.team_name === selectedSite.team ||
-        u.team === selectedSite.team_name
-      )
-    : [];
+  const siteElevators = form.siteId ? elevators.filter(e => e.site_id === form.siteId) : [];
+  const filteredElevators = elevSearch.trim()
+    ? siteElevators.filter(e =>
+        e.hogi_no?.toLowerCase().includes(elevSearch.toLowerCase()) ||
+        e.elevator_no?.toLowerCase().includes(elevSearch.toLowerCase()))
+    : siteElevators;
 
-  const getCompletedCount = (siteId: string) =>
-    faults.filter(f => f.site_id === siteId && f.status === '완료').length;
+  const activeCauseGroups = isEscalatorType(form.equipType) ? ESCALATOR_CAUSE_GROUPS : ELEVATOR_CAUSE_GROUPS;
 
-  const sitesForPdf = sites
-    .filter(s => getCompletedCount(s.id) > 0)
-    .filter(s =>
-      !pdfSiteSearch.trim() ||
-      s.site_name?.toLowerCase().includes(pdfSiteSearch.toLowerCase()));
-
+  const getCompletedCount = (siteId: string) => faults.filter(f => f.site_id === siteId && f.status === '완료').length;
+  const sitesForPdf = sites.filter(s => getCompletedCount(s.id) > 0)
+    .filter(s => !pdfSiteSearch.trim() || s.site_name?.toLowerCase().includes(pdfSiteSearch.toLowerCase()));
   const totalCompleted = faults.filter(f => f.status === '완료').length;
 
   const stats = [
-    { label: '전체',    count: faults.length,                                       color: 'bg-gray-100 text-gray-700' },
-    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length,  color: 'bg-yellow-100 text-yellow-700' },
-    { label: '접수',    count: faults.filter(f => f.status === '접수').length,       color: 'bg-red-100 text-red-600' },
-    { label: '처리중',  count: faults.filter(f => f.status === '처리중').length,     color: 'bg-orange-100 text-orange-600' },
-    { label: '완료',    count: faults.filter(f => f.status === '완료').length,       color: 'bg-green-100 text-green-700' },
+    { label: '전체', count: faults.length, color: 'bg-gray-100 text-gray-700' },
+    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length, color: 'bg-yellow-100 text-yellow-700' },
+    { label: '접수', count: faults.filter(f => f.status === '접수').length, color: 'bg-orange-100 text-orange-600' },
+    { label: '처리중', count: faults.filter(f => f.status === '처리중').length, color: 'bg-blue-100 text-blue-600' },
+    { label: '완료', count: faults.filter(f => f.status === '완료').length, color: 'bg-green-100 text-green-700' },
   ];
 
   if (loading) return (
@@ -569,435 +521,630 @@ export default function FaultPage() {
       <div className="text-gray-500 text-lg">로딩 중...</div>
     </div>
   );
-
   return (
-    <div className="min-h-screen bg-gray-50">
-
-      {/* ── 헤더 ── */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/dashboard')}
-            className="text-gray-400 hover:text-gray-700 text-sm font-medium">← 뒤로</button>
-          <span className="text-xl">🔧</span>
-          <h1 className="text-xl font-bold text-gray-900">고장접수 관리</h1>
+    <div className="min-h-screen bg-gray-50 pb-24">
+      {/* 상단 바 */}
+      <div className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button onClick={() => router.push('/dashboard')} className="text-gray-500 text-xl px-1">←</button>
+          <h1 className="text-lg font-bold text-gray-800">고장신고 관리</h1>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setPdfModal(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors">
-            📋 처리내역서 PDF
+          <button
+            onClick={() => setPdfModal(true)}
+            className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700"
+          >
+            📄 처리내역 PDF
           </button>
-          <button onClick={() => setReportModal(true)}
-            className="bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors">
-            🚨 고장접수
+          <button
+            onClick={() => setReportModal(true)}
+            className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold"
+          >
+            + 고장 접수
           </button>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
+      {/* 통계 바 */}
+      <div className="px-4 py-3 flex gap-2 overflow-x-auto">
+        {stats.map((s) => (
+          <button
+            key={s.label}
+            onClick={() => setStatusFilter(s.label === '전체' ? '전체' : s.label)}
+            className={`px-4 py-2 rounded-xl flex flex-col items-center min-w-[68px] ${s.color} ${
+              statusFilter === s.label ? 'ring-2 ring-offset-1 ring-gray-400' : ''
+            }`}
+          >
+            <span className="text-xs font-medium">{s.label}</span>
+            <span className="font-bold text-lg leading-tight">{s.count}</span>
+          </button>
+        ))}
+      </div>
 
-        {/* ── 통계 카드 ── */}
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          {stats.map(s => (
-            <button key={s.label}
-              onClick={() => setStatusFilter(s.label)}
-              className={`${s.color} rounded-xl p-4 text-center transition-all hover:opacity-80 ${
-                statusFilter === s.label ? 'ring-2 ring-offset-2 ring-blue-400' : ''
-              }`}>
-              <div className="text-2xl font-bold">{s.count}</div>
-              <div className="text-xs font-semibold mt-1">{s.label}</div>
-            </button>
+      {/* 검색/필터 */}
+      <div className="px-4 pb-2 flex flex-wrap gap-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="현장명·호기·담당자·내용 검색"
+          className="flex-1 min-w-[180px] px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+        />
+        <select
+          value={teamFilter}
+          onChange={(e) => setTeamFilter(e.target.value)}
+          className="px-3 py-2 border rounded-lg text-sm bg-white"
+        >
+          {teams.map((t) => (
+            <option key={t} value={t}>{t === ALL_TEAMS ? '전체 팀' : `${t}팀`}</option>
           ))}
-        </div>
+        </select>
+      </div>
 
-        {/* ── 팀 필터 탭 ── */}
-        {teams.length > 1 && (
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-            {teams.map(t => (
-              <button key={t} onClick={() => setTeamFilter(t)}
-                className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${
-                  teamFilter === t
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                }`}>
-                {t}
-              </button>
-            ))}
-          </div>
+      {/* 목록 */}
+      <div className="px-4 space-y-3 mt-2">
+        {filteredFaults.length === 0 && (
+          <div className="text-center text-gray-400 py-20 text-sm">고장신고 내역이 없습니다</div>
         )}
 
-        {/* ── 검색 ── */}
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="현장명, 호기, 담당자, 내용 검색..."
-          className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-900 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-
-        {/* ── 고장 목록 ── */}
-        {filteredFaults.length === 0 ? (
-          <div className="text-center text-gray-400 py-20 text-lg">고장신고 내역이 없습니다</div>
-        ) : (
-          <div className="space-y-3">
-            {filteredFaults.map(fault => {
-              const sc = STATUS_STYLE[fault.status] || 'bg-gray-100 text-gray-600';
-              return (
-                <div key={fault.id}
-                  className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => openDetail(fault)}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="font-bold text-gray-900 text-base">{fault.site_name}</span>
-                        <span className="text-gray-500 text-sm">{fault.hogi_no}</span>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${sc}`}>{fault.status}</span>
-                        {fault.team && (
-                          <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{fault.team}</span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-600 truncate mb-2">{fault.content}</p>
-                      <div className="flex items-center gap-1 text-xs text-gray-400 flex-wrap">
-                        <span>🔴 {formatShort(fault.created_at)}</span>
-                        <span>→</span>
-                        <span>📋 {formatShort(fault.received_at)}</span>
-                        <span>→</span>
-                        <span>🚗 {formatShort(fault.arrived_at)}</span>
-                        <span>→</span>
-                        <span>✅ {formatShort(fault.completed_at)}</span>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">담당: {fault.assigned_name || '미배정'}</p>
-                    </div>
-                    <div className="flex flex-col gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                      {fault.status === '접수대기' && (
-                        <button onClick={() => handleReceive(fault)}
-                          className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
-                          📋 접수
-                        </button>
-                      )}
-                      <button onClick={() => exportSinglePDF(fault)}
-                        className="bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
-                        📄 내역서
-                      </button>
-                      <button onClick={() => deleteFault(fault)}
-                        className="bg-red-50 hover:bg-red-100 text-red-500 text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
-                        🗑 삭제
-                      </button>
-                    </div>
-                  </div>
+        {filteredFaults.map((f) => (
+          <div key={f.id} className="bg-white rounded-xl border shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${STATUS_STYLE[f.status]}`}>
+                    {STATUS_LABEL[f.status] || f.status}
+                  </span>
+                  {f.team && <span className="text-xs text-gray-400">{f.team}팀</span>}
+                  {f.equip_type && <span className="text-xs text-gray-400">· {f.equip_type}</span>}
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
-
-      {/* ════════════════════════════════════════
-          고장접수 모달
-      ════════════════════════════════════════ */}
-      {reportModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">🚨 고장접수</h2>
-              <button onClick={() => { setReportModal(false); resetForm(); }}
-                className="text-gray-400 hover:text-gray-700 text-2xl">×</button>
-            </div>
-
-            <label className="block text-sm font-semibold text-gray-700 mb-1">현장 선택 *</label>
-            {form.siteId ? (
-              <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-3">
-                <div>
-                  <p className="font-semibold text-blue-700">📍 {form.siteName}</p>
-                  <p className="text-xs text-gray-500">{sites.find(s => s.id === form.siteId)?.address || ''}</p>
-                  <p className="text-xs text-blue-500 mt-0.5">팀: {sites.find(s => s.id === form.siteId)?.team || '-'}</p>
+                <div className="font-bold text-[15px] text-gray-900 truncate">
+                  {f.site_name} · {f.hogi_no}
+                  {f.elevator_no && <span className="text-gray-400 font-normal"> ({f.elevator_no})</span>}
                 </div>
-                <button onClick={() => { setForm(p => ({ ...p, siteId: '', siteName: '', hogiNo: '', assignedTo: '', assignedName: '' })); setSiteSearch(''); }}
-                  className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg">변경</button>
+                <div className="text-sm text-gray-500 mt-1 line-clamp-2">{f.content}</div>
               </div>
-            ) : (
-              <>
-                <input type="text" value={siteSearch} onChange={e => setSiteSearch(e.target.value)}
-                  placeholder="현장명 검색..."
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <div className="space-y-1 mb-3 max-h-40 overflow-y-auto">
-                  {filteredSites.slice(0, 5).map(s => (
-                    <button key={s.id}
-                      onClick={() => { setForm(p => ({ ...p, siteId: s.id, siteName: s.site_name })); setSiteSearch(''); }}
-                      className="w-full text-left px-3 py-2.5 bg-gray-50 hover:bg-blue-50 rounded-lg border border-gray-100 transition-colors">
-                      <p className="text-sm font-semibold text-gray-900">{s.site_name}</p>
-                      <p className="text-xs text-gray-400">{s.team || '팀 미지정'} {s.address ? `· ${s.address}` : ''}</p>
-                    </button>
-                  ))}
-                  {filteredSites.length > 5 && (
-                    <p className="text-xs text-gray-400 text-center py-1">+ {filteredSites.length - 5}개 더 있음</p>
-                  )}
-                </div>
-              </>
-            )}
-
-            {form.siteId && (
-              <>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">호기 *</label>
-                <input type="text" value={form.hogiNo}
-                  onChange={e => setForm(p => ({ ...p, hogiNo: e.target.value }))}
-                  placeholder="예: 1호기, 2호기"
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </>
-            )}
-
-            <label className="block text-sm font-semibold text-gray-700 mb-1">고장 내용 *</label>
-            <textarea value={form.content} onChange={e => setForm(p => ({ ...p, content: e.target.value }))}
-              placeholder="고장 내용을 입력하세요" rows={3}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-
-            <label className="block text-sm font-semibold text-gray-700 mb-1">신고자 전화번호</label>
-            <input type="tel" value={form.reporterPhone}
-              onChange={e => setForm(p => ({ ...p, reporterPhone: e.target.value }))}
-              placeholder="010-0000-0000"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-
-            <label className="block text-sm font-semibold text-gray-700 mb-1">추가사항</label>
-            <textarea value={form.extra} onChange={e => setForm(p => ({ ...p, extra: e.target.value }))}
-              placeholder="추가사항 입력" rows={2}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-
-            <label className="block text-sm font-semibold text-gray-700 mb-1">담당자 선택 *</label>
-            {!form.siteId ? (
-              <p className="text-xs text-gray-400 mb-3">먼저 현장을 선택해주세요</p>
-            ) : teamUsers.length === 0 ? (
-              <p className="text-xs text-gray-400 mb-3">{selectedSite?.team || '미지정'} 팀에 소속된 사용자가 없습니다</p>
-            ) : (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {teamUsers.map(u => (
-                  <button key={u.id}
-                    onClick={() => setForm(p => ({ ...p, assignedTo: u.id, assignedName: u.name }))}
-                    className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                      form.assignedTo === u.id
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-                    }`}>
-                    {u.name}
-                  </button>
-                ))}
+              <div className="text-xs text-gray-400 whitespace-nowrap text-right">
+                {toDateStr(f.created_at)}
               </div>
-            )}
-
-            <div className="flex gap-2 mt-2">
-              <button onClick={() => { setReportModal(false); resetForm(); }}
-                className="flex-1 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl">취소</button>
-              <button onClick={submitReport} disabled={isSubmitting}
-                className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white font-semibold rounded-xl transition-colors">
-                {isSubmitting ? '접수 중...' : '신고 접수'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════
-          상세 / 처리 모달
-      ════════════════════════════════════════ */}
-      {detailModal && selectedFault && (
-        <div className="fixed inset-0 bg-black/50 flex items-end md:items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">🔧 고장 상세</h2>
-              <button onClick={() => { setDetailModal(false); resetDetailFields(); }}
-                className="text-gray-400 hover:text-gray-700 text-2xl">×</button>
             </div>
 
-            <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 mb-4 space-y-2">
-              {[
-                { label: '현장',    value: selectedFault.site_name },
-                { label: '호기',    value: selectedFault.hogi_no },
-                { label: '담당자',  value: selectedFault.assigned_name || '미배정' },
-                { label: '신고자',  value: selectedFault.reporter_phone || '-' },
-                { label: '고장내용', value: selectedFault.content },
-                ...(selectedFault.extra ? [{ label: '추가사항', value: selectedFault.extra }] : []),
-              ].map(row => (
-                <div key={row.label} className="flex gap-3">
-                  <span className="text-sm text-gray-500 w-16 shrink-0">{row.label}</span>
-                  <span className="text-sm text-gray-900 flex-1">{row.value}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* 시간 내역 */}
-            <h3 className="font-bold text-gray-800 mb-2">⏱ 시간 내역</h3>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {[
-                { label: '🔴 고장 발생', value: toDateStr(selectedFault.created_at) },
-                { label: '📋 접수',      value: toDateStr(selectedFault.received_at) },
-                { label: '🚗 현장 도착', value: toDateStr(selectedFault.arrived_at) },
-                { label: '✅ 처리 완료', value: toDateStr(selectedFault.completed_at) },
-              ].map(row => (
-                <div key={row.label} className="bg-gray-50 rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500 font-semibold mb-1">{row.label}</p>
-                  <p className="text-sm text-gray-900 font-medium">{row.value}</p>
-                </div>
-              ))}
-            </div>
-
-            {selectedFault.status !== '완료' && (
-              <>
-                <h3 className="font-bold text-gray-800 mb-3">📝 처리 내용 입력</h3>
-                {selectedFault.status === '접수' && (
-                  <button onClick={() => handleSetInProgress(selectedFault)}
-                    className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl mb-3 transition-colors">
-                    🔧 처리중으로 변경
+            <div className="flex items-center justify-between border-t mt-3 pt-2">
+              <div className="text-xs text-gray-500">
+                담당: <span className="font-medium text-gray-700">{f.assigned_name || '미배정'}</span>
+              </div>
+              <div className="flex gap-1.5">
+                {f.status === '접수대기' && (
+                  <button
+                    onClick={() => handleReceive(f)}
+                    className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold"
+                  >
+                    접수하기
                   </button>
                 )}
-
-                <label className="block text-sm font-semibold text-gray-700 mb-1">현장 도착시간</label>
-                <input type="datetime-local" value={arrivedAtInput}
-                  onChange={e => setArrivedAtInput(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-
-                <label className="block text-sm font-semibold text-gray-700 mb-1">처리 완료시간</label>
-                <input type="datetime-local" value={completedAtInput}
-                  onChange={e => setCompletedAtInput(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-
-                <label className="block text-sm font-semibold text-gray-700 mb-1">고장 원인</label>
-                <textarea value={faultCause} onChange={e => setFaultCause(e.target.value)}
-                  placeholder="고장 원인을 입력하세요" rows={2}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-
-                <label className="block text-sm font-semibold text-gray-700 mb-1">처리 내용 *</label>
-                <textarea value={faultAction} onChange={e => setFaultAction(e.target.value)}
-                  placeholder="처리 내용을 입력하세요" rows={3}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-
-                <label className="block text-sm font-semibold text-gray-700 mb-1">비고</label>
-                <textarea value={faultNote} onChange={e => setFaultNote(e.target.value)}
-                  placeholder="비고 입력" rows={2}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-
-                <button onClick={submitComplete}
-                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-colors mb-2">
-                  ✅ 처리 완료 저장
+                {f.status === '접수' && (
+                  <button
+                    onClick={() => handleSetInProgress(f)}
+                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold"
+                  >
+                    현장 도착·처리 시작
+                  </button>
+                )}
+                {(f.status === '처리중' || f.status === '접수') && (
+                  <button
+                    onClick={() => openDetail(f)}
+                    className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-semibold text-gray-700"
+                  >
+                    처리 입력
+                  </button>
+                )}
+                {f.status === '완료' && (
+                  <>
+                    <button
+                      onClick={() => openDetail(f)}
+                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-semibold text-gray-700"
+                    >
+                      상세보기
+                    </button>
+                    <button
+                      onClick={() => exportSinglePDF(f)}
+                      className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-bold"
+                    >
+                      🧾 고장처리 보고서
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => deleteFault(f)}
+                  className="px-2 py-1.5 text-red-400 hover:text-red-600 text-xs"
+                >
+                  삭제
                 </button>
-              </>
-            )}
-
-            {selectedFault.status === '완료' && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 space-y-2">
-                <h3 className="font-bold text-green-800 mb-2">✅ 처리 완료 내역</h3>
-                {[
-                  { label: '고장 원인', value: selectedFault.fault_cause  || '-' },
-                  { label: '처리 내용', value: selectedFault.fault_action || '-' },
-                  { label: '비고',      value: selectedFault.fault_note   || '-' },
-                ].map(row => (
-                  <div key={row.label} className="flex gap-3">
-                    <span className="text-sm text-gray-500 w-16 shrink-0">{row.label}</span>
-                    <span className="text-sm text-gray-900 flex-1">{row.value}</span>
-                  </div>
-                ))}
               </div>
-            )}
+            </div>
+          </div>
+        ))}
+      </div>
 
-            <div className="space-y-2">
-              <button onClick={() => exportSinglePDF(selectedFault)}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors">
-                📄 처리내역서 출력 (공문)
-              </button>
-              {selectedFault.status === '완료' && (
-                <button onClick={() => exportListPDF(selectedFault.site_id)}
-                  className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-xl transition-colors">
-                  📋 이 현장 전체 내역서
-                </button>
+      {/* ===================== 고장 접수 모달 ===================== */}
+      {reportModal && (
+        <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold">고장 접수</h2>
+              <button
+                onClick={() => { setReportModal(false); resetForm(); }}
+                className="text-gray-400 text-xl"
+              >✕</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* 현장 선택 */}
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">현장 선택 *</label>
+                {form.siteId ? (
+                  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                    <div>
+                      <div className="font-semibold text-sm">{form.siteName}</div>
+                      <div className="text-xs text-gray-500">
+                        {sites.find((s) => s.id === form.siteId)?.address}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setForm({ ...form, siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '' })}
+                      className="text-xs text-blue-600 font-semibold"
+                    >
+                      변경
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      value={siteSearch}
+                      onChange={(e) => setSiteSearch(e.target.value)}
+                      placeholder="현장명 또는 주소 검색"
+                      className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
+                    />
+                    <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
+                      {filteredSites.length === 0 && (
+                        <div className="text-center text-gray-400 text-sm py-4">검색 결과가 없습니다</div>
+                      )}
+                      {filteredSites.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() =>
+                            setForm({ ...form, siteId: s.id, siteName: s.site_name, hogiNo: '', elevatorNo: '', equipType: '' })
+                          }
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+                        >
+                          <div className="font-medium">{s.site_name}</div>
+                          <div className="text-xs text-gray-400">{s.address}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* 설비(승강기/에스컬/무빙워크) 선택 - 현장 선택 후 노출 */}
+              {form.siteId && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-semibold text-gray-700">설비(승강기·에스컬레이터·무빙워크) 선택 *</label>
+                    <button
+                      onClick={() => setManualHogi(!manualHogi)}
+                      className="text-xs text-blue-600 font-semibold"
+                    >
+                      {manualHogi ? '목록에서 선택' : '직접 입력'}
+                    </button>
+                  </div>
+
+                  {!manualHogi ? (
+                    <>
+                      <input
+                        value={elevSearch}
+                        onChange={(e) => setElevSearch(e.target.value)}
+                        placeholder="호기 또는 등록번호 검색"
+                        className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
+                      />
+                      <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
+                        {filteredElevators.length === 0 && (
+                          <div className="text-center text-gray-400 text-sm py-4">등록된 설비가 없습니다. 직접 입력을 이용하세요.</div>
+                        )}
+                        {filteredElevators.map((e) => (
+                          <button
+                            key={e.id}
+                            onClick={() =>
+                              setForm({
+                                ...form,
+                                hogiNo: e.hogi_no || '',
+                                elevatorNo: e.elevator_no || '',
+                                equipType: e.type || e.equip_type || '승강기',
+                              })
+                            }
+                            className={`w-full text-left px-3 py-2 hover:bg-gray-50 text-sm ${
+                              form.hogiNo === e.hogi_no ? 'bg-blue-50' : ''
+                            }`}
+                          >
+                            <div className="font-medium">
+                              {e.hogi_no} <span className="text-xs text-gray-400 font-normal">· {e.type || e.equip_type}</span>
+                            </div>
+                            {e.elevator_no && <div className="text-xs text-gray-400">등록번호 {e.elevator_no}</div>}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        value={form.hogiNo}
+                        onChange={(e) => setForm({ ...form, hogiNo: e.target.value })}
+                        placeholder="호기 (예: 101동 1호기)"
+                        className="col-span-2 px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+                      />
+                      <input
+                        value={form.elevatorNo}
+                        onChange={(e) => setForm({ ...form, elevatorNo: e.target.value })}
+                        placeholder="등록번호 (선택)"
+                        className="px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+                      />
+                      <select
+                        value={form.equipType}
+                        onChange={(e) => setForm({ ...form, equipType: e.target.value })}
+                        className="px-3 py-2 border rounded-lg text-sm bg-white"
+                      >
+                        <option value="">설비 종류 선택</option>
+                        <option value="승강기">승강기</option>
+                        <option value="에스컬레이터">에스컬레이터</option>
+                        <option value="무빙워크">무빙워크</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {form.hogiNo && (
+                    <div className="mt-2 text-xs text-green-600 font-semibold">
+                      선택됨: {form.hogiNo} {form.elevatorNo && `(${form.elevatorNo})`} · {form.equipType || '종류 미지정'}
+                    </div>
+                  )}
+                </div>
               )}
-              <button onClick={() => deleteFault(selectedFault, true)}
-                className="w-full py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl transition-colors">
-                🗑 삭제
+
+              {/* 고장 내용 */}
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">고장 내용 *</label>
+                <textarea
+                  value={form.content}
+                  onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  placeholder="예: 3층에서 문이 안 열림 / 이상 소음 발생 등"
+                  rows={3}
+                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 mb-1 block">신고자 연락처</label>
+                  <input
+                    value={form.reporterPhone}
+                    onChange={(e) => setForm({ ...form, reporterPhone: e.target.value })}
+                    placeholder="010-0000-0000"
+                    className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 mb-1 block">추가 메모</label>
+                  <input
+                    value={form.extra}
+                    onChange={(e) => setForm({ ...form, extra: e.target.value })}
+                    placeholder="특이사항"
+                    className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 bg-white border-t px-5 py-3 flex gap-2">
+              <button
+                onClick={() => { setReportModal(false); resetForm(); }}
+                className="flex-1 py-2.5 bg-gray-100 rounded-lg font-semibold text-gray-700"
+              >
+                취소
               </button>
-              <button onClick={() => { setDetailModal(false); resetDetailFields(); }}
-                className="w-full py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl">
-                닫기
+              <button
+                onClick={submitReport}
+                disabled={isSubmitting}
+                className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold disabled:opacity-50"
+              >
+                {isSubmitting ? '접수 중...' : '고장 접수하기'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ════════════════════════════════════════
-          PDF 현장 선택 + 기간 설정 모달
-      ════════════════════════════════════════ */}
-      {pdfModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">📋 처리내역서 PDF</h2>
-              <button onClick={() => { setPdfModal(false); setPdfSiteSearch(''); }}
-                className="text-gray-400 hover:text-gray-700 text-2xl">×</button>
+      {/* ===================== 상세/처리 모달 ===================== */}
+      {detailModal && selectedFault && (
+        <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">
+                  {selectedFault.site_name} · {selectedFault.hogi_no}
+                </h2>
+                <span className={`inline-block mt-1 px-2 py-0.5 rounded-md text-xs font-bold ${STATUS_STYLE[selectedFault.status]}`}>
+                  {STATUS_LABEL[selectedFault.status] || selectedFault.status}
+                </span>
+              </div>
+              <button onClick={() => setDetailModal(false)} className="text-gray-400 text-xl">✕</button>
             </div>
 
-            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
-              <p className="text-sm font-semibold text-blue-700 mb-3">📅 기간 설정 (선택)</p>
-              <div className="flex gap-2 items-center">
-                <div className="flex-1">
-                  <label className="block text-xs text-gray-500 mb-1">시작일</label>
-                  <input type="date" value={pdfDateFrom}
-                    onChange={e => setPdfDateFrom(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div className="p-5 space-y-4">
+              {/* 시간 내역 */}
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="text-xs text-gray-400">고장 발생</div>
+                  <div className="font-medium">{toDateStr(selectedFault.created_at)}</div>
                 </div>
-                <span className="text-gray-400 mt-4">~</span>
-                <div className="flex-1">
-                  <label className="block text-xs text-gray-500 mb-1">종료일</label>
-                  <input type="date" value={pdfDateTo}
-                    onChange={e => setPdfDateTo(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="text-xs text-gray-400">접수</div>
+                  <div className="font-medium">{toDateStr(selectedFault.received_at)}</div>
                 </div>
               </div>
-              {(pdfDateFrom || pdfDateTo) && (
-                <button onClick={() => { setPdfDateFrom(''); setPdfDateTo(''); }}
-                  className="mt-2 text-xs text-blue-600 hover:underline">
-                  기간 초기화
-                </button>
-              )}
-            </div>
 
-            <p className="text-xs text-gray-400 mb-3">완료된 고장신고가 있는 현장만 표시됩니다</p>
-            <input type="text" value={pdfSiteSearch} onChange={e => setPdfSiteSearch(e.target.value)}
-              placeholder="현장명 검색..."
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {/* 고장 내용 (읽기전용) */}
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">고장 내용</label>
+                <div className="bg-gray-50 rounded-lg p-3 text-sm whitespace-pre-wrap">{selectedFault.content}</div>
+              </div>
 
-            <div className="space-y-2">
-              {totalCompleted > 0 && (
-                <button
-                  onClick={() => { setPdfModal(false); exportListPDF(); }}
-                  className="w-full flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 hover:bg-blue-100 transition-colors">
-                  <div className="text-left">
-                    <p className="font-semibold text-blue-700">📋 전체 현장</p>
-                    <p className="text-xs text-gray-500">모든 완료 고장신고를 포함합니다</p>
-                  </div>
-                  <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">
-                    {totalCompleted}건
-                  </span>
-                </button>
-              )}
-              {sitesForPdf.length === 0 ? (
-                <p className="text-center text-gray-400 py-6 text-sm">
-                  {pdfSiteSearch ? '검색 결과가 없습니다' : '완료된 고장신고가 있는 현장이 없습니다'}
-                </p>
-              ) : sitesForPdf.map(s => {
-                const cnt = getCompletedCount(s.id);
-                return (
-                  <button key={s.id}
-                    onClick={() => { setPdfModal(false); exportListPDF(s.id); }}
-                    className="w-full flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 hover:bg-gray-100 transition-colors">
-                    <div className="text-left">
-                      <p className="font-semibold text-gray-900">📍 {s.site_name}</p>
-                      {s.address && <p className="text-xs text-gray-500 truncate">{s.address}</p>}
+              {selectedFault.status === '완료' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="text-xs text-gray-400">현장 도착</div>
+                      <div className="font-medium">{toDateStr(selectedFault.arrived_at)}</div>
                     </div>
-                    <span className="bg-green-100 text-green-700 text-xs font-bold px-2.5 py-1 rounded-full ml-2">
-                      {cnt}건
-                    </span>
-                  </button>
-                );
-              })}
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="text-xs text-gray-400">처리 완료</div>
+                      <div className="font-medium">{toDateStr(selectedFault.completed_at)}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">고장 원인</label>
+                    <div className="bg-gray-50 rounded-lg p-3 text-sm whitespace-pre-wrap">
+                      {selectedFault.fault_cause || <span className="text-gray-400">미입력</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">처리 내용</label>
+                    <div className="bg-gray-50 rounded-lg p-3 text-sm whitespace-pre-wrap">
+                      {selectedFault.fault_action || <span className="text-gray-400">미입력</span>}
+                    </div>
+                  </div>
+                  {selectedFault.fault_note && (
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 mb-1 block">비고</label>
+                      <div className="bg-gray-50 rounded-lg p-3 text-sm whitespace-pre-wrap">{selectedFault.fault_note}</div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* 처리중 전환 (접수 상태에서만 노출) */}
+                  {selectedFault.status === '접수' && (
+                    <button
+                      onClick={() => handleSetInProgress(selectedFault)}
+                      className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-semibold"
+                    >
+                      현장 도착 · 처리중으로 전환
+                    </button>
+                  )}
+
+                  {/* 시간 입력 */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 mb-1 block">현장 도착 시간</label>
+                      <input
+                        type="datetime-local"
+                        value={arrivedAtInput}
+                        onChange={(e) => setArrivedAtInput(e.target.value)}
+                        className="w-full px-2 py-2 border rounded-lg text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 mb-1 block">처리 완료 시간</label>
+                      <input
+                        type="datetime-local"
+                        value={completedAtInput}
+                        onChange={(e) => setCompletedAtInput(e.target.value)}
+                        className="w-full px-2 py-2 border rounded-lg text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 고장 원인 칩 (승강기/에스컬레이터 자동 분기) */}
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">
+                      고장 원인 {isEscalatorType(selectedFault.equip_type) ? '(에스컬레이터·무빙워크)' : '(승강기)'}
+                    </label>
+                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
+                      {Object.entries(activeCauseGroups).map(([group, items]) => (
+                        <div key={group}>
+                          <div className="text-xs font-semibold text-gray-400 mb-1">{group}</div>
+                          <div className="flex flex-wrap gap-1.5 mb-1">
+                            {items.map((label) => {
+                              const active = faultCause.split(CHIP_SEP).map((s) => s.trim()).includes(label);
+                              return (
+                                <button
+                                  key={label}
+                                  onClick={() => setFaultCause(toggleChipValue(faultCause, label))}
+                                  className={`px-2.5 py-1 rounded-full text-xs border ${
+                                    active
+                                      ? 'bg-red-500 text-white border-red-500'
+                                      : 'bg-white text-gray-600 border-gray-300'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <textarea
+                      value={faultCause}
+                      onChange={(e) => setFaultCause(e.target.value)}
+                      rows={2}
+                      placeholder="선택된 원인이 자동으로 표시됩니다. 필요시 직접 수정하세요."
+                      className="w-full mt-1.5 px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
+                    />
+                  </div>
+
+                  {/* 처리 내용 칩 */}
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">처리 내용 *</label>
+                    <div className="flex flex-wrap gap-1.5 mb-1.5">
+                      {ACTION_CHIPS.map((label) => {
+                        const active = faultAction.split(CHIP_SEP).map((s) => s.trim()).includes(label);
+                        return (
+                          <button
+                            key={label}
+                            onClick={() => setFaultAction(toggleChipValue(faultAction, label))}
+                            className={`px-2.5 py-1 rounded-full text-xs border ${
+                              active
+                                ? 'bg-blue-500 text-white border-blue-500'
+                                : 'bg-white text-gray-600 border-gray-300'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <textarea
+                      value={faultAction}
+                      onChange={(e) => setFaultAction(e.target.value)}
+                      rows={2}
+                      placeholder="선택된 처리내용이 자동으로 표시됩니다. 필요시 직접 수정하세요."
+                      className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
+                    />
+                  </div>
+
+                  {/* 비고 */}
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">비고</label>
+                    <textarea
+                      value={faultNote}
+                      onChange={(e) => setFaultNote(e.target.value)}
+                      rows={2}
+                      placeholder="특이사항이 있으면 입력하세요"
+                      className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
-            <button onClick={() => { setPdfModal(false); setPdfSiteSearch(''); }}
-              className="w-full mt-4 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl">
-              취소
-            </button>
+            <div className="sticky bottom-0 bg-white border-t px-5 py-3 flex gap-2">
+              {selectedFault.status === '완료' ? (
+                <>
+                  <button
+                    onClick={() => deleteFault(selectedFault, true)}
+                    className="px-4 py-2.5 bg-red-50 text-red-500 rounded-lg font-semibold text-sm"
+                  >
+                    삭제
+                  </button>
+                  <button
+                    onClick={() => exportSinglePDF(selectedFault)}
+                    className="flex-1 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold"
+                  >
+                    🧾 고장처리 보고서 PDF
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setDetailModal(false)}
+                    className="flex-1 py-2.5 bg-gray-100 rounded-lg font-semibold text-gray-700"
+                  >
+                    닫기
+                  </button>
+                  <button
+                    onClick={submitComplete}
+                    className="flex-1 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold"
+                  >
+                    처리 완료 저장
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== PDF 내보내기 모달 (기간·현장별) ===================== */}
+      {pdfModal && (
+        <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold">고장처리 내역 PDF</h2>
+              <button onClick={() => setPdfModal(false)} className="text-gray-400 text-xl">✕</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 mb-1 block">시작일</label>
+                  <input
+                    type="date"
+                    value={pdfDateFrom}
+                    onChange={(e) => setPdfDateFrom(e.target.value)}
+                    className="w-full px-2 py-2 border rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 mb-1 block">종료일</label>
+                  <input
+                    type="date"
+                    value={pdfDateTo}
+                    onChange={(e) => setPdfDateTo(e.target.value)}
+                    className="w-full px-2 py-2 border rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={() => exportListPDF()}
+                className="w-full py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-bold text-sm"
+              >
+                전체 현장 내보내기 (완료 {totalCompleted}건)
+              </button>
+
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">현장별 내보내기</label>
+                <input
+                  value={pdfSiteSearch}
+                  onChange={(e) => setPdfSiteSearch(e.target.value)}
+                  placeholder="현장명 검색"
+                  className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
+                />
+                <div className="max-h-56 overflow-y-auto border rounded-lg divide-y">
+                  {sitesForPdf.length === 0 && (
+                    <div className="text-center text-gray-400 text-sm py-6">완료된 고장처리 내역이 있는 현장이 없습니다</div>
+                  )}
+                  {sitesForPdf.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => exportListPDF(s.id)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 text-sm"
+                    >
+                      <span className="font-medium">{s.site_name}</span>
+                      <span className="text-xs text-gray-400">완료 {getCompletedCount(s.id)}건</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
