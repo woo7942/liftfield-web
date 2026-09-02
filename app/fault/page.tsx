@@ -1,8 +1,9 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+
 
 interface FaultReport {
   id: string;
@@ -138,6 +139,10 @@ export default function FaultPage() {
   const [pdfSiteSearch, setPdfSiteSearch] = useState('');
   const [pdfDateFrom, setPdfDateFrom] = useState('');
   const [pdfDateTo, setPdfDateTo] = useState('');
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [soundOn, setSoundOn] = useState(false);
+  const [unseenCount, setUnseenCount] = useState(0);
+
 
   const [siteSearch, setSiteSearch] = useState('');
   const [elevSearch, setElevSearch] = useState('');
@@ -171,17 +176,56 @@ export default function FaultPage() {
     });
     return () => subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    audioRef.current = new Audio('/sounds/alert.mp3');
+  }, []);
 
-  const loadData = async (info: any) => {
+  useEffect(() => {
+    if (!userInfo?.company_id) return;
+    const isOfficeAdmin = userInfo.super_admin || userInfo.role === 'admin';
+
+    const channel = supabase
+      .channel('fault-reports-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'fault_reports' },
+        (payload) => {
+          const newFault = payload.new as FaultReport;
+          if (newFault.company_id !== userInfo.company_id) return;
+          if (!isOfficeAdmin && newFault.team !== userInfo.team) return;
+
+          setFaults(prev => [newFault, ...prev]);
+          setUnseenCount(prev => prev + 1);
+          if (soundOn) audioRef.current?.play().catch(() => {});
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userInfo, soundOn]);
+
+    const loadData = async (info: any) => {
     const cid = info.company_id || '';
     if (!cid) { setLoading(false); return; }
     try {
-      const { data: faultData } = await supabase
-        .from('fault_reports').select('*').eq('company_id', cid).order('created_at', { ascending: false });
+      const isOfficeAdmin = info.super_admin || info.role === 'admin';
+
+      let faultQuery = supabase
+        .from('fault_reports')
+        .select('*')
+        .eq('company_id', cid)
+        .order('created_at', { ascending: false });
+
+      if (!isOfficeAdmin) {
+        faultQuery = faultQuery.eq('team', info.team || '__none__');
+      }
+
+      const { data: faultData } = await faultQuery;
       const faultList = (faultData || []) as FaultReport[];
       setFaults(faultList);
       const teamSet = new Set(faultList.map(f => f.team).filter(Boolean));
       setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
+
 
       const { data: siteData } = await supabase
         .from('sites').select('*').eq('company_id', cid).order('site_name');
@@ -236,7 +280,7 @@ export default function FaultPage() {
     }
   };
 
-  const handleReceive = async (fault: FaultReport) => {
+    const handleReceive = async (fault: FaultReport) => {
     if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 내가 접수하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
     try {
       const { data, error } = await supabase
@@ -253,12 +297,16 @@ export default function FaultPage() {
       if (error) throw error;
       if (!data || data.length === 0) {
         alert('이미 다른 팀원이 접수를 완료했습니다.');
+        await loadData(userInfo);
+        return;
       }
       await loadData(userInfo);
+      openDetail(data[0] as FaultReport);
     } catch (e: any) {
       alert('오류: ' + e.message);
     }
   };
+
 
   const handleSetInProgress = async (fault: FaultReport) => {
     try {
@@ -523,13 +571,23 @@ export default function FaultPage() {
   );
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      {/* 상단 바 */}
+            {/* 상단 바 */}
       <div className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button onClick={() => router.push('/dashboard')} className="text-gray-500 text-xl px-1">←</button>
           <h1 className="text-lg font-bold text-gray-800">고장신고 관리</h1>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => {
+              audioRef.current?.play().then(() => setSoundOn(true)).catch(() => {});
+            }}
+            className={`px-3 py-2 rounded-lg text-sm font-medium ${
+              soundOn ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+            }`}
+          >
+            {soundOn ? '🔔 알림 켜짐' : '🔕 알림 켜기'}
+          </button>
           <button
             onClick={() => setPdfModal(true)}
             className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700"
@@ -544,6 +602,7 @@ export default function FaultPage() {
           </button>
         </div>
       </div>
+
 
       {/* 통계 바 */}
       <div className="px-4 py-3 flex gap-2 overflow-x-auto">
@@ -889,6 +948,24 @@ export default function FaultPage() {
                   <div className="font-medium">{toDateStr(selectedFault.received_at)}</div>
                 </div>
               </div>
+
+              {/* ▼▼▼ 여기 새로 추가 ▼▼▼ */}
+              {(selectedFault.reporter_phone || selectedFault.extra) && (
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  {selectedFault.reporter_phone && (
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="text-xs text-gray-400">신고자 연락처</div>
+                      <div className="font-medium">{selectedFault.reporter_phone}</div>
+                    </div>
+                  )}
+                  {selectedFault.extra && (
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="text-xs text-gray-400">추가 메모</div>
+                      <div className="font-medium whitespace-pre-wrap">{selectedFault.extra}</div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 고장 내용 (읽기전용) */}
               <div>
