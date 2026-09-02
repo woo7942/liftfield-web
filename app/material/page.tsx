@@ -337,91 +337,90 @@ export default function MaterialPage() {
       </div>
 
       {/* 테이블 */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">신청일</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">현장 / 호기</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">자재명</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">수량</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">신청자</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">상태</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">처리</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {paginated.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
-                  자재신청 내역이 없습니다.
-                </td>
-              </tr>
-            ) : paginated.map(item => {
-              const style = STATUS_STYLE[item.status] || STATUS_STYLE['신청중'];
-              return (
-                <tr key={item.id} className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setDetailItem(item)}>
-                  <td className="px-4 py-3 text-gray-500 text-xs">
-                    {item.request_at ? item.request_at.slice(0, 10) : item.created_at?.slice(0, 10)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{item.site_name}</div>
-                    <div className="text-xs text-gray-400">{item.hogi_no}호기 {item.team ? `· ${item.team}` : ''}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{item.material_name}</div>
-                    {item.spec && <div className="text-xs text-gray-400">{item.spec}</div>}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-amber-600">
-                    {item.quantity}{item.unit}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{item.requester_name || '-'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${style.bg} ${style.text} ${style.border}`}>
-                      {style.label}
-                    </span>
-                  </td>
-                                                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                    {item.status === '신청중' && userInfo?.role === 'admin' && (
-                      <button
-                        onClick={() => handleStatusChange(item, '접수')}
-                        className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700"
-                      >
-                        ✅ 접수처리
-                      </button>
-                    )}
-                    {item.status === '접수' && (
-                      <button
-                        onClick={() => handleStatusChange(item, '수령')}
-                        className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700"
-                      >
-                        📥 수령처리
-                      </button>
-                    )}
-                    {item.status === '수령' && (
-                      <button
-                        onClick={() => handleStatusChange(item, '교체완료')}
-                        className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700"
-                      >
-                        🔧 교체완료 처리
-                      </button>
-                    )}
-                    {item.status === '교체완료' && (
-                      <span className="text-xs text-blue-600 font-medium">
-                        교체완료<br/>
-                        <span className="text-gray-400">{item.replaced_at ? item.replaced_at.slice(0,10) : ''}</span>
-                      </span>
-                    )}
-                  </td>
+<div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+  <table className="w-full text-sm min-w-[820px]">
+    <thead className="bg-gray-50">
+      <tr>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">신청일</th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">현장 / 호기</th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">자재명</th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">수량</th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">신청자</th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">상태</th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">처리</th>
+      </tr>
+    </thead>
+    <tbody className="divide-y divide-gray-100">
+      {paginated.length === 0 ? (
+        <tr>
+          <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
+            자재신청 내역이 없습니다.
+          </td>
+        </tr>
+      ) : paginated.map(item => {
+        const style = STATUS_STYLE[item.status] || STATUS_STYLE['신청중'];
+        return (
+          <tr key={item.id} className="hover:bg-gray-50 cursor-pointer"
+            onClick={() => setDetailItem(item)}>
+            <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
+              {item.request_at ? item.request_at.slice(0, 10) : item.created_at?.slice(0, 10)}
+            </td>
+            <td className="px-4 py-3 whitespace-nowrap">
+              <div className="font-medium text-gray-900">{item.site_name}</div>
+              <div className="text-xs text-gray-400">{item.hogi_no}호기 {item.team ? `· ${item.team}` : ''}</div>
+            </td>
+            <td className="px-4 py-3 whitespace-nowrap">
+              <div className="font-medium text-gray-900">{item.material_name}</div>
+              {item.spec && <div className="text-xs text-gray-400">{item.spec}</div>}
+            </td>
+            <td className="px-4 py-3 font-semibold text-amber-600 whitespace-nowrap">
+              {item.quantity}{item.unit}
+            </td>
+            <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{item.requester_name || '-'}</td>
+            <td className="px-4 py-3 whitespace-nowrap">
+              <span className={`px-2 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${style.bg} ${style.text} ${style.border}`}>
+                {style.label}
+              </span>
+            </td>
+            <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+              {item.status === '신청중' && userInfo?.role === 'admin' && (
+                <button
+                  onClick={() => handleStatusChange(item, '접수')}
+                  className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 whitespace-nowrap"
+                >
+                  ✅ 접수처리
+                </button>
+              )}
+              {item.status === '접수' && (
+                <button
+                  onClick={() => handleStatusChange(item, '수령')}
+                  className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 whitespace-nowrap"
+                >
+                  📥 수령처리
+                </button>
+              )}
+              {item.status === '수령' && (
+                <button
+                  onClick={() => handleStatusChange(item, '교체완료')}
+                  className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 whitespace-nowrap"
+                >
+                  🔧 교체완료 처리
+                </button>
+              )}
+              {item.status === '교체완료' && (
+                <span className="text-xs text-blue-600 font-medium whitespace-nowrap">
+                  교체완료{' '}
+                  <span className="text-gray-400">{item.replaced_at ? item.replaced_at.slice(0,10) : ''}</span>
+                </span>
+              )}
+            </td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+</div>
 
-
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
 
       {/* 페이지네이션 */}
       {totalPages > 1 && (
