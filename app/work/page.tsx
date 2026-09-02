@@ -235,6 +235,44 @@ export default function WorkPage() {
 
       <style>{`
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        word-break: keep-all;        /* 한글 단어 중간에서 끊기지 않도록 */
+  overflow-wrap: break-word;   /* 긴 전화번호·URL은 필요할 때만 강제 개행 */
+}
+
+/* 헤더 줄바꿈 방지 */
+.wHeadSub {
+  display:flex; align-items:center; gap:7px; margin-top:6px;
+  font-size:12px; color:#94a3b8;
+}
+.wHeadSub strong { color:#e2e8f0; font-size:13px; white-space:nowrap; }
+.wTeam {
+  background:#1e3a5f; color:#93c5fd; font-size:11px; font-weight:700;
+  padding:2px 8px; border-radius:10px; white-space:nowrap; flex-shrink:0;
+}
+.wDate { margin-left:auto; font-size:11px; white-space:nowrap; flex-shrink:0; }
+
+/* 현장 카드 버튼 줄 - flex-wrap을 정렬 가능한 방식으로 교체 */
+.wRow { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.wKey, .wCall, .wNav {
+  flex: 1 1 130px;
+  display:flex; align-items:center; justify-content:center; gap:4px;
+  font-size:13px; font-weight:700; padding:8px 10px; border-radius:9px;
+  text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.wKey { background:#fef9c3; color:#a16207; }
+.wCall { background:#dcfce7; color:#15803d; }
+.wNav { background:#eff6ff; color:#2563eb; }
+.wCall.alt { background:#fee2e2; color:#b91c1c; }
+
+/* 좁은 화면(구형 폰) 전용 미디어쿼리 추가 */
+@media (max-width:380px) {
+  .wKpiCard { padding:10px 8px; }
+  .wKpiVal { font-size:22px; }
+  .wKpiLbl { font-size:10px; }
+  .wKey, .wCall, .wNav { font-size:12px; padding:7px 9px; flex-basis:110px; }
+  .wNavLbl { font-size:9px; }
+  .wCardName { font-size:14px; }
+}
         .wLoad { min-height:100vh; display:flex; align-items:center; justify-content:center;
           background:#f8fafc; text-align:center; color:#94a3b8; font-size:13px; }
         .wRoot { min-height:100dvh; background:#f1f5f9; padding-bottom:calc(66px + env(safe-area-inset-bottom));
