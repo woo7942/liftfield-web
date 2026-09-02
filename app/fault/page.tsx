@@ -356,7 +356,8 @@ export default function FaultPage() {
 
     await supabase.from('push_subscriptions').upsert(
       {
-        user_id: userInfo?.id,
+        user_id: userInfo?.uid,
+
         company_id: userInfo?.company_id,
         team: userInfo?.team,
         endpoint: subJson.endpoint,
