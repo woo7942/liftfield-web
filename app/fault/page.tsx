@@ -107,6 +107,18 @@ const STATUS_STYLE: Record<string, string> = {
   '완료':     'bg-green-100 text-green-700',
 };
 
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+
 const printHtml = (html: string) => {
   const win = window.open('', '_blank');
   if (!win) return;
@@ -142,6 +154,8 @@ export default function FaultPage() {
     const audioRef = useRef<HTMLAudioElement | null>(null);
   const [soundOn, setSoundOn] = useState(false);
   const [unseenCount, setUnseenCount] = useState(0);
+  const [pushEnabled, setPushEnabled] = useState(false);
+
 
   useEffect(() => {
     const saved = localStorage.getItem('fault_sound_on');
@@ -194,15 +208,22 @@ export default function FaultPage() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'fault_reports' },
-        (payload) => {
+                (payload) => {
           const newFault = payload.new as FaultReport;
           if (newFault.company_id !== userInfo.company_id) return;
           if (!isOfficeAdmin && newFault.team !== userInfo.team) return;
 
           setFaults(prev => [newFault, ...prev]);
           setUnseenCount(prev => prev + 1);
-          if (soundOn) audioRef.current?.play().catch(() => {});
+
+          console.log('새 고장 접수 감지, soundOn:', soundOn);
+          if (soundOn) {
+            audioRef.current?.play()
+              .then(() => console.log('알림음 재생 성공'))
+              .catch((err) => console.error('알림음 재생 실패:', err.name, err.message));
+          }
         }
+
       )
       .subscribe();
 
@@ -309,6 +330,50 @@ export default function FaultPage() {
       setIsSubmitting(false);
     }
   };
+
+  async function enablePushNotification() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('이 브라우저는 푸시 알림을 지원하지 않습니다.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      alert('알림 권한이 거부되었습니다.');
+      return;
+    }
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(
+        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
+      ),
+    });
+
+    const subJson = subscription.toJSON();
+
+    await supabase.from('push_subscriptions').upsert(
+      {
+        user_id: userInfo?.id,
+        company_id: userInfo?.company_id,
+        team: userInfo?.team,
+        endpoint: subJson.endpoint,
+        p256dh: subJson.keys?.p256dh,
+        auth: subJson.keys?.auth,
+      },
+      { onConflict: 'endpoint' }
+    );
+
+    setPushEnabled(true);
+    alert('푸시 알림이 활성화되었습니다.');
+  } catch (err) {
+    console.error('푸시 등록 실패:', err);
+    alert('푸시 알림 등록에 실패했습니다.');
+  }
+}
+
 
     const handleReceive = async (fault: FaultReport) => {
     if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 내가 접수하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
@@ -626,6 +691,16 @@ export default function FaultPage() {
 >
   {soundOn ? '🔔 알림 켜짐' : '🔕 알림 켜기'}
 </button>
+<button
+  onClick={enablePushNotification}
+  className={`px-3 py-2 rounded-lg text-sm font-medium ${
+    pushEnabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+  }`}
+>
+  {pushEnabled ? '📲 푸시 켜짐' : '📲 푸시 알림 받기'}
+</button>
+
+
           <button
             onClick={() => setPdfModal(true)}
             className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700"
