@@ -143,6 +143,11 @@ export default function FaultPage() {
   const [soundOn, setSoundOn] = useState(false);
   const [unseenCount, setUnseenCount] = useState(0);
 
+  useEffect(() => {
+    const saved = localStorage.getItem('fault_sound_on');
+    if (saved === 'true') setSoundOn(true);
+  }, []);
+
 
   const [siteSearch, setSiteSearch] = useState('');
   const [elevSearch, setElevSearch] = useState('');
@@ -204,6 +209,26 @@ export default function FaultPage() {
     return () => { supabase.removeChannel(channel); };
   }, [userInfo, soundOn]);
 
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        const { data, error } = await supabase.auth.getSession();
+        if (error || !data.session) {
+          router.push('/login');
+          return;
+        }
+        const expiresAt = data.session.expires_at;
+        const now = Math.floor(Date.now() / 1000);
+        if (expiresAt && expiresAt - now < 60) {
+          await supabase.auth.refreshSession();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
     const loadData = async (info: any) => {
     const cid = info.company_id || '';
     if (!cid) { setLoading(false); return; }
@@ -220,12 +245,9 @@ export default function FaultPage() {
         faultQuery = faultQuery.eq('team', info.team || '__none__');
       }
 
-      const { data: faultData } = await faultQuery;
+            const { data: faultData } = await faultQuery;
       const faultList = (faultData || []) as FaultReport[];
       setFaults(faultList);
-      const teamSet = new Set(faultList.map(f => f.team).filter(Boolean));
-      setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
-
 
       const { data: siteData } = await supabase
         .from('sites').select('*').eq('company_id', cid).order('site_name');
@@ -240,7 +262,15 @@ export default function FaultPage() {
       }
 
       const { data: userData } = await supabase.from('users').select('*').eq('company_id', cid);
-      setUsers(userData || []);
+      const userList = userData || [];
+      setUsers(userList);
+
+      // 실제 존재하는 팀 전체(팀원이 배정된 팀 + 고장신고가 있는 팀)를 합쳐서 필터 목록 구성
+      const teamFromUsers = userList.map((u: any) => u.team).filter(Boolean);
+      const teamFromFaults = faultList.map((f) => f.team).filter(Boolean);
+      const teamSet = new Set([...teamFromUsers, ...teamFromFaults]);
+      setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
+
     } catch (e) {
       console.error('loadData error:', e);
     } finally {
@@ -579,15 +609,23 @@ export default function FaultPage() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              audioRef.current?.play().then(() => setSoundOn(true)).catch(() => {});
-            }}
-            className={`px-3 py-2 rounded-lg text-sm font-medium ${
-              soundOn ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-            }`}
-          >
-            {soundOn ? '🔔 알림 켜짐' : '🔕 알림 켜기'}
-          </button>
+  onClick={() => {
+    audioRef.current?.play()
+      .then(() => {
+        setSoundOn(true);
+        localStorage.setItem('fault_sound_on', 'true');
+      })
+      .catch((err) => {
+        console.error('알림음 재생 실패:', err);
+        alert('알림음 재생 실패: ' + err.message);
+      });
+  }}
+  className={`px-3 py-2 rounded-lg text-sm font-medium ${
+    soundOn ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+  }`}
+>
+  {soundOn ? '🔔 알림 켜짐' : '🔕 알림 켜기'}
+</button>
           <button
             onClick={() => setPdfModal(true)}
             className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700"
@@ -602,6 +640,12 @@ export default function FaultPage() {
           </button>
         </div>
       </div>
+
+      {teamFilter !== ALL_TEAMS && (
+  <div className="px-4 pt-2 text-xs text-gray-500">
+    {teamFilter}팀 인원: {users.filter(u => u.team === teamFilter).length}명
+  </div>
+)}
 
 
       {/* 통계 바 */}
