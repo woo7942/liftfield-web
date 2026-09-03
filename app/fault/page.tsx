@@ -310,8 +310,12 @@ export default function FaultPage() {
       setFaults(faultList);
 
       const { data: siteData } = await supabase
-        .from('sites').select('*').eq('company_id', cid).order('site_name');
-      setSites(siteData || []);
+  .from('sites')
+  .select('*')
+  .eq('company_id', cid)
+  .order('name');   // ← site_name이 아니라 name 기준으로 정렬
+setSites(siteData || []);
+
 
       const siteIds = (siteData || []).map((s: any) => s.id);
       if (siteIds.length > 0) {
@@ -673,10 +677,11 @@ export default function FaultPage() {
   });
 
   const filteredSites = siteSearch.trim()
-    ? sites.filter(s =>
-        s.site_name?.toLowerCase().includes(siteSearch.toLowerCase()) ||
-        s.address?.toLowerCase().includes(siteSearch.toLowerCase()))
-    : sites;
+  ? sites.filter(s =>
+      s.name?.toLowerCase().includes(siteSearch.toLowerCase()) ||
+      s.address?.toLowerCase().includes(siteSearch.toLowerCase()))
+  : sites;
+
 
   const siteElevators = form.siteId ? elevators.filter(e => e.site_id === form.siteId) : [];
   const filteredElevators = elevSearch.trim()
@@ -874,52 +879,52 @@ export default function FaultPage() {
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-1 block">현장 선택 *</label>
                 {form.siteId ? (
-                  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                    <div>
-                      <div className="font-semibold text-sm">{form.siteName}</div>
-                      <div className="text-xs text-gray-500">
-                        {sites.find((s) => s.id === form.siteId)?.address}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setForm({ ...form, siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '' })}
-                      className="text-xs text-blue-600 font-semibold"
-                    >
-                      변경
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <input
-                      value={siteSearch}
-                      onChange={(e) => setSiteSearch(e.target.value)}
-                      placeholder="현장명 또는 주소 검색"
-                      className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
-                    />
-                    <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
-                      {filteredSites.length === 0 && (
-                        <div className="text-center text-gray-400 text-sm py-4">검색 결과가 없습니다</div>
-                      )}
-                      {filteredSites.map((s) => (
-  <button
-    key={s.id}
-    onClick={() =>
-      setForm({ ...form, siteId: s.id, siteName: s.site_name || s.address || '이름 미등록 현장', hogiNo: '', elevatorNo: '', equipType: '' })
-    }
-    className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
-  >
-    <div className="font-medium">
-      {s.site_name
-        ? s.site_name
-        : <span className="text-red-500">⚠ 현장명 미등록 (운영자 페이지에서 확인 필요)</span>}
+  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+    <div>
+      <div className="font-semibold text-sm">{form.siteName}</div>
+      <div className="text-xs text-gray-500">
+        {sites.find((s) => s.id === form.siteId)?.address}
+      </div>
     </div>
-    <div className="text-xs text-gray-400">{s.address || '주소 미등록'}</div>
-  </button>
-))}
+    <button
+      onClick={() => setForm({ ...form, siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '' })}
+      className="text-xs text-blue-600 font-semibold"
+    >
+      변경
+    </button>
+  </div>
+) : (
+  <>
+    <input
+      value={siteSearch}
+      onChange={(e) => setSiteSearch(e.target.value)}
+      placeholder="현장명 또는 주소 검색"
+      className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
+    />
+    <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
+      {filteredSites.length === 0 && (
+        <div className="text-center text-gray-400 text-sm py-4">검색 결과가 없습니다</div>
+      )}
+      {filteredSites.map((s) => (
+        <button
+          key={s.id}
+          onClick={() =>
+            setForm({ ...form, siteId: s.id, siteName: s.name || s.address || '이름 미등록 현장', hogiNo: '', elevatorNo: '', equipType: '' })
+          }
+          className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+        >
+          <div className="font-medium">
+            {s.name
+              ? s.name
+              : <span className="text-red-500">⚠ 현장명 미등록 (운영자 페이지에서 확인 필요)</span>}
+          </div>
+          <div className="text-xs text-gray-400">{s.address || '주소 미등록'}</div>
+        </button>
+      ))}
+    </div>
+  </>
+)}
 
-                    </div>
-                  </>
-                )}
               </div>
 
               {/* 설비(승강기/에스컬/무빙워크) 선택 - 현장 선택 후 노출 */}
