@@ -69,6 +69,13 @@ const Icon = {
       <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 01-3.4 0" />
     </svg>
   ),
+   logout: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  ),
   chevronRight: (s = 14) => (
     <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M9 6l6 6-6 6" />
@@ -571,6 +578,7 @@ export default function WorkPage() {
     const { data: authData } = await supabase.auth.getUser();
     const uid = authData?.user?.id;
     if (!uid) return;
+      
 
     // 1) 로그인 사용자 정보
     const { data: userData, error: userErr } = await supabase.from("users").select("*").eq("id", uid).single();
@@ -679,6 +687,12 @@ export default function WorkPage() {
     }
   }
 
+  async function handleLogout() {
+  if (!confirm("로그아웃 하시겠습니까?")) return;
+  await supabase.auth.signOut();
+  router.push("/login");
+}
+
   const urgentCount = faults.filter((f) => {
     const created = pick(f, ["created_at"], new Date().toISOString());
     return (Date.now() - new Date(created).getTime()) / 3600000 >= 2;
@@ -721,7 +735,8 @@ export default function WorkPage() {
             </div>
           </div>
         </div>
-        <div
+                <div
+          onClick={handleLogout}
           style={{
             width: 40,
             height: 40,
@@ -731,11 +746,13 @@ export default function WorkPage() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: C.inkSoft,
+            color: C.red,
+            cursor: "pointer",
           }}
         >
-          {Icon.bell(18)}
+          {Icon.logout(18)}
         </div>
+
       </div>
 
       <div style={{ maxWidth: 480, margin: "0 auto" }}>
