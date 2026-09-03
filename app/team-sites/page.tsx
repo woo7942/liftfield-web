@@ -22,18 +22,18 @@ interface SiteItem {
   name: string;
   address?: string;
   elevatorCount?: number;
-  phone?: string;
-  emergencyPhone?: string;   // 비통번호
-  contractType?: string;     // 계약종류
-  contractStart?: string;    // 계약 시작일
-  contractEnd?: string;      // 계약 종료일
+  phones?: string[];          // 전화번호 여러 개
+  emergencyPhone?: string;    // 비통번호
+  contractType?: string;      // 계약종류
+  contractStart?: string;     // 계약 시작일
+  contractEnd?: string;       // 계약 종료일
   teamName?: string;
   source?: 'admin' | 'member' | 'team';
   createdAt?: string;
   managerName?: string;
   memo?: string;
-  password?: string;         // 출입/공동현관 비밀번호
-  maintenanceFee?: number;   // 보수료
+  password?: string;          // 출입/공동현관 비밀번호
+  maintenanceFee?: number;    // 보수료
   lat?: number;
   lng?: number;
 }
@@ -46,17 +46,16 @@ interface ElevatorItem {
   status?: string;
   installDate?: string;
   inspectionDate?: string;
-  model?: string;            // elvtr_model
-  manufacturer?: string;     // manufacturer_name
-  mntCompany?: string;       // mnt_cpny_nm (관리업체)
-  subCompany?: string;       // subcntr_cpny (하도급업체)
-  liveLoad?: string;         // 정원/적재하중
-  ratedSpeed?: string;       // 정격속도
-  shuttleSection?: string;   // 운행구간
-  lastResult?: string;       // 최근 검사결과
+  model?: string;
+  manufacturer?: string;
+  mntCompany?: string;
+  subCompany?: string;
+  liveLoad?: string;
+  ratedSpeed?: string;
+  shuttleSection?: string;
+  lastResult?: string;
   installationPlace?: string;
 }
-
 
 interface CacheRow {
   elevator_no: string;
@@ -82,10 +81,8 @@ interface CacheRow {
 
 type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'contractType';
 
-// 계약종류 고정 옵션 (입력 폼용)
 const CONTRACT_TYPES = ['종합계약', '일반계약', '분담종합계약', '분담일반계약', '종합SMART계약'];
 
-// 시/도 이름 접두어 제거 (정식명 먼저, 축약형 나중 순서 중요)
 const SIDO_PREFIXES = [
   '서울특별시', '서울',
   '부산광역시', '부산',
@@ -106,7 +103,6 @@ const SIDO_PREFIXES = [
   '제주특별자치도', '제주도', '제주',
 ];
 
-// 괄호 안 내용 제거 (예: "가람로 113 (당하동)" → "가람로 113")
 function cleanAddressInput(raw: string): string {
   return raw.replace(/\([^)]*\)/g, '').trim();
 }
@@ -121,14 +117,12 @@ function stripSidoPrefix(raw: string): string {
   return q;
 }
 
-// 도로명 + 번지 추출 (예: "파주시 가람로 113" → { road: '가람로', number: '113' })
 function extractRoadAndNumber(q: string): { road: string; number: string } | null {
   const match = q.match(/([가-힣0-9]+(?:로|길))\s*(\d+(?:-\d+)?)/);
   if (!match) return null;
   return { road: match[1], number: match[2] };
 }
 
-// 주소 → 좌표 변환 (카카오 지오코더)
 function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   return new Promise((resolve) => {
     const w = window as any;
@@ -139,7 +133,6 @@ function geocodeAddress(address: string): Promise<{ lat: number; lng: number } |
       if (status === w.kakao.maps.services.Status.OK && result[0]) {
         resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) });
       } else {
-        // 정제된 주소로 실패하면 원문으로 한 번 더 시도
         if (cleaned !== address.trim()) {
           geocoder.addressSearch(address.trim(), (result2: any[], status2: string) => {
             if (status2 === w.kakao.maps.services.Status.OK && result2[0]) {
@@ -156,9 +149,22 @@ function geocodeAddress(address: string): Promise<{ lat: number; lng: number } |
   });
 }
 
-// 자동 조회 결과 행의 고유 키 (elevator_no가 중복될 가능성을 대비해 idx까지 포함)
 function cacheRowKey(row: CacheRow, idx: number): string {
   return `${row.elevator_no || 'no'}_${row.hogi_no || ''}_${idx}`;
+}
+
+// 주소/좌표 기반 카카오맵 길찾기
+function openNavigation(site: { name?: string; address?: string; lat?: number; lng?: number }) {
+  if (!site.address && !(site.lat && site.lng)) {
+    alert('주소 정보가 없습니다.');
+    return;
+  }
+  const label = encodeURIComponent(site.name || '목적지');
+  if (site.lat && site.lng) {
+    window.open(`https://map.kakao.com/link/to/${label},${site.lat},${site.lng}`, '_blank');
+  } else if (site.address) {
+    window.open(`https://map.kakao.com/link/search/${encodeURIComponent(site.address)}`, '_blank');
+  }
 }
 
 export default function TeamSitesPage() {
@@ -169,12 +175,10 @@ export default function TeamSitesPage() {
   const [sites, setSites] = useState<SiteItem[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
 
-  // 호기
   const [siteElevators, setSiteElevators] = useState<ElevatorItem[]>([]);
   const [elevatorsLoading, setElevatorsLoading] = useState(false);
   const [totalElevatorCount, setTotalElevatorCount] = useState(0);
 
-  // 필터/정렬
   const [selectedTeam, setSelectedTeam] = useState('전체');
   const [selectedContractType, setSelectedContractType] = useState('전체');
   const [groupByContract, setGroupByContract] = useState(false);
@@ -182,7 +186,6 @@ export default function TeamSitesPage() {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortAsc, setSortAsc] = useState(true);
 
-  // 추가/수정 모달
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState<Partial<SiteItem>>({});
   const [addLoading, setAddLoading] = useState(false);
@@ -192,8 +195,6 @@ export default function TeamSitesPage() {
   const [expandedElevatorId, setExpandedElevatorId] = useState<string | null>(null);
   const [showSitePassword, setShowSitePassword] = useState(false);
 
-
-  // 승강기 자동 조회 (elevator_national_cache)
   const [cacheSearching, setCacheSearching] = useState(false);
   const [cacheResults, setCacheResults] = useState<CacheRow[]>([]);
   const [cacheGrouped, setCacheGrouped] = useState<{ dong: string; count: number }[]>([]);
@@ -201,9 +202,9 @@ export default function TeamSitesPage() {
 
   const isAdmin = userInfo?.role === 'admin';
   const isSuperAdmin = userInfo?.superAdmin === true;
-  const canEdit = isAdmin || isSuperAdmin; // 전체 관리 권한 (모든 팀 현장 수정/삭제/팀 재배정)
+  const canEdit = isAdmin || isSuperAdmin;
   const hasTeam = !!(userInfo?.team && userInfo.team.trim());
-  const canAddSite = canEdit || hasTeam; // 관리자 또는 팀 배정된 팀원은 자기 팀 현장 추가 가능
+  const canAddSite = canEdit || hasTeam;
 
   // ─── 인증 ───
   useEffect(() => {
@@ -242,7 +243,7 @@ export default function TeamSitesPage() {
     return () => subscription.unsubscribe();
   }, [router]);
 
-  // ─── 카카오 지오코더 SDK 로드 (좌표 변환용, 지도 표시는 하지 않음) ───
+  // ─── 카카오 지오코더 SDK 로드 ───
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const w = window as any;
@@ -273,8 +274,7 @@ export default function TeamSitesPage() {
 
     let query = supabase
       .from('sites')
-      .select('id, name, address, lat, lng, elevator_count, phone, emergency_phone, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, access_code, maintenance_fee')
-
+      .select('id, name, address, lat, lng, elevator_count, phones, emergency_phone, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, access_code, maintenance_fee')
       .eq('company_id', cid);
 
     if (!isAdminUser) {
@@ -292,7 +292,7 @@ export default function TeamSitesPage() {
       lat: d.lat ?? undefined,
       lng: d.lng ?? undefined,
       elevatorCount: d.elevator_count || 0,
-      phone: d.phone || '',
+      phones: Array.isArray(d.phones) ? d.phones : [],
       emergencyPhone: d.emergency_phone || '',
       contractType: d.contract_type || '',
       contractStart: d.contract_start || '',
@@ -340,57 +340,56 @@ export default function TeamSitesPage() {
 
   // ─── 현장 클릭 시 호기 로드 ───
   async function handleSiteClick(site: SiteItem) {
-  setSelectedSite(site);
-  setEditForm(site);
-  setEditMode(false);
-  setShowSitePassword(false);
-  setSiteElevators([]);
-  setElevatorsLoading(true);
+    setSelectedSite(site);
+    setEditForm(site);
+    setEditMode(false);
+    setShowSitePassword(false);
+    setSiteElevators([]);
+    setElevatorsLoading(true);
 
-  try {
-    const { data, error } = await supabase
-      .from('elevators')
-      .select(`
-        id, dong, hogi_no, type, status, install_date, inspection_date,
-        elvtr_model, manufacturer_name, mnt_cpny_nm, subcntr_cpny,
-        live_load, rated_speed, shuttle_section, last_result_nm, installation_place
-      `)
-      .eq('site_id', site.id)
-      .order('dong', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('elevators')
+        .select(`
+          id, dong, hogi_no, type, status, install_date, inspection_date,
+          elvtr_model, manufacturer_name, mnt_cpny_nm, subcntr_cpny,
+          live_load, rated_speed, shuttle_section, last_result_nm, installation_place
+        `)
+        .eq('site_id', site.id)
+        .order('dong', { ascending: true });
 
-    if (error) throw error;
+      if (error) throw error;
 
-    const getHogiNum = (h: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
-    const sorted = (data || []).sort((a: any, b: any) => {
-      if ((a.dong || '') !== (b.dong || '')) return (a.dong || '').localeCompare(b.dong || '', 'ko', { numeric: true });
-      return getHogiNum(a.hogi_no) - getHogiNum(b.hogi_no);
-    });
+      const getHogiNum = (h: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
+      const sorted = (data || []).sort((a: any, b: any) => {
+        if ((a.dong || '') !== (b.dong || '')) return (a.dong || '').localeCompare(b.dong || '', 'ko', { numeric: true });
+        return getHogiNum(a.hogi_no) - getHogiNum(b.hogi_no);
+      });
 
-    setSiteElevators(sorted.map((d: any) => ({
-      id: d.id,
-      dong: d.dong || '',
-      hogiNo: d.hogi_no || '',
-      type: d.type || '',
-      status: d.status || '',
-      installDate: d.install_date || '',
-      inspectionDate: d.inspection_date || '',
-      model: d.elvtr_model || '',
-      manufacturer: d.manufacturer_name || '',
-      mntCompany: d.mnt_cpny_nm || '',
-      subCompany: d.subcntr_cpny || '',
-      liveLoad: d.live_load || '',
-      ratedSpeed: d.rated_speed || '',
-      shuttleSection: d.shuttle_section || '',
-      lastResult: d.last_result_nm || '',
-      installationPlace: d.installation_place || '',
-    })));
-  } catch (e) {
-    console.error(e);
-  } finally {
-    setElevatorsLoading(false);
+      setSiteElevators(sorted.map((d: any) => ({
+        id: d.id,
+        dong: d.dong || '',
+        hogiNo: d.hogi_no || '',
+        type: d.type || '',
+        status: d.status || '',
+        installDate: d.install_date || '',
+        inspectionDate: d.inspection_date || '',
+        model: d.elvtr_model || '',
+        manufacturer: d.manufacturer_name || '',
+        mntCompany: d.mnt_cpny_nm || '',
+        subCompany: d.subcntr_cpny || '',
+        liveLoad: d.live_load || '',
+        ratedSpeed: d.rated_speed || '',
+        shuttleSection: d.shuttle_section || '',
+        lastResult: d.last_result_nm || '',
+        installationPlace: d.installation_place || '',
+      })));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setElevatorsLoading(false);
+    }
   }
-}
-
 
   async function searchElevatorCache() {
     const rawQ = (addForm.address || '').trim();
@@ -420,7 +419,6 @@ export default function TeamSitesPage() {
 
       let rows: CacheRow[] = [];
 
-      // 1차: 도로명 + 번지를 정확한 컬럼으로 검색 (가장 정확)
       const roadInfo = extractRoadAndNumber(normalizedQ);
       if (roadInfo) {
         const { data, error } = await supabase
@@ -432,12 +430,10 @@ export default function TeamSitesPage() {
         if (!error && data) rows = data;
       }
 
-      // 2차: 시/도·괄호 제거한 문자열로 전체 부분일치 검색
       if (rows.length === 0) {
         rows = await runTextSearch(normalizedQ);
       }
 
-      // 3차: 원문 그대로 한 번 더 검색 (최후 폴백)
       if (rows.length === 0 && normalizedQ !== rawQ) {
         rows = await runTextSearch(rawQ);
       }
@@ -451,7 +447,6 @@ export default function TeamSitesPage() {
       });
       setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
 
-      // 관리업체명에 우리 회사명이 포함된 항목은 자동으로 체크해줌 (편의 기능)
       const myCompanyName = (userInfo?.companyDisplayName || '').trim();
       const autoSelected = new Set<string>();
       rows.forEach((r, idx) => {
@@ -495,12 +490,10 @@ export default function TeamSitesPage() {
     setAddForm(prev => ({ ...prev, elevatorCount: 0 }));
   }
 
-  // ─── 계약종류 옵션 (실제 데이터 기준) ───
   const contractTypeOptions = Array.from(
     new Set(sites.map(s => s.contractType).filter((v): v is string => !!v))
   ).sort();
 
-  // ─── 필터 + 정렬 ───
   const filteredSites = sites
     .filter(s => {
       if (!canEdit && s.teamName !== userInfo?.team) return false;
@@ -512,7 +505,7 @@ export default function TeamSitesPage() {
           s.name?.toLowerCase().includes(q) ||
           s.teamName?.toLowerCase().includes(q) ||
           s.managerName?.toLowerCase().includes(q) ||
-          s.phone?.toLowerCase().includes(q) ||
+          (s.phones || []).some(p => p.toLowerCase().includes(q)) ||
           s.emergencyPhone?.toLowerCase().includes(q)
         );
       }
@@ -533,7 +526,6 @@ export default function TeamSitesPage() {
   const filteredElevatorCount = filteredSites.reduce((sum, s) => sum + (s.elevatorCount || 0), 0);
   const filteredFeeSum = filteredSites.reduce((sum, s) => sum + (s.maintenanceFee || 0), 0);
 
-  // ─── 계약종류별 그룹핑 ───
   const groupedByContract = filteredSites.reduce((acc, s) => {
     const key = s.contractType || '미분류';
     if (!acc[key]) acc[key] = [];
@@ -555,7 +547,7 @@ export default function TeamSitesPage() {
     return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
 
-  // ─── 현장 추가 (+ 자동 조회된 호기 중 '체크된 것만' + 좌표 함께 저장) ───
+  // ─── 현장 추가 ───
   async function handleAddSite() {
     if (!addForm.name?.trim() || !userInfo?.companyId) return;
     if (!canEdit && !userInfo?.team) {
@@ -564,14 +556,13 @@ export default function TeamSitesPage() {
     }
     setAddLoading(true);
     try {
-      // 주소가 있으면 좌표 계산 시도 (지도 표시를 위해 필요)
       const coords = addForm.address ? await geocodeAddress(addForm.address) : null;
 
-      // 체크된 호기만 추려냄 (같은 주소의 다른 관리업체 승강기가 섞이지 않도록)
       const selectedRows = cacheResults.filter((r, idx) => selectedCacheKeys.has(cacheRowKey(r, idx)));
 
-      // 팀 배정: 관리자는 자유롭게 선택, 일반 팀원은 본인 팀으로 고정
       const teamToSave = canEdit ? (addForm.teamName || '') : (userInfo.team || '');
+
+      const cleanedPhones = (addForm.phones || []).map(p => p.trim()).filter(p => p !== '');
 
       const { data: newSite, error } = await supabase
         .from('sites')
@@ -580,7 +571,7 @@ export default function TeamSitesPage() {
           address: addForm.address || '',
           lat: coords?.lat ?? null,
           lng: coords?.lng ?? null,
-          phone: addForm.phone || '',
+          phones: cleanedPhones,
           emergency_phone: addForm.emergencyPhone || '',
           contract_type: addForm.contractType || '',
           contract_start: addForm.contractStart || null,
@@ -590,7 +581,6 @@ export default function TeamSitesPage() {
           manager_name: addForm.managerName || '',
           memo: addForm.memo || '',
           access_code: addForm.password || '',
-
           maintenance_fee: addForm.maintenanceFee || 0,
           source: 'team',
           company_id: userInfo.companyId,
@@ -659,7 +649,7 @@ export default function TeamSitesPage() {
     }
   }
 
-  // ─── 현장 수정 (주소가 바뀌면 좌표도 재계산) ───
+  // ─── 현장 수정 ───
   async function handleEditSave() {
     if (!selectedSite || !userInfo?.companyId) return;
     try {
@@ -672,13 +662,15 @@ export default function TeamSitesPage() {
         console.warn('좌표를 찾지 못했습니다. 지도에 표시되지 않을 수 있어요:', editForm.address);
       }
 
+      const cleanedPhones = (editForm.phones || []).map(p => p.trim()).filter(p => p !== '');
+
       const { error } = await supabase
         .from('sites')
         .update({
           name: editForm.name,
           address: editForm.address || '',
           ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
-          phone: editForm.phone || '',
+          phones: cleanedPhones,
           emergency_phone: editForm.emergencyPhone || '',
           contract_type: editForm.contractType || '',
           contract_start: editForm.contractStart || null,
@@ -698,6 +690,7 @@ export default function TeamSitesPage() {
       const updated = {
         ...selectedSite,
         ...editForm,
+        phones: cleanedPhones,
         ...(addressChanged ? { lat: coords?.lat, lng: coords?.lng } : {}),
       };
       setEditMode(false);
@@ -734,7 +727,6 @@ export default function TeamSitesPage() {
     </div>
   );
 
-  // 테이블 컬럼 수 (colSpan용): 현장명,팀,대수,담당자,전화번호,비통번호,계약종류 = 7 (+관리 1)
   const emptyColSpan = canEdit ? 8 : 7;
 
   return (
@@ -997,7 +989,6 @@ export default function TeamSitesPage() {
 
               {[
                 { label: '담당자', field: 'managerName', type: 'text' },
-                { label: '전화번호', field: 'phone', type: 'text' },
                 { label: '비통번호', field: 'emergencyPhone', type: 'text' },
                 { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                 { label: '비밀번호', field: 'password', type: 'text' },
@@ -1017,6 +1008,15 @@ export default function TeamSitesPage() {
                   />
                 </div>
               ))}
+
+              {/* 전화번호 (여러 개) */}
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">전화번호</label>
+                <PhoneListEditor
+                  phones={addForm.phones || []}
+                  onChange={(phones) => setAddForm(prev => ({ ...prev, phones }))}
+                />
+              </div>
 
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">계약종류</label>
@@ -1103,7 +1103,6 @@ export default function TeamSitesPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg">{selectedSite.name}</h2>
               <button onClick={() => { setSelectedSite(null); setExpandedElevatorId(null); }} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
-
             </div>
 
             {!editMode ? (
@@ -1112,7 +1111,6 @@ export default function TeamSitesPage() {
                   {[
                     { label: '배정 팀', value: selectedSite.teamName },
                     { label: '담당자', value: selectedSite.managerName },
-                    { label: '전화번호', value: selectedSite.phone },
                     { label: '비통번호', value: selectedSite.emergencyPhone },
                     { label: '계약종류', value: selectedSite.contractType },
                     {
@@ -1122,7 +1120,6 @@ export default function TeamSitesPage() {
                         : undefined,
                     },
                     { label: '승강기 대수', value: selectedSite.elevatorCount ? `${selectedSite.elevatorCount}대` : undefined },
-                    { label: '주소', value: selectedSite.address },
                     { label: '메모', value: selectedSite.memo },
                     { label: '보수료', value: selectedSite.maintenanceFee ? `${selectedSite.maintenanceFee.toLocaleString()}원` : undefined },
                   ].filter(i => i.value).map(({ label, value }) => (
@@ -1131,6 +1128,38 @@ export default function TeamSitesPage() {
                       <span className="font-medium text-gray-800">{value}</span>
                     </div>
                   ))}
+
+                  {/* 주소: 클릭 시 바로 길찾기 */}
+                  {selectedSite.address && (
+                    <div
+                      onClick={() => openNavigation(selectedSite)}
+                      className="flex justify-between items-start py-1.5 border-b last:border-0 cursor-pointer"
+                    >
+                      <span className="text-gray-500 shrink-0">주소</span>
+                      <span className="font-medium text-blue-600 text-right ml-2">
+                        📍 {selectedSite.address}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 전화번호: 순번대로, 각각 클릭 시 전화 걸기 */}
+                  {selectedSite.phones && selectedSite.phones.length > 0 && (
+                    <div className="py-1.5 border-b last:border-0">
+                      <span className="text-gray-500 block mb-1">전화번호</span>
+                      <div className="space-y-1">
+                        {selectedSite.phones.map((phone, i) => (
+                          <a
+                            key={i}
+                            href={`tel:${phone}`}
+                            className="flex items-center justify-between text-blue-600 font-medium py-0.5"
+                          >
+                            <span>{i + 1}. {phone}</span>
+                            <span>📞</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {selectedSite.password && (
                     <div className="flex justify-between items-center py-1.5 border-b last:border-0">
@@ -1156,69 +1185,67 @@ export default function TeamSitesPage() {
                 </div>
 
                 {/* 호기 목록 */}
-<div className="mt-4">
-  <h3 className="font-semibold text-sm text-gray-700 mb-2">
-    🔧 호기 목록 ({siteElevators.length}대)
-  </h3>
-  {elevatorsLoading ? (
-    <p className="text-sm text-gray-400 text-center py-3">로딩 중...</p>
-  ) : siteElevators.length === 0 ? (
-    <p className="text-sm text-gray-400 text-center py-3">등록된 호기가 없어요</p>
-  ) : (
-    <div className="space-y-1.5">
-      {siteElevators.map(elev => {
-        const isOpen = expandedElevatorId === elev.id;
-        return (
-          <div key={elev.id} className="bg-gray-50 rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setExpandedElevatorId(isOpen ? null : elev.id)}
-              className="w-full px-3 py-2 text-sm flex justify-between items-center"
-            >
-              <span className="font-medium text-left">
-                {elev.dong ? `${elev.dong} ` : ''}{elev.hogiNo || elev.id}
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="text-gray-500 text-xs">{elev.type || '-'}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                }`}>
-                  {elev.status || '-'}
-                </span>
-                <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
-              </span>
-            </button>
+                <div className="mt-4">
+                  <h3 className="font-semibold text-sm text-gray-700 mb-2">
+                    🔧 호기 목록 ({siteElevators.length}대)
+                  </h3>
+                  {elevatorsLoading ? (
+                    <p className="text-sm text-gray-400 text-center py-3">로딩 중...</p>
+                  ) : siteElevators.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-3">등록된 호기가 없어요</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {siteElevators.map(elev => {
+                        const isOpen = expandedElevatorId === elev.id;
+                        return (
+                          <div key={elev.id} className="bg-gray-50 rounded-xl overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedElevatorId(isOpen ? null : elev.id)}
+                              className="w-full px-3 py-2 text-sm flex justify-between items-center"
+                            >
+                              <span className="font-medium text-left">
+                                {elev.dong ? `${elev.dong} ` : ''}{elev.hogiNo || elev.id}
+                              </span>
+                              <span className="flex items-center gap-2">
+                                <span className="text-gray-500 text-xs">{elev.type || '-'}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                                }`}>
+                                  {elev.status || '-'}
+                                </span>
+                                <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
+                              </span>
+                            </button>
 
-            {isOpen && (
-              <div className="px-3 pb-3 pt-1 text-xs text-gray-600 space-y-1 border-t border-gray-200">
-                {[
-                  { label: '모델', value: elev.model },
-                  { label: '제조사', value: elev.manufacturer },
-                  { label: '관리업체', value: elev.mntCompany },
-                  { label: '하도급업체', value: elev.subCompany },
-                  { label: '정원/적재하중', value: elev.liveLoad },
-                  { label: '정격속도', value: elev.ratedSpeed },
-                  { label: '운행구간', value: elev.shuttleSection },
-                  { label: '설치장소', value: elev.installationPlace },
-                  { label: '설치일', value: elev.installDate },
-                  { label: '최근 검사일', value: elev.inspectionDate },
-                  { label: '최근 검사결과', value: elev.lastResult },
-                ].filter(i => i.value).map(({ label, value }) => (
-                  <div key={label} className="flex justify-between py-0.5">
-                    <span className="text-gray-400">{label}</span>
-                    <span className="font-medium text-gray-700">{value}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  )}
-</div>
-
-
+                            {isOpen && (
+                              <div className="px-3 pb-3 pt-1 text-xs text-gray-600 space-y-1 border-t border-gray-200">
+                                {[
+                                  { label: '모델', value: elev.model },
+                                  { label: '제조사', value: elev.manufacturer },
+                                  { label: '관리업체', value: elev.mntCompany },
+                                  { label: '하도급업체', value: elev.subCompany },
+                                  { label: '정원/적재하중', value: elev.liveLoad },
+                                  { label: '정격속도', value: elev.ratedSpeed },
+                                  { label: '운행구간', value: elev.shuttleSection },
+                                  { label: '설치장소', value: elev.installationPlace },
+                                  { label: '설치일', value: elev.installDate },
+                                  { label: '최근 검사일', value: elev.inspectionDate },
+                                  { label: '최근 검사결과', value: elev.lastResult },
+                                ].filter(i => i.value).map(({ label, value }) => (
+                                  <div key={label} className="flex justify-between py-0.5">
+                                    <span className="text-gray-400">{label}</span>
+                                    <span className="font-medium text-gray-700">{value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
                 {canManageThisSite && (
                   <div className="flex gap-2 mt-4">
@@ -1238,7 +1265,6 @@ export default function TeamSitesPage() {
                     { label: '현장명', field: 'name', type: 'text' },
                     { label: '주소', field: 'address', type: 'text' },
                     { label: '담당자', field: 'managerName', type: 'text' },
-                    { label: '전화번호', field: 'phone', type: 'text' },
                     { label: '비통번호', field: 'emergencyPhone', type: 'text' },
                     { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                     { label: '비밀번호', field: 'password', type: 'text' },
@@ -1258,6 +1284,15 @@ export default function TeamSitesPage() {
                       />
                     </div>
                   ))}
+
+                  {/* 전화번호 (여러 개) */}
+                  <div>
+                    <label className="text-sm text-gray-600 mb-0.5 block">전화번호</label>
+                    <PhoneListEditor
+                      phones={editForm.phones || []}
+                      onChange={(phones) => setEditForm(prev => ({ ...prev, phones }))}
+                    />
+                  </div>
 
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">계약종류</label>
@@ -1326,6 +1361,56 @@ export default function TeamSitesPage() {
   );
 }
 
+// ─── 전화번호 여러 개 입력 컴포넌트 ───
+function PhoneListEditor({
+  phones, onChange,
+}: {
+  phones: string[];
+  onChange: (phones: string[]) => void;
+}) {
+  const list = phones.length > 0 ? phones : [''];
+
+  const update = (idx: number, value: string) => {
+    const next = [...list];
+    next[idx] = value;
+    onChange(next);
+  };
+  const add = () => onChange([...list, '']);
+  const remove = (idx: number) => onChange(list.filter((_, i) => i !== idx));
+
+  return (
+    <div>
+      {list.map((phone, idx) => (
+        <div key={idx} className="flex gap-2 mb-1.5">
+          <input
+            type="text"
+            value={phone}
+            onChange={e => update(idx, e.target.value)}
+            placeholder="010-0000-0000"
+            className="flex-1 border rounded-xl px-3 py-2 text-sm"
+          />
+          {list.length > 1 && (
+            <button
+              type="button"
+              onClick={() => remove(idx)}
+              className="px-2 text-red-400 hover:text-red-600 text-sm"
+            >
+              삭제
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={add}
+        className="text-xs text-blue-500 hover:underline"
+      >
+        + 전화번호 추가
+      </button>
+    </div>
+  );
+}
+
 // ─── 현장 행 컴포넌트 (일반 목록 / 그룹 목록 공통 사용) ───
 function SiteRow({
   site, idx, canEdit, onClick, onDelete,
@@ -1352,7 +1437,9 @@ function SiteRow({
         {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
       </td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.managerName || '-'}</td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.phone || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">
+        {site.phones && site.phones.length > 0 ? site.phones.join(', ') : '-'}
+      </td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.emergencyPhone || '-'}</td>
 
       <td className="px-3 py-2.5 text-center whitespace-nowrap">
