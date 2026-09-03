@@ -1,353 +1,787 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const MENUS = [
-  { icon: '🏢', label: '현장',   path: '/team-sites' },
-  { icon: '🔧', label: '고장',   path: '/fault',      badgeKey: 'fault' },
-  { icon: '📋', label: '점검',   path: '/inspection' },
-  { icon: '🔍', label: '검사',   path: '/inspect' },
-  { icon: '📦', label: '자재',   path: '/material',   badgeKey: 'material' },
-  { icon: '📄', label: '견적서', path: '/quote' },
-];
-
-
-const siteName = (s: any) => s.site_name || s.name || '';
-const timeAgo = (v: any) => {
-  if (!v) return '-';
-  const m = Math.floor((Date.now() - new Date(v).getTime()) / 60000);
-  if (m < 1) return '방금 전';
-  if (m < 60) return `${m}분 전`;
-  if (m < 1440) return `${Math.floor(m / 60)}시간 전`;
-  return `${Math.floor(m / 1440)}일 전`;
+// ── 팔레트 ──────────────────────────────
+const C = {
+  bg: "#f3f5f9",
+  surface: "#ffffff",
+  ink: "#0f172a",
+  inkSoft: "#334155",
+  inkDim: "#64748b",
+  inkFaint: "#94a3b8",
+  line: "#e2e8f0",
+  primary: "#2563eb",
+  primaryDeep: "#1e40af",
+  primaryLight: "#dbeafe",
+  red: "#dc2626",
+  amber: "#d97706",
+  green: "#059669",
+  purple: "#7c3aed",
+  mono: "'Space Mono', monospace",
 };
 
-export default function WorkPage() {
-  const router = useRouter();
-  const [userInfo, setUserInfo] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [sites, setSites] = useState<any[]>([]);
-  const [elevCount, setElevCount] = useState(0);
-  const [faults, setFaults] = useState<any[]>([]);
-  const [materials, setMaterials] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<'site' | 'alert'>('site');
+// ── 안전 필드 선택 헬퍼 (컬럼명 확정 전인 테이블용) ──
+function pick(obj: any, candidates: string[], fallback: any = "") {
+  if (!obj) return fallback;
+  for (const key of candidates) {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
+  }
+  return fallback;
+}
 
-  useEffect(() => {
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) { router.push('/login'); return; }
-      const { data } = await supabase.from('users')
-        .select('name, role, company_id, company_display_name, team, super_admin')
-        .eq('id', session.user.id).single();
-      if (!data?.company_id) { router.push('/'); return; }
-      setUserInfo({ ...data, uid: session.user.id });
-      setLoading(false);
-    };
-    init();
-  }, []);
+// ── 인라인 아이콘 ───────────────────────
+const Icon = {
+  wrench: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+    </svg>
+  ),
+  box: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 8L12 3 3 8l9 5 9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" />
+    </svg>
+  ),
+  clipboard: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="6" y="4" width="12" height="16" rx="2" /><path d="M9 4V2h6v2" />
+    </svg>
+  ),
+  building: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="4" y="3" width="16" height="18" /><path d="M9 21v-4h6v4M9 7h.01M15 7h.01M9 11h.01M15 11h.01" />
+    </svg>
+  ),
+  alert: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.2 18a2 2 0 001.7 3h16.2a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
+    </svg>
+  ),
+  clock: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" />
+    </svg>
+  ),
+  bell: (s = 16) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 01-3.4 0" />
+    </svg>
+  ),
+  chevronRight: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 6l6 6-6 6" />
+    </svg>
+  ),
+  home: (s = 20) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 12l9-9 9 9" /><path d="M5 10v10h14V10" />
+    </svg>
+  ),
+  fileText: (s = 20) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" />
+    </svg>
+  ),
+  tool: (s = 20) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
+    </svg>
+  ),
+};
 
-  useEffect(() => {
-    if (!userInfo) return;
-    const load = async () => {
-      const isAdmin = userInfo.role === 'admin' || userInfo.super_admin === true;
-      let q = supabase.from('sites').select('*').eq('company_id', userInfo.company_id);
-      if (!isAdmin && userInfo.team) q = q.eq('team', userInfo.team);
-      const { data: siteData } = await q;
-      const list = siteData || [];
-      setSites(list);
+// ── 유틸 함수 ───────────────────────────
+function parseYmd(ymd: string): Date {
+  return new Date(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8)));
+}
+function dDay(ymd: string): number {
+  const due = parseYmd(ymd);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((due.getTime() - today.getTime()) / 86400000);
+}
+function timeAgo(iso: string): string {
+  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 60) return `${min}분 전`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
+}
 
-      const ids = list.map((s: any) => s.id);
-      if (ids.length) {
-        const { count } = await supabase.from('elevators')
-          .select('id', { count: 'exact' }).in('site_id', ids);
-        setElevCount(count || 0);
-      } else setElevCount(0);
-
-      const names = new Set(list.map(siteName));
-      const { data: f } = await supabase.from('fault_reports').select('*')
-        .eq('company_id', userInfo.company_id)
-        .in('status', ['접수대기', '진행중'])
-        .order('created_at', { ascending: false });
-      setFaults((f || []).filter((x: any) => names.has(x.site_name || x.siteName)));
-
-      const { data: m } = await supabase.from('material_usages').select('*')
-        .eq('company_id', userInfo.company_id)
-        .eq('status', '신청중')
-        .order('created_at', { ascending: false });
-      setMaterials((m || []).filter((x: any) => names.has(x.site_name || x.siteName)));
-    };
-    load();
-    const iv = setInterval(load, 60000);
-    return () => clearInterval(iv);
-  }, [userInfo]);
-
-  const counts = { fault: faults.length, material: materials.length };
-    const onlyNum = (v: any) => String(v ?? '').replace(/[^0-9]/g, '');
-  const filtered = sites.filter(s => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    const qn = onlyNum(search);
-    const hitText =
-      siteName(s).toLowerCase().includes(q) ||
-      (s.address || '').toLowerCase().includes(q) ||
-      (s.contract_person || '').toLowerCase().includes(q);
-    const hitNum = qn.length > 0 && (
-      onlyNum(s.phone).includes(qn) ||
-      onlyNum(s.emergency_phone).includes(qn) ||
-      onlyNum(s.access_code).includes(qn)
-    );
-    return hitText || hitNum;
-  });
-
-
-  if (loading) return (
-    <div className="wLoad"><div><div style={{ fontSize: 36 }}>🛗</div><p>로딩 중...</p></div></div>
+// ── 도넛 차트 ───────────────────────────
+function Donut({
+  pct,
+  size = 90,
+  stroke = 10,
+  color = C.primary,
+  bg = "#e2e8f0",
+  children,
+}: {
+  pct: number;
+  size?: number;
+  stroke?: number;
+  color?: string;
+  bg?: string;
+  children?: React.ReactNode;
+}) {
+  const r = (size - stroke) / 2;
+  const cir = 2 * Math.PI * r;
+  const offset = cir - (Math.min(100, Math.max(0, pct)) / 100) * cir;
+  return (
+    <div style={{ position: "relative", width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={bg} strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeDasharray={cir}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset .5s ease" }}
+        />
+      </svg>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {children}
+      </div>
+    </div>
   );
+}
+
+// ── 히어로 (오늘의 진행률) ───────────────
+function ProgressHero({
+  completedToday,
+  openFaults,
+  urgent,
+  overdue,
+}: {
+  completedToday: number;
+  openFaults: number;
+  urgent: number;
+  overdue: number;
+}) {
+  const total = completedToday + openFaults;
+  const pct = total === 0 ? 0 : Math.round((completedToday / total) * 100);
+  return (
+    <div
+      style={{
+        background: `linear-gradient(135deg, ${C.primaryDeep} 0%, ${C.primary} 100%)`,
+        borderRadius: 16,
+        padding: "18px 20px",
+        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        gap: 18,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: "radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)",
+          backgroundSize: "10px 10px",
+          opacity: 0.6,
+        }}
+      />
+      <Donut pct={pct} size={94} stroke={8} color="#fff" bg="rgba(255,255,255,0.15)">
+        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: C.mono, color: "#fff", lineHeight: 1 }}>{pct}%</div>
+        <div style={{ fontSize: 9, color: "rgba(255,255,255,0.7)", fontWeight: 600, marginTop: 2 }}>완료율</div>
+      </Donut>
+      <div style={{ flex: 1, position: "relative" }}>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 700, letterSpacing: "1px", marginBottom: 6 }}>
+          오늘의 진행률
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.4px", lineHeight: 1.2, marginBottom: 8 }}>
+          {completedToday}건 완료
+          <br />
+          <span style={{ color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>{openFaults}건 남음</span>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ padding: "3px 8px", borderRadius: 4, background: "rgba(255,255,255,0.15)", fontSize: 10, fontWeight: 700, fontFamily: C.mono }}>
+            긴급 {urgent}
+          </div>
+          <div style={{ padding: "3px 8px", borderRadius: 4, background: "rgba(255,255,255,0.15)", fontSize: 10, fontWeight: 700, fontFamily: C.mono }}>
+            초과 {overdue}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── KPI 미니 카드 ───────────────────────
+function MiniKpi({
+  label,
+  value,
+  max,
+  color,
+  icon,
+  unit = "건",
+}: {
+  label: string;
+  value: number;
+  max: number;
+  color: string;
+  icon: (s: number) => React.ReactNode;
+  unit?: string;
+}) {
+  const pct = Math.min(100, (value / max) * 100);
+  return (
+    <div style={{ background: C.surface, borderRadius: 12, padding: "12px 12px 14px", border: `1px solid ${C.line}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <div
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 6,
+            background: `${color}15`,
+            color,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {icon(12)}
+        </div>
+        <span style={{ fontSize: 10.5, color: C.inkDim, fontWeight: 700 }}>{label}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 8 }}>
+        <span style={{ fontSize: 24, fontWeight: 800, color: C.ink, fontFamily: C.mono, letterSpacing: "-1px", lineHeight: 1 }}>
+          {value}
+        </span>
+        <span style={{ fontSize: 10, color: C.inkFaint, fontWeight: 600 }}>
+          / {max}
+          {unit}
+        </span>
+      </div>
+      <div style={{ height: 3, background: `${color}18`, borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} />
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ title, count, onMore }: { title: string; count: number; onMore: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 4px 12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, color: C.ink, letterSpacing: "-0.4px" }}>{title}</span>
+        <span
+          style={{
+            padding: "1px 8px",
+            borderRadius: 8,
+            background: C.primaryLight,
+            color: C.primary,
+            fontSize: 10.5,
+            fontWeight: 800,
+            fontFamily: C.mono,
+          }}
+        >
+          {count}
+        </span>
+      </div>
+      <button
+        onClick={onMore}
+        style={{
+          background: "none",
+          border: "none",
+          color: C.inkDim,
+          fontSize: 11.5,
+          fontWeight: 700,
+          cursor: "pointer",
+          padding: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        전체 {Icon.chevronRight(14)}
+      </button>
+    </div>
+  );
+}
+
+function IconChip({ icon, color, size = 40 }: { icon: (s: number) => React.ReactNode; color: string; size?: number }) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 12,
+        flexShrink: 0,
+        background: `${color}12`,
+        color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: `1px solid ${color}20`,
+      }}
+    >
+      {icon(size * 0.5)}
+    </div>
+  );
+}
+
+// ── 고장 아이템 ─────────────────────────
+function FaultItemRow({ f, onClick }: { f: any; onClick: () => void }) {
+  const createdAt = pick(f, ["created_at"], new Date().toISOString());
+  const siteName = pick(f, ["site_name"], "현장명 없음");
+  const hogiNo = pick(f, ["hogi_no"], "");
+  const content = pick(f, ["content"], "내용 없음");
+  const status = pick(f, ["status"], "접수대기");
+  const hoursAgo = (Date.now() - new Date(createdAt).getTime()) / 3600000;
+  const urgent = status === "접수대기" && hoursAgo >= 2;
+  const color = urgent ? C.red : status === "접수대기" ? C.amber : C.inkFaint;
+  const badge = urgent ? "긴급" : status;
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: C.surface,
+        borderRadius: 12,
+        padding: "13px 14px",
+        border: `1px solid ${C.line}`,
+        marginBottom: 8,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        cursor: "pointer",
+      }}
+    >
+      <IconChip icon={Icon.wrench} color={color} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+          <span style={{ padding: "1px 6px", borderRadius: 3, background: `${color}15`, color, fontSize: 10, fontWeight: 800 }}>
+            {badge}
+          </span>
+          <span style={{ fontSize: 10.5, color: C.inkFaint, fontWeight: 700 }}>{status}</span>
+        </div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 1 }}>
+          {siteName} {hogiNo && <span style={{ color: C.inkFaint, fontWeight: 500, fontSize: 12 }}>· {hogiNo}</span>}
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: C.inkDim,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {content}
+        </div>
+      </div>
+      <div style={{ fontSize: 10.5, color: C.inkFaint, fontWeight: 700, flexShrink: 0, fontFamily: C.mono }}>
+        {timeAgo(createdAt)}
+      </div>
+    </div>
+  );
+}
+
+// ── 검사 아이템 ─────────────────────────
+function InspectItemRow({ i, onClick }: { i: any; onClick: () => void }) {
+  const applcEnDt: string = pick(i, ["applc_en_dt"], "");
+  const siteName = pick(i, ["site_name"], "현장명 없음");
+  const hogiNo = pick(i, ["hogi_no"], "");
+  if (!applcEnDt) return null;
+
+  const d = dDay(applcEnDt);
+  const overdue = d < 0;
+  const imminent = d >= 0 && d <= 3;
+  const color = overdue ? C.red : imminent ? C.amber : C.primary;
+  const pct = overdue ? 100 : Math.max(10, 100 - (d / 30) * 100);
 
   return (
-    <div className="wRoot">
-      <header className="wHead">
-        <div className="wHeadTop">
-          <span className="wLogo">🛗 LiftField</span>
-          <button className="wOut" onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}>
-            로그아웃
-          </button>
+    <div
+      onClick={onClick}
+      style={{
+        background: C.surface,
+        borderRadius: 12,
+        padding: "13px 14px",
+        border: `1px solid ${C.line}`,
+        marginBottom: 8,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        cursor: "pointer",
+      }}
+    >
+      <Donut pct={pct} size={48} stroke={5} color={color} bg={C.line}>
+        <div style={{ fontSize: 9, fontWeight: 700, color, fontFamily: C.mono, lineHeight: 1 }}>
+          {overdue ? "초과" : "D-"}
         </div>
-        <div className="wHeadSub">
-          <strong>{userInfo?.name}님</strong>
-          {userInfo?.team && <span className="wTeam">{userInfo.team}</span>}
-          <span className="wDate">{new Date().toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' })}</span>
+        <div style={{ fontSize: 13, fontWeight: 800, color, fontFamily: C.mono, lineHeight: 1, marginTop: 1 }}>
+          {overdue ? `+${Math.abs(d)}` : d}
         </div>
-      </header>
-
-      <main className="wMain">
-        <div className="wKpi">
-          {[
-            { ic: '🏢', val: sites.length,    lbl: '담당 현장',   c: '#10b981' },
-            { ic: '🛗', val: elevCount,       lbl: '담당 승강기', c: '#3b82f6' },
-            { ic: '🔧', val: counts.fault,    lbl: '처리할 고장', c: '#ef4444' },
-            { ic: '📦', val: counts.material, lbl: '자재 신청중', c: '#8b5cf6' },
-          ].map((k, i) => (
-            <div key={i} className="wKpiCard" style={{ borderTopColor: k.c }}>
-              <span className="wKpiIc">{k.ic}</span>
-              <span className="wKpiVal">{k.val}</span>
-              <span className="wKpiLbl">{k.lbl}</span>
-            </div>
-          ))}
+      </Donut>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 3 }}>{siteName}</div>
+        <div style={{ fontSize: 11.5, color: C.inkDim, display: "flex", alignItems: "center", gap: 5 }}>
+          {hogiNo && (
+            <span style={{ padding: "1px 6px", borderRadius: 3, background: `${color}12`, color, fontWeight: 700, fontSize: 10 }}>
+              {hogiNo}
+            </span>
+          )}
+          <span style={{ fontFamily: C.mono }}>
+            {applcEnDt.slice(4, 6)}.{applcEnDt.slice(6, 8)}
+          </span>
         </div>
+      </div>
+      <span style={{ color: C.inkFaint }}>{Icon.chevronRight(16)}</span>
+    </div>
+  );
+}
 
-        <div className="wTabs">
-          <button className={tab === 'site' ? 'wTab on' : 'wTab'} onClick={() => setTab('site')}>
-            내 현장 {sites.length}
-          </button>
-          <button className={tab === 'alert' ? 'wTab on' : 'wTab'} onClick={() => setTab('alert')}>
-            알림 {counts.fault + counts.material}
-          </button>
-        </div>
-
-        {tab === 'site' && (
-          <>
-            <input className="wSearch" value={search} onChange={e => setSearch(e.target.value)}
-                            placeholder="🔍 현장명, 주소, 전화번호 검색" />
-
-            <div className="wList">
-              {filtered.length === 0 ? (
-                <div className="wEmpty"><div style={{ fontSize: 28 }}>🏢</div>담당 현장이 없어요</div>
-              ) : filtered.map(s => (
-                <div key={s.id} className="wCard">
-                  <div className="wCardTop">
-                    <span className="wCardName">{siteName(s)}</span>
-                    {s.elevator_count ? <span className="wPill">{s.elevator_count}대</span> : null}
-                  </div>
-                  {s.address && <div className="wAddr">{s.address}</div>}
-                                    <div className="wRow">
-                    {s.access_code && <span className="wKey">🔑 {s.access_code}</span>}
-                    {s.phone && (
-                      <a className="wCall" href={`tel:${String(s.phone).replace(/[^0-9+]/g, '')}`}>
-                        📞 담당 {s.phone}
-                      </a>
-                    )}
-                    {s.emergency_phone && (
-                      <a className="wCall alt" href={`tel:${String(s.emergency_phone).replace(/[^0-9+]/g, '')}`}>
-                        🚨 비통 {s.emergency_phone}
-                      </a>
-                    )}
-                    {s.address && (
-                      <a className="wNav" target="_blank" rel="noreferrer"
-                        href={`https://map.kakao.com/link/search/${encodeURIComponent(s.address)}`}>
-                        🗺️ 길찾기
-                      </a>
-                    )}
-                  </div>
-
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {tab === 'alert' && (
-          <div className="wList">
-            {counts.fault + counts.material === 0 ? (
-              <div className="wEmpty"><div style={{ fontSize: 28 }}>✅</div>대기 중인 항목 없음</div>
-            ) : (
-              <>
-                {faults.map(x => (
-                  <div key={x.id} className="wCard alert red" onClick={() => router.push('/fault')}>
-                    <div className="wCardTop">
-                      <span className="wCardName">{x.site_name} · {x.hogi_no}</span>
-                      <span className="wAgo">{timeAgo(x.created_at)}</span>
-                    </div>
-                    <div className="wDesc">{x.content}</div>
-                    <div className="wMeta">🔧 {x.status} · 담당 {x.assigned_name || '미배정'}</div>
-                  </div>
-                ))}
-                {materials.map(x => (
-                  <div key={x.id} className="wCard alert purple" onClick={() => router.push('/material')}>
-                    <div className="wCardTop">
-                      <span className="wCardName">{x.site_name}</span>
-                      <span className="wAgo">{timeAgo(x.created_at)}</span>
-                    </div>
-                    <div className="wDesc">📦 {x.item_name}</div>
-                    <div className="wMeta">신청자 {x.requester_name || '-'}</div>
-                  </div>
-                ))}
-              </>
-            )}
+// ── 자재 아이템 ─────────────────────────
+function MaterialItemRow({ m, onClick }: { m: any; onClick: () => void }) {
+  const siteName = pick(m, ["site_name"], "현장명 없음");
+  const materialName = pick(m, ["material_name", "item_name", "material", "name"], "자재명 없음");
+  const quantity = pick(m, ["quantity", "qty", "count"], "-");
+  const status = pick(m, ["status"], "접수");
+  const statusColor: Record<string, string> = { 접수: C.amber, 수령: C.primary, 교체완료: C.green };
+  const color = statusColor[status] ?? C.inkDim;
+  const steps = ["접수", "수령", "교체완료"];
+  const currentStep = steps.indexOf(status);
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: C.surface,
+        borderRadius: 12,
+        padding: "13px 14px",
+        border: `1px solid ${C.line}`,
+        marginBottom: 8,
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+        <IconChip icon={Icon.box} color={C.purple} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 2 }}>
+            {materialName}{" "}
+            <span style={{ color: C.inkFaint, fontFamily: C.mono, fontWeight: 500, fontSize: 12 }}>×{quantity}</span>
           </div>
-        )}
-      </main>
-
-      <nav className="wNavBar">
-        {MENUS.map(m => {
-          const cnt = m.badgeKey ? (counts as any)[m.badgeKey] : 0;
-          return (
-            <button key={m.path} onClick={() => router.push(m.path)}>
-              <span className="wNavIc">{m.icon}{cnt > 0 && <i className="wDot">{cnt}</i>}</span>
-              <span className="wNavLbl">{m.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-
-      <style>{`
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        word-break: keep-all;        /* 한글 단어 중간에서 끊기지 않도록 */
-  overflow-wrap: break-word;   /* 긴 전화번호·URL은 필요할 때만 강제 개행 */
+          <div style={{ fontSize: 11.5, color: C.inkDim }}>{siteName}</div>
+        </div>
+        <span style={{ padding: "3px 8px", borderRadius: 8, fontSize: 10.5, fontWeight: 800, background: `${color}14`, color }}>
+          {status}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 3 }}>
+        {steps.map((s, idx) => (
+          <div key={idx} style={{ flex: 1, height: 3, borderRadius: 2, background: idx <= currentStep ? color : C.line }} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
-/* 헤더 줄바꿈 방지 */
-.wHeadSub {
-  display:flex; align-items:center; gap:7px; margin-top:6px;
-  font-size:12px; color:#94a3b8;
+// ── 하단 탭바 ───────────────────────────
+const TABS = [
+  { key: "home", path: "/work", icon: Icon.home },
+  { key: "fault", path: "/fault", icon: Icon.wrench },
+  { key: "inspection", path: "/inspection", icon: Icon.tool },
+  { key: "inspect", path: "/inspect", icon: Icon.clipboard },
+  { key: "material", path: "/material", icon: Icon.box },
+  { key: "quote", path: "/quote", icon: Icon.fileText },
+];
+
+function TabBar({ active, router }: { active: string; router: ReturnType<typeof useRouter> }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 14,
+        left: 14,
+        right: 14,
+        maxWidth: 480,
+        margin: "0 auto",
+        background: "#fff",
+        borderRadius: 20,
+        padding: "10px 6px",
+        display: "flex",
+        justifyContent: "space-around",
+        zIndex: 40,
+        boxShadow: "0 8px 24px rgba(15,23,42,0.12), 0 2px 6px rgba(15,23,42,0.06)",
+        border: `1px solid ${C.line}`,
+      }}
+    >
+      {TABS.map((t) => {
+        const isActive = t.key === active;
+        return (
+          <div
+            key={t.key}
+            onClick={() => router.push(t.path)}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 14,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: isActive ? C.primary : "transparent",
+              color: isActive ? "#fff" : C.inkDim,
+              cursor: "pointer",
+              transition: "all .18s ease",
+              boxShadow: isActive ? `0 4px 12px ${C.primary}55` : "none",
+            }}
+          >
+            {t.icon(20)}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
-.wHeadSub strong { color:#e2e8f0; font-size:13px; white-space:nowrap; }
-.wTeam {
-  background:#1e3a5f; color:#93c5fd; font-size:11px; font-weight:700;
-  padding:2px 8px; border-radius:10px; white-space:nowrap; flex-shrink:0;
-}
-.wDate { margin-left:auto; font-size:11px; white-space:nowrap; flex-shrink:0; }
 
-/* 현장 카드 버튼 줄 - flex-wrap을 정렬 가능한 방식으로 교체 */
-.wRow { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
-.wKey, .wCall, .wNav {
-  flex: 1 1 130px;
-  display:flex; align-items:center; justify-content:center; gap:4px;
-  font-size:13px; font-weight:700; padding:8px 10px; border-radius:9px;
-  text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-.wKey { background:#fef9c3; color:#a16207; }
-.wCall { background:#dcfce7; color:#15803d; }
-.wNav { background:#eff6ff; color:#2563eb; }
-.wCall.alt { background:#fee2e2; color:#b91c1c; }
+// ── 메인 페이지 ─────────────────────────
+export default function WorkPage() {
+  const router = useRouter();
+  const [userRaw, setUserRaw] = useState<any>(null);
+  const [faults, setFaults] = useState<any[]>([]);
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [inspects, setInspects] = useState<any[]>([]);
+  const [activeSites, setActiveSites] = useState(0);
+  const [completedToday, setCompletedToday] = useState(0);
 
-/* 좁은 화면(구형 폰) 전용 미디어쿼리 추가 */
-@media (max-width:380px) {
-  .wKpiCard { padding:10px 8px; }
-  .wKpiVal { font-size:22px; }
-  .wKpiLbl { font-size:10px; }
-  .wKey, .wCall, .wNav { font-size:12px; padding:7px 9px; flex-basis:110px; }
-  .wNavLbl { font-size:9px; }
-  .wCardName { font-size:14px; }
-}
-        .wLoad { min-height:100vh; display:flex; align-items:center; justify-content:center;
-          background:#f8fafc; text-align:center; color:#94a3b8; font-size:13px; }
-        .wRoot { min-height:100dvh; background:#f1f5f9; padding-bottom:calc(66px + env(safe-area-inset-bottom));
-          font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif; }
+  useEffect(() => {
+    fetchAll();
+    const t = setInterval(fetchAll, 60000);
+    return () => clearInterval(t);
+  }, []);
 
-        .wHead { position:sticky; top:0; z-index:20; background:#0f172a; padding:10px 14px 8px; }
-        .wHeadTop { display:flex; align-items:center; justify-content:space-between; }
-        .wLogo { color:#f8fafc; font-weight:800; font-size:15px; }
-        .wOut { background:none; border:1px solid #334155; border-radius:6px; color:#64748b;
-          font-size:11px; padding:4px 9px; font-family:inherit; }
-        .wHeadSub { display:flex; align-items:center; gap:7px; margin-top:6px; font-size:12px; color:#94a3b8; flex-wrap:wrap; }
-        .wHeadSub strong { color:#e2e8f0; font-size:13px; }
-        .wTeam { background:#1e3a5f; color:#93c5fd; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; }
-        .wDate { margin-left:auto; font-size:11px; }
+  async function fetchAll() {
+    const { data: authData } = await supabase.auth.getUser();
+    const uid = authData?.user?.id;
+    if (!uid) return;
 
-        .wMain { padding:12px 12px 0; }
-        .wKpi { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-        .wKpiCard { background:#fff; border-radius:12px; border-top:3px solid; padding:12px 10px;
-          display:flex; flex-direction:column; align-items:flex-start; box-shadow:0 1px 3px rgba(0,0,0,.05); }
-        .wKpiIc { font-size:15px; }
-        .wKpiVal { font-size:26px; font-weight:900; line-height:1.1; color:#0f172a; }
-        .wKpiLbl { font-size:11px; color:#94a3b8; font-weight:600; margin-top:2px; }
+    // 1) 로그인 사용자 정보
+    const { data: userData, error: userErr } = await supabase.from("users").select("*").eq("id", uid).single();
+    if (userErr) console.error("USER QUERY ERROR:", userErr.message);
+    setUserRaw(userData);
 
-        .wTabs { display:flex; gap:8px; margin:14px 0 10px; }
-        .wTab { flex:1; padding:10px; border-radius:10px; border:1px solid #e2e8f0; background:#fff;
-          font-size:13px; font-weight:700; color:#64748b; font-family:inherit; }
-        .wTab.on { background:#3b82f6; border-color:#3b82f6; color:#fff; }
+    const team = pick(userData, ["team", "team_name"], "");
 
-        .wSearch { width:100%; border:1px solid #e2e8f0; border-radius:10px; padding:11px 12px;
-          font-size:15px; background:#fff; outline:none; font-family:inherit; margin-bottom:10px; }
+    // 2) 고장 (team 컬럼 확정됨)
+    const { data: faultData, error: faultErr } = await supabase
+      .from("fault_reports")
+      .select("*")
+      .eq("team", team)
+      .order("created_at", { ascending: true })
+      .limit(30);
+    if (faultErr) console.error("FAULT QUERY ERROR:", faultErr.message);
+    const openFaults = (faultData ?? []).filter((f) => pick(f, ["status"], "접수대기") !== "완료");
+    setFaults(openFaults);
 
-        .wList { display:flex; flex-direction:column; gap:8px; }
-        .wEmpty { text-align:center; color:#94a3b8; font-size:13px; padding:40px 0; }
-        .wCard { background:#fff; border-radius:12px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
-        .wCard.alert { border-left:3px solid; }
-        .wCard.red { border-left-color:#ef4444; background:#fef2f2; }
-        .wCard.purple { border-left-color:#8b5cf6; background:#faf5ff; }
-        .wCardTop { display:flex; align-items:center; gap:8px; }
-        .wCardName { font-size:15px; font-weight:700; color:#1e293b; flex:1;
-          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .wPill { font-size:11px; font-weight:700; background:#eff6ff; color:#3b82f6;
-          padding:2px 7px; border-radius:7px; flex-shrink:0; }
-        .wAgo { font-size:11px; color:#94a3b8; flex-shrink:0; }
-        .wAddr { font-size:12px; color:#64748b; margin-top:4px; line-height:1.4; }
-        .wDesc { font-size:13px; color:#475569; margin-top:5px; line-height:1.4; }
-        .wMeta { font-size:11px; color:#94a3b8; margin-top:5px; }
-        .wRow { display:flex; gap:6px; margin-top:9px; flex-wrap:wrap; }
-        .wKey, .wCall, .wNav { font-size:13px; font-weight:700; padding:7px 11px; border-radius:9px;
-          text-decoration:none; display:inline-block; }
-        .wKey { background:#fef9c3; color:#a16207; }
-        .wCall { background:#dcfce7; color:#15803d; }
-        .wNav { background:#eff6ff; color:#2563eb; }
-                .wCall.alt { background:#fee2e2; color:#b91c1c; }
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    setCompletedToday(
+      (faultData ?? []).filter(
+        (f) => pick(f, ["status"]) === "완료" && new Date(pick(f, ["created_at"], 0)) >= todayStart
+      ).length
+    );
 
+    // 3) 자재 (team 컬럼 확정됨)
+    const { data: materialData, error: matErr } = await supabase
+      .from("material_requests")
+      .select("*")
+      .eq("team", team)
+      .order("requested_at", { ascending: true })
+      .limit(30);
+    if (matErr) console.error("MATERIAL QUERY ERROR:", matErr.message);
+    const pendingMaterials = (materialData ?? []).filter((m) => pick(m, ["status"]) !== "교체완료");
+    setMaterials(pendingMaterials);
 
-        .wNavBar { position:fixed; bottom:0; left:0; right:0; z-index:30; background:#0f172a;
-          display:flex; border-top:1px solid #1e293b; padding-bottom:env(safe-area-inset-bottom); }
-        .wNavBar button { flex:1; background:none; border:none; padding:9px 0 8px; display:flex;
-          flex-direction:column; align-items:center; gap:3px; font-family:inherit; }
-        .wNavIc { font-size:19px; position:relative; }
-        .wDot { position:absolute; top:-4px; right:-9px; background:#ef4444; color:#fff; font-size:9px;
-          font-weight:800; font-style:normal; min-width:15px; height:15px; line-height:15px;
-          border-radius:8px; padding:0 3px; }
-        .wNavLbl { font-size:10px; color:#94a3b8; font-weight:600; }
+    // 4) 현장 목록(팀 기준) → 검사 필터 및 담당 현장 수
+    // sites 테이블은 team 컬럼에 팀 이름 문자열을 직접 저장하고 있음
+    const userTeamName = pick(userData, ["team"], "");
+    const userCompanyId = pick(userData, ["company_id"], null);
 
-        @media (min-width:768px) {
-          .wRoot { padding-bottom:0; display:flex; flex-direction:column; min-height:100vh; }
-          .wKpi { grid-template-columns:repeat(4,1fr); gap:10px; }
-          .wKpiVal { font-size:30px; }
-          .wMain { max-width:1100px; width:100%; margin:0 auto; padding:16px 20px 90px; flex:1; }
-          .wTabs { max-width:400px; }
-          .wNavBar { justify-content:center; gap:10px; }
-          .wNavBar button { flex:0 0 96px; }
-        }
-      `}</style>
+    let siteIds: string[] = [];
+
+    if (userTeamName) {
+      let siteQuery = supabase.from("sites").select("id").eq("team", userTeamName);
+      if (userCompanyId) {
+        siteQuery = siteQuery.eq("company_id", userCompanyId);
+      }
+      const { data: siteRows, error: siteErr } = await siteQuery;
+
+      if (siteErr) {
+        console.error("SITE QUERY ERROR:", siteErr.message);
+      } else {
+        siteIds = (siteRows ?? [])
+          .map((s: { id: string }) => s.id)
+          .filter((id: string | null | undefined): id is string => Boolean(id));
+      }
+    }
+
+    setActiveSites(siteIds.length);
+
+    if (siteIds.length === 0) {
+      setInspects([]);
+    } else {
+      const { data: inspectData, error: inspErr } = await supabase
+        .from("safety_inspections")
+        .select("id, site_name, hogi_no, applc_en_dt, site_id")
+        .in("site_id", siteIds);
+
+            if (inspErr) {
+        console.error("INSPECT QUERY ERROR:", inspErr.message);
+        setInspects([]);
+      } else {
+        // 같은 현장 + 같은 호기의 검사 기록이 여러 건 있을 수 있으므로,
+        // "site_id + hogi_no" 기준으로 묶어서 가장 최신(applc_en_dt가 가장 큰) 1건만 남긴다.
+        const latestByKey = new Map<string, any>();
+        (inspectData ?? []).forEach((row: any) => {
+          const key = `${row.site_id}_${row.hogi_no ?? ""}`;
+          const existing = latestByKey.get(key);
+          if (!existing || String(row.applc_en_dt) > String(existing.applc_en_dt)) {
+            latestByKey.set(key, row);
+          }
+        });
+        const dedupedInspectData = Array.from(latestByKey.values());
+
+        const in7 = new Date();
+        in7.setDate(in7.getDate() + 7);
+
+        const filtered = dedupedInspectData.filter((row: any) => {
+          const ymd = row?.applc_en_dt;
+          if (!ymd) return false;
+          const due = parseYmd(String(ymd));
+          return due <= in7;
+        });
+
+        filtered.sort(
+          (a: any, b: any) =>
+            parseYmd(String(a.applc_en_dt)).getTime() - parseYmd(String(b.applc_en_dt)).getTime()
+        );
+
+        setInspects(filtered.slice(0, 30));
+      }
+
+    }
+  }
+
+  const urgentCount = faults.filter((f) => {
+    const created = pick(f, ["created_at"], new Date().toISOString());
+    return (Date.now() - new Date(created).getTime()) / 3600000 >= 2;
+  }).length;
+  const overdueInspectCount = inspects.filter((i) => dDay(pick(i, ["applc_en_dt"], "20990101")) < 0).length;
+  const imminentInspectCount = inspects.filter((i) => {
+    const d = dDay(pick(i, ["applc_en_dt"], "20990101"));
+    return d >= 0 && d <= 3;
+  }).length;
+
+  const userName = pick(userRaw, ["name", "user_name", "full_name", "username"], "이름없음");
+  const companyName = pick(userRaw, ["company_display_name", "company_name", "company", "corp_name"], "-");
+  const teamName = pick(userRaw, ["team", "team_name"], "-");
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.bg, color: C.ink, paddingBottom: 110 }}>
+      <div style={{ padding: "24px 20px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: C.primary,
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 18,
+              fontWeight: 800,
+              boxShadow: `0 4px 12px ${C.primary}44`,
+            }}
+          >
+            L
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>{userName}</div>
+            <div style={{ fontSize: 11, color: C.inkDim, fontWeight: 600 }}>
+              {teamName} · {companyName}
+            </div>
+          </div>
+        </div>
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            background: "#fff",
+            border: `1px solid ${C.line}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: C.inkSoft,
+          }}
+        >
+          {Icon.bell(18)}
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ padding: "0 16px 14px" }}>
+          <ProgressHero
+            completedToday={completedToday}
+            openFaults={faults.length}
+            urgent={urgentCount}
+            overdue={overdueInspectCount}
+          />
+        </div>
+
+        <div style={{ padding: "0 16px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <MiniKpi label="긴급 고장" value={urgentCount} max={5} color={C.red} icon={Icon.alert} />
+          <MiniKpi label="임박 검사" value={imminentInspectCount} max={10} color={C.amber} icon={Icon.clock} />
+          <MiniKpi label="자재 대기" value={materials.length} max={8} color={C.purple} icon={Icon.box} />
+          <MiniKpi label="담당 현장" value={activeSites} max={20} color={C.primary} icon={Icon.building} />
+        </div>
+
+        <div style={{ padding: "0 16px 4px" }}>
+          <SectionTitle title="고장접수" count={faults.length} onMore={() => router.push("/fault")} />
+          {faults.length === 0 ? (
+            <p style={{ fontSize: 13, color: C.inkFaint, padding: "8px 4px" }}>처리할 고장이 없습니다</p>
+          ) : (
+            faults.slice(0, 3).map((f, idx) => <FaultItemRow key={f.id ?? idx} f={f} onClick={() => router.push("/fault")} />)
+          )}
+        </div>
+
+        <div style={{ padding: "0 16px 4px" }}>
+          <SectionTitle title="검사관련" count={inspects.length} onMore={() => router.push("/inspect")} />
+          {inspects.length === 0 ? (
+            <p style={{ fontSize: 13, color: C.inkFaint, padding: "8px 4px" }}>임박한 검사가 없습니다</p>
+          ) : (
+            inspects.slice(0, 3).map((i, idx) => <InspectItemRow key={i.id ?? idx} i={i} onClick={() => router.push("/inspect")} />)
+          )}
+        </div>
+
+        <div style={{ padding: "0 16px 4px" }}>
+          <SectionTitle title="자재신청" count={materials.length} onMore={() => router.push("/material")} />
+          {materials.length === 0 ? (
+            <p style={{ fontSize: 13, color: C.inkFaint, padding: "8px 4px" }}>신청 중인 자재가 없습니다</p>
+          ) : (
+            materials.slice(0, 3).map((m, idx) => <MaterialItemRow key={m.id ?? idx} m={m} onClick={() => router.push("/material")} />)
+          )}
+        </div>
+      </div>
+
+      <TabBar active="home" router={router} />
     </div>
   );
 }
