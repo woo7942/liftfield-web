@@ -494,12 +494,14 @@ function MaterialItemRow({ m, onClick }: { m: any; onClick: () => void }) {
 // ── 하단 탭바 ───────────────────────────
 const TABS = [
   { key: "home", path: "/work", icon: Icon.home },
+  { key: "sites", path: "/team-sites", icon: Icon.building },
   { key: "fault", path: "/fault", icon: Icon.wrench },
   { key: "inspection", path: "/inspection", icon: Icon.tool },
   { key: "inspect", path: "/inspect", icon: Icon.clipboard },
   { key: "material", path: "/material", icon: Icon.box },
   { key: "quote", path: "/quote", icon: Icon.fileText },
 ];
+
 
 function TabBar({ active, router }: { active: string; router: ReturnType<typeof useRouter> }) {
   return (
