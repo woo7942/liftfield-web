@@ -198,6 +198,45 @@ export default function FaultPage() {
   useEffect(() => {
     audioRef.current = new Audio('/sounds/alert.mp3');
   }, []);
+  useEffect(() => {
+  if (!userInfo) return;
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+
+  // 이미 브라우저에서 허용된 상태면 조용히 소리만 활성화하고 끝
+  if (Notification.permission === 'granted') {
+    setSoundOn(true);
+    localStorage.setItem('fault_sound_on', 'true');
+    return;
+  }
+
+  // 이미 명시적으로 차단(denied)한 경우엔 브라우저가 재요청 자체를 막기 때문에
+  // 계속 팝업을 띄워도 의미가 없어 여기서는 더 묻지 않음
+  if (Notification.permission === 'denied') return;
+
+  // 아직 결정 전(default) 상태 → 확인을 누를 때까지 계속 물어봄
+  let confirmed = false;
+  while (!confirmed) {
+    confirmed = window.confirm(
+      '새 고장 접수를 실시간으로 알려드리려고 합니다.\n알림을 받으시겠습니까?'
+    );
+  }
+
+  // 확인을 누른 사용자 제스처를 이용해 알림음 재생 권한도 함께 미리 풀어둠
+  audioRef.current
+    ?.play()
+    .then(() => {
+      audioRef.current?.pause();
+      if (audioRef.current) audioRef.current.currentTime = 0;
+      setSoundOn(true);
+      localStorage.setItem('fault_sound_on', 'true');
+    })
+    .catch((err) => console.error('알림음 사전 재생 실패:', err));
+
+  // 브라우저 네이티브 알림 권한 요청 + 푸시 구독
+  enablePushNotification(true);
+
+}, [userInfo]);
+
 
   useEffect(() => {
     if (!userInfo?.company_id) return;
@@ -331,15 +370,15 @@ export default function FaultPage() {
     }
   };
 
-  async function enablePushNotification() {
+  async function enablePushNotification(silent = false) {
   try {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      alert('이 브라우저는 푸시 알림을 지원하지 않습니다.');
+      if (!silent) alert('이 브라우저는 푸시 알림을 지원하지 않습니다.');
       return;
     }
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      alert('알림 권한이 거부되었습니다.');
+      if (!silent) alert('알림 권한이 거부되었습니다.');
       return;
     }
     const registration = await navigator.serviceWorker.register('/sw.js');
@@ -357,7 +396,6 @@ export default function FaultPage() {
     await supabase.from('push_subscriptions').upsert(
       {
         user_id: userInfo?.uid,
-
         company_id: userInfo?.company_id,
         team: userInfo?.team,
         endpoint: subJson.endpoint,
@@ -368,12 +406,14 @@ export default function FaultPage() {
     );
 
     setPushEnabled(true);
-    alert('푸시 알림이 활성화되었습니다.');
+    if (!silent) alert('푸시 알림이 활성화되었습니다.');
   } catch (err) {
     console.error('푸시 등록 실패:', err);
-    alert('푸시 알림 등록에 실패했습니다.');
+    // 자동 실행 시에는 실패해도 사용자에게 팝업을 띄우지 않음 (알림음/화면 실시간 감지는 이미 켜졌으므로 핵심 기능엔 지장 없음)
+    if (!silent) alert('푸시 알림 등록에 실패했습니다.');
   }
 }
+
 
 
     const handleReceive = async (fault: FaultReport) => {
@@ -674,33 +714,6 @@ export default function FaultPage() {
           <h1 className="text-lg font-bold text-gray-800">고장신고 관리</h1>
         </div>
         <div className="flex gap-2">
-          <button
-  onClick={() => {
-    audioRef.current?.play()
-      .then(() => {
-        setSoundOn(true);
-        localStorage.setItem('fault_sound_on', 'true');
-      })
-      .catch((err) => {
-        console.error('알림음 재생 실패:', err);
-        alert('알림음 재생 실패: ' + err.message);
-      });
-  }}
-  className={`px-3 py-2 rounded-lg text-sm font-medium ${
-    soundOn ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-  }`}
->
-  {soundOn ? '🔔 알림 켜짐' : '🔕 알림 켜기'}
-</button>
-<button
-  onClick={enablePushNotification}
-  className={`px-3 py-2 rounded-lg text-sm font-medium ${
-    pushEnabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
-  }`}
->
-  {pushEnabled ? '📲 푸시 켜짐' : '📲 푸시 알림 받기'}
-</button>
-
 
           <button
             onClick={() => setPdfModal(true)}
@@ -888,17 +901,22 @@ export default function FaultPage() {
                         <div className="text-center text-gray-400 text-sm py-4">검색 결과가 없습니다</div>
                       )}
                       {filteredSites.map((s) => (
-                        <button
-                          key={s.id}
-                          onClick={() =>
-                            setForm({ ...form, siteId: s.id, siteName: s.site_name, hogiNo: '', elevatorNo: '', equipType: '' })
-                          }
-                          className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
-                        >
-                          <div className="font-medium">{s.site_name}</div>
-                          <div className="text-xs text-gray-400">{s.address}</div>
-                        </button>
-                      ))}
+  <button
+    key={s.id}
+    onClick={() =>
+      setForm({ ...form, siteId: s.id, siteName: s.site_name || s.address || '이름 미등록 현장', hogiNo: '', elevatorNo: '', equipType: '' })
+    }
+    className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+  >
+    <div className="font-medium">
+      {s.site_name
+        ? s.site_name
+        : <span className="text-red-500">⚠ 현장명 미등록 (운영자 페이지에서 확인 필요)</span>}
+    </div>
+    <div className="text-xs text-gray-400">{s.address || '주소 미등록'}</div>
+  </button>
+))}
+
                     </div>
                   </>
                 )}

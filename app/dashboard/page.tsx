@@ -69,13 +69,14 @@ interface MaterialItem {
   id: string;
   siteName?: string;
   site_name?: string;
-  itemName?: string;
-  item_name?: string;
+  materialName?: string;
+  material_name?: string;
   requesterName?: string;
   requester_name?: string;
   status: string;
   created_at: any;
 }
+
 
 // ── 유틸 ──────────────────────────────────────────
 function getDday(dateStr?: string): number | null {
@@ -257,15 +258,16 @@ export default function DashboardPage() {
       setFaultList((faultData || []) as FaultItem[]);
       setCounts(p => ({ ...p, fault: faultData?.length || 0 }));
 
-      let matQ = supabase.from('material_usages')
-        .select('*')
-        .eq('status', '신청중')
-        .gte('created_at', since)
-        .order('created_at', { ascending: false });
-      if (!userInfo.super_admin) matQ = matQ.eq('company_id', cid);
-      const { data: matData } = await matQ;
-      setMaterialList((matData || []) as MaterialItem[]);
-      setCounts(p => ({ ...p, material: matData?.length || 0 }));
+      let matQ = supabase.from('material_requests')
+  .select('*')
+  .eq('status', '신청중')
+  .gte('created_at', since)
+  .order('created_at', { ascending: false });
+if (!userInfo.super_admin) matQ = matQ.eq('company_id', cid);
+const { data: matData } = await matQ;
+setMaterialList((matData || []) as MaterialItem[]);
+setCounts(p => ({ ...p, material: matData?.length || 0 }));
+
 
       let quoteQ = supabase.from('quotes')
         .select('id', { count: 'exact' })
@@ -614,8 +616,9 @@ export default function DashboardPage() {
                             <span style={{ fontSize: 10, color: '#94a3b8' }}>{timeAgo(m.created_at)}</span>
                           </div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>{m.site_name || m.siteName}</div>
-                          <div style={{ fontSize: 12, color: '#6d28d9', marginBottom: 2 }}>{m.item_name || m.itemName}</div>
-                          <div style={{ fontSize: 11, color: '#94a3b8' }}>신청자: {m.requester_name || m.requesterName || '-'}</div>
+<div style={{ fontSize: 12, color: '#6d28d9', marginBottom: 2 }}>{m.material_name || m.materialName}</div>
+<div style={{ fontSize: 11, color: '#94a3b8' }}>신청자: {m.requester_name || m.requesterName || '-'}</div>
+
                         </div>
                       ))}
                     </div>
