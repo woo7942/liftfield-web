@@ -17,3 +17,483 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ============================================
+   THEME E — Editorial Ivory
+   ============================================ */
+.theme-e {
+  --ivory: #FAF7F0;
+  --ivory-dim: #F2EDE1;
+  --ink: #1B1B1B;
+  --text-dim: #6E6A5F;
+  --champagne: #8A6E4B;
+  --hairline: #DAD2BE;
+  --ok: #4C6B4F;
+  --ok-bg: #EEF3EC;
+  --rej: #9A4A3C;
+  --rej-bg: #F7EBE8;
+  --pend: #8A6E4B;
+  --pend-bg: #F3EEE3;
+
+  --serif: 'Playfair Display', 'Noto Serif KR', serif;
+  --sans: 'Noto Sans KR', -apple-system, sans-serif;
+
+  background: var(--ivory);
+  color: var(--ink);
+  font-family: var(--sans);
+  min-height: 100vh;
+  width: 100%;
+}
+
+.theme-e * { box-sizing: border-box; }
+
+.theme-e .page-frame {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+/* ── 브랜드 헤더 ── */
+.theme-e .brand-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+  border-bottom: 1px solid var(--ink);
+}
+.theme-e .brand-title {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--ink);
+}
+.theme-e .brand-sub {
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--champagne);
+  margin-top: 2px;
+}
+.theme-e .brand-meta {
+  margin-left: auto;
+  text-align: right;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.theme-e .brand-meta strong {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* ── 탭 바 ── */
+.theme-e .tab-bar {
+  display: flex;
+  gap: 0;
+  margin-bottom: 32px;
+  border-bottom: 1px solid var(--ink);
+}
+.theme-e .tab-btn {
+  padding: 14px 28px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.theme-e .tab-btn.active { color: var(--ink); border-bottom-color: var(--champagne); }
+.theme-e .tab-btn:hover { color: var(--ink); }
+
+/* ── 패널 ── */
+.theme-e .panel { background: transparent; }
+.theme-e .panel-title {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.theme-e .panel-title .num {
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--champagne);
+  font-weight: 600;
+}
+.theme-e .panel-title .en {
+  margin-left: auto;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* ── 필터바 ── */
+.theme-e .filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.theme-e .filter-bar select,
+.theme-e .filter-bar input[type="month"] {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  padding: 9px 14px;
+  border: 1px solid var(--hairline);
+  background: var(--ivory);
+  color: var(--ink);
+}
+
+/* ── 버튼 ── */
+.theme-e .btn-primary {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  padding: 11px 22px;
+  background: var(--ink);
+  color: var(--ivory);
+  border: 1px solid var(--ink);
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.theme-e .btn-primary:hover { opacity: .85; }
+.theme-e .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.theme-e .btn-primary.accent { background: var(--champagne); border-color: var(--champagne); }
+
+.theme-e .btn-secondary {
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  padding: 9px 16px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  cursor: pointer;
+}
+.theme-e .btn-secondary:hover { background: var(--ink); color: var(--ivory); }
+
+/* ── 견적서 목록 테이블 ── */
+.theme-e .quote-table { width: 100%; border-collapse: collapse; font-family: var(--sans); }
+.theme-e .quote-table thead th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ink);
+}
+.theme-e .quote-table thead th.center { text-align: center; }
+.theme-e .quote-table thead th.num { text-align: right; }
+.theme-e .quote-table tbody tr {
+  cursor: pointer;
+  border-bottom: 1px solid var(--hairline);
+  transition: background .12s;
+}
+.theme-e .quote-table tbody tr:hover { background: var(--ivory-dim); }
+.theme-e .quote-table tbody td { padding: 16px 12px; vertical-align: middle; }
+.theme-e .qt-num { font-family: var(--serif); font-style: italic; color: var(--champagne); font-size: 13px; }
+.theme-e .qt-title { font-family: var(--serif); font-size: 14.5px; color: var(--ink); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.theme-e .qt-team { font-size: 12px; color: var(--text-dim); }
+.theme-e .qt-amount { text-align: right; font-family: var(--serif); font-weight: 500; font-size: 14px; }
+.theme-e .qt-date { text-align: center; font-size: 12px; color: var(--text-dim); }
+.theme-e .mini-tag {
+  font-size: 9.5px;
+  padding: 3px 8px;
+  border: 1px solid var(--hairline);
+  color: var(--text-dim);
+  letter-spacing: .5px;
+}
+
+.theme-e .status-badge {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 5px 12px;
+  border: 1px solid;
+}
+.theme-e .status-ok { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
+.theme-e .status-rej { color: var(--rej); border-color: var(--rej); background: var(--rej-bg); }
+.theme-e .status-pend { color: var(--pend); border-color: var(--pend); background: var(--pend-bg); }
+
+/* ── 폼 요소 ── */
+.theme-e .form-section { padding-top: 4px; }
+.theme-e .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.theme-e .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+.theme-e .form-item { margin-bottom: 18px; }
+.theme-e .form-label {
+  display: block;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.theme-e .form-label .req { color: var(--rej); }
+.theme-e .form-input,
+.theme-e .form-select,
+.theme-e .form-textarea {
+  width: 100%;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  padding: 11px 14px;
+  border: 1px solid var(--hairline);
+  background: var(--ivory);
+  color: var(--ink);
+}
+.theme-e .form-input:focus,
+.theme-e .form-select:focus,
+.theme-e .form-textarea:focus {
+  outline: none;
+  border-color: var(--champagne);
+}
+.theme-e .form-textarea { resize: vertical; font-family: var(--sans); }
+
+.theme-e .asset-slot { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.theme-e .slot-preview {
+  width: 100%;
+  height: 100px;
+  border: 1px dashed var(--hairline);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 12px;
+  background: var(--ivory-dim);
+}
+
+/* ── 모달 ── */
+.theme-e .modal-overlay {
+  position: fixed; inset: 0; background: rgba(27,27,27,.55);
+  display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+}
+.theme-e .modal-box {
+  background: var(--ivory);
+  border: 1px solid var(--hairline);
+  max-width: 800px; width: 100%; max-height: 90vh; overflow-y: auto; position: relative;
+  padding: 40px;
+}
+.theme-e .modal-close {
+  position: absolute; top: 20px; right: 24px; font-size: 20px;
+  color: var(--text-dim); background: none; border: none; cursor: pointer; z-index: 2;
+}
+.theme-e .modal-close:hover { color: var(--ink); }
+
+.theme-e .site-search-result { padding: 14px 4px; border-bottom: 1px solid var(--hairline); cursor: pointer; font-family: var(--sans); }
+.theme-e .site-search-result:hover { background: var(--ivory-dim); }
+.theme-e .site-search-result .name { font-family: var(--serif); font-weight: 500; font-size: 14px; color: var(--ink); }
+.theme-e .site-search-result .addr { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+.theme-e .selected-site-box {
+  border: 1px solid var(--hairline); border-left: 3px solid var(--champagne);
+  padding: 16px 20px; margin-bottom: 24px; display: flex; justify-content: space-between;
+  align-items: center; background: var(--ivory-dim);
+}
+.theme-e .selected-site-box .name { font-family: var(--serif); font-weight: 500; font-size: 15px; color: var(--ink); }
+.theme-e .selected-site-box .addr { font-family: var(--sans); font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
+
+.theme-e .section-label { font-family: var(--serif); font-style: italic; color: var(--champagne); font-size: 14px; }
+.theme-e .section-label i { margin-right: 6px; }
+.theme-e .section-label b { font-style: normal; color: var(--ink); font-weight: 500; margin-left: 6px; letter-spacing: 1px; }
+
+/* ── 편집 테이블(자재/인건비) ── */
+.theme-e .edit-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 12.5px; margin-bottom: 6px; }
+.theme-e .edit-table th {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-dim); padding: 8px 6px; border-bottom: 1px solid var(--ink); text-align: center;
+}
+.theme-e .edit-table td { padding: 6px; border-bottom: 1px solid var(--hairline); text-align: center; }
+.theme-e .edit-table input,
+.theme-e .edit-table select {
+  width: 100%; font-family: var(--sans); font-size: 12.5px; padding: 7px 8px;
+  border: 1px solid var(--hairline); background: var(--ivory); text-align: center;
+}
+.theme-e .edit-table td:first-child input { text-align: left; }
+.theme-e .edit-table .amount { font-family: var(--serif); font-weight: 500; }
+.theme-e .edit-table .del-btn { color: var(--rej); background: none; border: none; cursor: pointer; font-size: 14px; }
+
+/* ── 계산 요약 ── */
+.theme-e .calc-summary { border-top: 1px solid var(--ink); padding-top: 16px; font-family: var(--sans); }
+.theme-e .calc-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 0; font-size: 12.5px; color: var(--text-dim); border-bottom: 1px solid var(--hairline);
+}
+.theme-e .calc-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.theme-e .calc-row .val { font-family: var(--serif); color: var(--ink); font-size: 13.5px; }
+.theme-e .calc-row.subtotal { font-weight: 600; color: var(--ink); }
+.theme-e .calc-row.total {
+  background: var(--ink); color: var(--ivory); padding: 16px 14px; margin-top: 8px; border: none;
+  font-family: var(--serif); font-size: 16px; font-weight: 600;
+}
+.theme-e .calc-row.total .val { color: var(--champagne); font-size: 20px; }
+
+.theme-e .action-panel { display: flex; gap: 10px; padding: 24px 40px; border-top: 1px solid var(--hairline); }
+.theme-e .action-panel button { flex: 1; }
+
+/* ── 견적서 문서(인쇄) ── */
+.theme-e .quote-doc {
+  background: var(--ivory); color: var(--ink); font-family: var(--sans);
+  width: 100%; max-width: 780px; padding: 48px 56px;
+}
+
+.theme-e .doc-hero { text-align: center; margin-bottom: 32px; }
+.theme-e .doc-monogram { font-family: var(--serif); font-style: italic; color: var(--champagne); font-size: 13px; letter-spacing: 2px; margin-bottom: 6px; }
+.theme-e .doc-title { font-family: var(--serif); font-size: 34px; font-weight: 600; letter-spacing: 12px; color: var(--ink); }
+.theme-e .doc-title-en { font-family: var(--sans); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; color: var(--text-dim); margin-top: 6px; }
+.theme-e .doc-ornament { color: var(--champagne); font-size: 16px; margin-top: 14px; }
+
+/* TO/FROM 영역 - 세로 구분선으로 두 칸 분리 */
+.theme-e .doc-header-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  margin-bottom: 24px;
+}
+.theme-e .doc-header-grid .lbl { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--champagne); margin-bottom: 8px; }
+.theme-e .doc-supplier {
+  text-align: right;
+  padding: 24px 28px;
+  background: var(--ivory-dim);
+}
+
+.theme-e .doc-client-block .val { font-family: var(--serif); font-size: 17px; font-weight: 500; margin-bottom: 6px; }
+.theme-e .doc-client-block .sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.6; }
+.theme-e .doc-supplier {
+  text-align: right;
+  padding: 24px 28px;
+  background: #FAF7F0;
+}
+
+.theme-e .doc-supplier .sup-name { font-family: var(--serif); font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
+.theme-e .doc-supplier .sup-lines { font-size: 11px; color: var(--text-dim); line-height: 1.7; }
+.theme-e .doc-supplier .sup-lines .val { color: var(--ink); }
+.theme-e .doc-supplier .sup-ceo { margin-top: 10px; font-size: 12px; position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.theme-e .doc-supplier .stamp { opacity: .9; }
+
+/* Total Amount - 왼쪽 라벨, 오른쪽 금액 */
+.theme-e .doc-amount-box {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 24px 0 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+.theme-e .doc-amount-label {
+  font-family: var(--sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.theme-e .doc-amount-value {
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 600;
+  text-align: right;
+}
+.theme-e .doc-amount-value .accent { color: var(--champagne); margin-right: 4px; }
+.theme-e .doc-note { text-align: center; font-size: 10.5px; color: var(--text-dim); margin-bottom: 28px; }
+
+.theme-e .doc-project-title { font-family: var(--serif); font-size: 14px; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--ink); }
+.theme-e .doc-project-title .lbl { font-family: var(--sans); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--champagne); margin-right: 10px; }
+
+.theme-e .doc-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.theme-e .doc-table th { padding: 8px 6px; border-bottom: 1px solid var(--ink); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); text-align: center; }
+.theme-e .doc-table td { padding: 8px 6px; border-bottom: 1px solid var(--hairline); }
+.theme-e .doc-table td.center { text-align: center; }
+.theme-e .doc-table td.right { text-align: right; }
+.theme-e .doc-table .section-row td { font-family: var(--serif); font-style: italic; color: var(--champagne); padding-top: 16px; border-bottom: 1px solid var(--hairline); }
+.theme-e .doc-table .section-row .num { margin-right: 6px; }
+.theme-e .doc-table .subtotal-row td { font-weight: 600; background: var(--ivory-dim); }
+.theme-e .doc-table .total-row td { font-family: var(--serif); font-weight: 700; font-size: 14px; background: var(--ink); color: #fff; padding: 12px 6px; }
+
+.theme-e .doc-remarks { margin-top: 24px; padding: 14px 16px; border: 1px solid var(--hairline); background: var(--ivory-dim); font-size: 11.5px; }
+.theme-e .doc-remarks .rmk-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--champagne); margin-bottom: 6px; }
+
+.theme-e .doc-footer { text-align: center; margin-top: 40px; font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
+.theme-e .doc-footer .divider { margin: 0 10px; color: var(--champagne); }
+/* ============================================
+   인쇄 전용 스타일
+   ============================================ */
+@media print {
+  /* 1) 화면 전체를 일단 숨긴다 */
+  body * {
+    visibility: hidden;
+  }
+
+  /* 2) 견적서 문서 영역만 다시 보이게 한다 */
+  .quote-doc,
+  .quote-doc * {
+    visibility: visible;
+  }
+
+  /* 3) 모달 컨테이너들의 fixed/overflow 제약을 풀어준다 */
+  .modal-overlay {
+    position: static !important;
+    background: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .modal-box {
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  /* 4) 문서 자체를 페이지 좌상단에 절대 배치 */
+  .quote-doc {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none;
+    padding: 20px 30px;
+    background: #fff !important;
+  }
+
+  /* 5) 인쇄에 불필요한 버튼/닫기 아이콘 등은 숨김 */
+  .modal-close,
+  .action-panel,
+  .tab-bar,
+  .filter-bar,
+  .btn-primary,
+  .btn-secondary {
+    display: none !important;
+  }
+
+  /* 6) 배경색이 인쇄되도록 강제 (일부 브라우저는 기본적으로 배경 인쇄를 생략함) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
