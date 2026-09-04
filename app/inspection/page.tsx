@@ -133,7 +133,7 @@ export default function InspectionPage() {
       if (error) { console.error(error); return; }
       setSites((data || []).map((s: any) => ({
         id: s.id,
-        name: s.site_name || s.name || '',
+         name: s.name || s.site_name || '',   // ← name을 우선 사용
         address: s.address || '',
         team: s.team || '',
         lat: s.lat,

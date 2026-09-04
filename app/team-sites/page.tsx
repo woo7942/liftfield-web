@@ -568,6 +568,7 @@ export default function TeamSitesPage() {
         .from('sites')
         .insert({
           name: addForm.name,
+          site_name: addForm.name,   // ← 추가
           address: addForm.address || '',
           lat: coords?.lat ?? null,
           lng: coords?.lng ?? null,
@@ -668,6 +669,7 @@ export default function TeamSitesPage() {
         .from('sites')
         .update({
           name: editForm.name,
+          site_name: editForm.name,   // ← 추가: name과 항상 동일하게 동기화
           address: editForm.address || '',
           ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
           phones: cleanedPhones,

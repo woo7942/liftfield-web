@@ -107,12 +107,12 @@ export default function InspectPage() {
         if (sitesError) throw sitesError;
 
         const mapped = (allSites || []).map((s: any) => ({
-          id: s.id,
-          siteName: s.site_name,
-          name: s.name,
-          source: s.source,
-          teamName: s.team,
-        }));
+  id: s.id,
+  siteName: s.name || s.site_name,   // ← name을 우선 사용
+  name: s.name,
+  source: s.source,
+  teamName: s.team,
+}));
 
         const isAdmin = userData.role === 'admin' || userData.super_admin === true;
 
