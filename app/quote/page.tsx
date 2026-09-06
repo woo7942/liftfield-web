@@ -3,6 +3,9 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { C, Icon } from '@/lib/theme';
+import TabBar from '@/components/TabBar';
+
 
 interface MaterialItem {
   name: string;
@@ -439,12 +442,13 @@ export default function QuotePage() {
   const inclOverhead = selectedQuote?.items?.includeOverhead !== false;
   const inclProfit = selectedQuote?.items?.includeProfit !== false;
 
-  return (
-    <div className="theme-e">
-      <div className="page-frame">
+    return (
+    <>
+      <div className="theme-e" style={{ paddingBottom: 110 }}>
+        <div className="page-frame">
 
-        {/* ===== 브랜드 헤더 ===== */}
-        <div className="brand-header">
+          {/* ===== 브랜드 헤더 ===== */}
+          <div className="brand-header">
           <ElevatorLogo size={40} />
           <div>
             <div className="brand-title">{company?.company_name || '견 적 서 관 리'}</div>
@@ -988,11 +992,15 @@ export default function QuotePage() {
         </div>
       )}
 
-      <style>{`
-        input[type=number]::-webkit-outer-spin-button,
-        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        input[type=number] { -moz-appearance: textfield; }
-      `}</style>
-    </div>
+              <style>{`
+          input[type=number]::-webkit-outer-spin-button,
+          input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+          input[type=number] { -moz-appearance: textfield; }
+        `}</style>
+      </div>
+
+      <TabBar active="quote" />
+    </>
   );
 }
+

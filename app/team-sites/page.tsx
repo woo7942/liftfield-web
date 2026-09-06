@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { C, Icon } from '@/lib/theme';
+import TabBar from '@/components/TabBar';
 
 // ─── 타입 정의 ───
 interface UserInfo {
@@ -166,6 +168,9 @@ function openNavigation(site: { name?: string; address?: string; lat?: number; l
     window.open(`https://map.kakao.com/link/search/${encodeURIComponent(site.address)}`, '_blank');
   }
 }
+
+// 🏢 호기 정렬용 숫자 추출 (동/공용 동일 규칙)
+const getHogiNum = (h?: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
 
 export default function TeamSitesPage() {
   const router = useRouter();
@@ -360,7 +365,6 @@ export default function TeamSitesPage() {
 
       if (error) throw error;
 
-      const getHogiNum = (h: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
       const sorted = (data || []).sort((a: any, b: any) => {
         if ((a.dong || '') !== (b.dong || '')) return (a.dong || '').localeCompare(b.dong || '', 'ko', { numeric: true });
         return getHogiNum(a.hogi_no) - getHogiNum(b.hogi_no);
@@ -390,6 +394,20 @@ export default function TeamSitesPage() {
       setElevatorsLoading(false);
     }
   }
+
+  // 🏢 선택된 현장의 호기를 동별로 그룹핑 (InspectionPage / FaultPage와 동일 규칙)
+  const groupedSiteElevators = useMemo(() => {
+    const map: Record<string, ElevatorItem[]> = {};
+    siteElevators.forEach(e => {
+      const key = e.dong && e.dong.trim() ? e.dong : '동 미지정';
+      if (!map[key]) map[key] = [];
+      map[key].push(e);
+    });
+    Object.values(map).forEach(arr =>
+      arr.sort((a, b) => getHogiNum(a.hogiNo) - getHogiNum(b.hogiNo))
+    );
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true }));
+  }, [siteElevators]);
 
   async function searchElevatorCache() {
     const rawQ = (addForm.address || '').trim();
@@ -544,7 +562,7 @@ export default function TeamSitesPage() {
 
   function SortIcon({ k }: { k: SortKey }) {
     if (sortKey !== k) return <span className="text-gray-300 ml-1">↕</span>;
-    return <span className="text-blue-500 ml-1">{sortAsc ? '↑' : '↓'}</span>;
+    return <span style={{ color: C.primary }} className="ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
 
   // ─── 현장 추가 ───
@@ -724,56 +742,78 @@ export default function TeamSitesPage() {
   }
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <p className="text-gray-500">로딩 중...</p>
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ color: C.inkDim, fontSize: 16 }}>로딩 중...</div>
     </div>
   );
 
   const emptyColSpan = canEdit ? 8 : 7;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* 헤더 */}
-      <header className="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <button onClick={() => router.push('/dashboard')} className="text-gray-500 hover:text-gray-700 text-lg">←</button>
-          <h1 className="font-bold text-lg">🏢 팀별 현장</h1>
-          <span className="text-sm text-gray-400">({filteredSites.length}개)</span>
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.ink, paddingBottom: 130 }}>
+      {/* 상단 헤더 (메인화면 스타일) */}
+      <div style={{ padding: '24px 20px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            onClick={() => router.push('/work')}
+            style={{
+              width: 40, height: 40, borderRadius: 12, background: C.primary, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 4px 12px ${C.primary}44`, cursor: 'pointer',
+            }}
+          >
+            {Icon.building(18)}
+
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>팀별 현장</div>
+            <div style={{ fontSize: 11, color: C.inkDim, fontWeight: 600 }}>
+              총 {filteredSites.length}개 현장
+            </div>
+          </div>
         </div>
         {canAddSite && (
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setAddForm(canEdit ? {} : { teamName: userInfo?.team || '' });
-                setCacheResults([]);
-                setCacheGrouped([]);
-                setSelectedCacheKeys(new Set());
-                setShowAddModal(true);
-              }}
-              className="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium"
-            >
-              + 추가
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              setAddForm(canEdit ? {} : { teamName: userInfo?.team || '' });
+              setCacheResults([]);
+              setCacheGrouped([]);
+              setSelectedCacheKeys(new Set());
+              setShowAddModal(true);
+            }}
+            style={{
+              padding: '9px 16px', borderRadius: 12, background: C.primary, color: '#fff',
+              fontSize: 13, fontWeight: 800, border: 'none', cursor: 'pointer',
+              boxShadow: `0 4px 12px ${C.primary}44`,
+            }}
+          >
+            + 추가
+          </button>
         )}
-      </header>
+      </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-4">
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 16px' }}>
 
         {/* 검색 + 필터 */}
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           <input
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
             placeholder="현장명, 팀명, 담당자, 전화번호, 비통번호 검색..."
-            className="flex-1 min-w-48 border rounded-xl px-3 py-2 text-sm bg-white"
+            style={{
+              flex: 1, minWidth: 200, padding: '10px 12px', borderRadius: 10,
+              border: `1px solid ${C.line}`, fontSize: 13, outline: 'none', background: C.surface, color: C.ink,
+            }}
           />
           {canEdit && (
             <>
               <select
                 value={selectedTeam}
                 onChange={e => setSelectedTeam(e.target.value)}
-                className="border rounded-xl px-3 py-2 text-sm bg-white"
+                style={{
+                  padding: '10px 12px', borderRadius: 10, border: `1px solid ${C.line}`,
+                  fontSize: 13, background: C.surface, color: C.ink,
+                }}
               >
                 <option value="전체">전체 팀</option>
                 {teams.map(t => <option key={t} value={t}>{t}</option>)}
@@ -782,7 +822,10 @@ export default function TeamSitesPage() {
               <select
                 value={selectedContractType}
                 onChange={e => setSelectedContractType(e.target.value)}
-                className="border rounded-xl px-3 py-2 text-sm bg-white"
+                style={{
+                  padding: '10px 12px', borderRadius: 10, border: `1px solid ${C.line}`,
+                  fontSize: 13, background: C.surface, color: C.ink,
+                }}
               >
                 <option value="전체">전체 계약종류</option>
                 {contractTypeOptions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -790,9 +833,13 @@ export default function TeamSitesPage() {
 
               <button
                 onClick={() => setGroupByContract(!groupByContract)}
-                className={`text-sm px-3 py-2 rounded-xl border ${
-                  groupByContract ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-600'
-                }`}
+                style={{
+                  fontSize: 13, padding: '9px 14px', borderRadius: 10,
+                  border: groupByContract ? `1px solid ${C.primary}` : `1px solid ${C.line}`,
+                  background: groupByContract ? C.primary : C.surface,
+                  color: groupByContract ? '#fff' : C.inkDim,
+                  fontWeight: 700, cursor: 'pointer',
+                }}
               >
                 📂 계약종류별 모아보기
               </button>
@@ -801,47 +848,47 @@ export default function TeamSitesPage() {
         </div>
 
         {/* 테이블 */}
-        <div className="bg-white rounded-xl border overflow-hidden">
+        <div style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.line}`, overflow: 'hidden' }}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1000px] text-sm table-fixed">
 
               <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-56">
-                    <button onClick={() => handleSort('name')} className="flex items-center hover:text-blue-600">
+                <tr style={{ background: C.bg, borderBottom: `1px solid ${C.line}` }}>
+                  <th className="text-left px-3 py-2.5 font-semibold whitespace-nowrap w-56" style={{ color: C.inkDim }}>
+                    <button onClick={() => handleSort('name')} className="flex items-center">
                       현장명 <SortIcon k="name" />
                     </button>
                   </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">
-                    <button onClick={() => handleSort('teamName')} className="flex items-center justify-center hover:text-blue-600">
+                  <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-20" style={{ color: C.inkDim }}>
+                    <button onClick={() => handleSort('teamName')} className="flex items-center justify-center">
                       팀 <SortIcon k="teamName" />
                     </button>
                   </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">
-                    <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center hover:text-blue-600">
+                  <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-16" style={{ color: C.inkDim }}>
+                    <button onClick={() => handleSort('elevatorCount')} className="flex items-center justify-center">
                       대수 <SortIcon k="elevatorCount" />
                     </button>
                   </th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-20">담당자</th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">전화번호</th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-32">비통번호</th>
-                  <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-28">
-                    <button onClick={() => handleSort('contractType')} className="flex items-center justify-center hover:text-blue-600">
+                  <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-20" style={{ color: C.inkDim }}>담당자</th>
+                  <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-32" style={{ color: C.inkDim }}>전화번호</th>
+                  <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-32" style={{ color: C.inkDim }}>비통번호</th>
+                  <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-28" style={{ color: C.inkDim }}>
+                    <button onClick={() => handleSort('contractType')} className="flex items-center justify-center">
                       계약종류 <SortIcon k="contractType" />
                     </button>
                   </th>
-                  {canEdit && <th className="text-center px-3 py-2.5 font-semibold text-gray-600 whitespace-nowrap w-16">관리</th>}
+                  {canEdit && <th className="text-center px-3 py-2.5 font-semibold whitespace-nowrap w-16" style={{ color: C.inkDim }}>관리</th>}
                 </tr>
               </thead>
 
               <tbody>
                 {filteredSites.length === 0 ? (
                   <tr>
-                    <td colSpan={emptyColSpan} className="text-center py-16 text-gray-400">
+                    <td colSpan={emptyColSpan} className="text-center py-16" style={{ color: C.inkFaint }}>
                       <p className="text-3xl mb-2">🏢</p>
                       {canEdit && selectedTeam !== '전체' ? (
                         <>
-                          <p className="text-gray-500">{selectedTeam}에 배정된 현장이 없어요</p>
+                          <p style={{ color: C.inkDim }}>{selectedTeam}에 배정된 현장이 없어요</p>
                           <p className="text-xs mt-1">+ 추가 버튼으로 배정하거나, 기존 현장을 수정해 팀을 바꿀 수 있어요</p>
                         </>
                       ) : (
@@ -852,8 +899,8 @@ export default function TeamSitesPage() {
                 ) : groupByContract ? (
                   groupKeys.map(key => (
                     <React.Fragment key={key}>
-                      <tr className="bg-blue-50 border-b">
-                        <td colSpan={emptyColSpan} className="px-3 py-2 font-semibold text-blue-700 text-sm">
+                      <tr style={{ background: `${C.primary}10`, borderBottom: `1px solid ${C.line}` }}>
+                        <td colSpan={emptyColSpan} className="px-3 py-2 font-semibold text-sm" style={{ color: C.primary }}>
                           📂 {key} — {groupedByContract[key].length}개 현장 /{' '}
                           {groupedByContract[key].reduce((sum, s) => sum + (s.elevatorCount || 0), 0)}대 / 보수료{' '}
                           {groupedByContract[key].reduce((sum, s) => sum + (s.maintenanceFee || 0), 0).toLocaleString()}원
@@ -879,10 +926,10 @@ export default function TeamSitesPage() {
 
           {/* 하단 합계 */}
           {filteredSites.length > 0 && (
-            <div className="bg-gray-50 border-t px-3 py-2 flex gap-4 text-xs text-gray-500">
-              <span>총 <strong className="text-gray-700">{filteredSites.length}</strong>개 현장</span>
-              <span>승강기 <strong className="text-gray-700">{filteredElevatorCount}</strong>대</span>
-              <span>보수료 <strong className="text-gray-700">{filteredFeeSum.toLocaleString()}</strong>원</span>
+            <div style={{ background: C.bg, borderTop: `1px solid ${C.line}`, padding: '10px 12px', display: 'flex', gap: 16, fontSize: 12, color: C.inkDim }}>
+              <span>총 <strong style={{ color: C.ink }}>{filteredSites.length}</strong>개 현장</span>
+              <span>승강기 <strong style={{ color: C.ink }}>{filteredElevatorCount}</strong>대</span>
+              <span>보수료 <strong style={{ color: C.ink }}>{filteredFeeSum.toLocaleString()}</strong>원</span>
             </div>
           )}
         </div>
@@ -1186,7 +1233,7 @@ export default function TeamSitesPage() {
                   )}
                 </div>
 
-                {/* 호기 목록 */}
+                {/* 호기 목록 (동별 그룹핑) */}
                 <div className="mt-4">
                   <h3 className="font-semibold text-sm text-gray-700 mb-2">
                     🔧 호기 목록 ({siteElevators.length}대)
@@ -1196,55 +1243,66 @@ export default function TeamSitesPage() {
                   ) : siteElevators.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-3">등록된 호기가 없어요</p>
                   ) : (
-                    <div className="space-y-1.5">
-                      {siteElevators.map(elev => {
-                        const isOpen = expandedElevatorId === elev.id;
-                        return (
-                          <div key={elev.id} className="bg-gray-50 rounded-xl overflow-hidden">
-                            <button
-                              type="button"
-                              onClick={() => setExpandedElevatorId(isOpen ? null : elev.id)}
-                              className="w-full px-3 py-2 text-sm flex justify-between items-center"
-                            >
-                              <span className="font-medium text-left">
-                                {elev.dong ? `${elev.dong} ` : ''}{elev.hogiNo || elev.id}
-                              </span>
-                              <span className="flex items-center gap-2">
-                                <span className="text-gray-500 text-xs">{elev.type || '-'}</span>
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                  elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                                }`}>
-                                  {elev.status || '-'}
-                                </span>
-                                <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
-                              </span>
-                            </button>
+                    <div className="space-y-3">
+                      {groupedSiteElevators.map(([dong, list]) => (
+                        <div key={dong} className="space-y-1.5">
+                          {dong !== '동 미지정' && (
+                            <p className="text-[11px] font-bold text-indigo-500 px-1">📍 {dong}</p>
+                          )}
+                          {list.map(elev => {
+                            const isOpen = expandedElevatorId === elev.id;
+                            const hogiDisplay = elev.installationPlace
+                              ? `(${elev.installationPlace})`
+                              : (elev.hogiNo || elev.id);
+                            return (
+                              <div key={elev.id} className="bg-gray-50 rounded-xl overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedElevatorId(isOpen ? null : elev.id)}
+                                  className="w-full px-3 py-2 text-sm flex justify-between items-center"
+                                >
+                                  <span className="font-medium text-left">
+                                    {hogiDisplay}
+                                  </span>
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-gray-500 text-xs">{elev.type || '-'}</span>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                      elev.status === '정상' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                                    }`}>
+                                      {elev.status || '-'}
+                                    </span>
+                                    <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
+                                  </span>
+                                </button>
 
-                            {isOpen && (
-                              <div className="px-3 pb-3 pt-1 text-xs text-gray-600 space-y-1 border-t border-gray-200">
-                                {[
-                                  { label: '모델', value: elev.model },
-                                  { label: '제조사', value: elev.manufacturer },
-                                  { label: '관리업체', value: elev.mntCompany },
-                                  { label: '하도급업체', value: elev.subCompany },
-                                  { label: '정원/적재하중', value: elev.liveLoad },
-                                  { label: '정격속도', value: elev.ratedSpeed },
-                                  { label: '운행구간', value: elev.shuttleSection },
-                                  { label: '설치장소', value: elev.installationPlace },
-                                  { label: '설치일', value: elev.installDate },
-                                  { label: '최근 검사일', value: elev.inspectionDate },
-                                  { label: '최근 검사결과', value: elev.lastResult },
-                                ].filter(i => i.value).map(({ label, value }) => (
-                                  <div key={label} className="flex justify-between py-0.5">
-                                    <span className="text-gray-400">{label}</span>
-                                    <span className="font-medium text-gray-700">{value}</span>
+                                {isOpen && (
+                                  <div className="px-3 pb-3 pt-1 text-xs text-gray-600 space-y-1 border-t border-gray-200">
+                                    {[
+                                      { label: '호기', value: elev.hogiNo },
+                                      { label: '모델', value: elev.model },
+                                      { label: '제조사', value: elev.manufacturer },
+                                      { label: '관리업체', value: elev.mntCompany },
+                                      { label: '하도급업체', value: elev.subCompany },
+                                      { label: '정원/적재하중', value: elev.liveLoad },
+                                      { label: '정격속도', value: elev.ratedSpeed },
+                                      { label: '운행구간', value: elev.shuttleSection },
+                                      { label: '설치장소', value: elev.installationPlace },
+                                      { label: '설치일', value: elev.installDate },
+                                      { label: '최근 검사일', value: elev.inspectionDate },
+                                      { label: '최근 검사결과', value: elev.lastResult },
+                                    ].filter(i => i.value).map(({ label, value }) => (
+                                      <div key={label} className="flex justify-between py-0.5">
+                                        <span className="text-gray-400">{label}</span>
+                                        <span className="font-medium text-gray-700">{value}</span>
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
+                                )}
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                            );
+                          })}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1359,6 +1417,8 @@ export default function TeamSitesPage() {
         </div>
         );
       })()}
+
+      <TabBar active="sites" />
     </div>
   );
 }

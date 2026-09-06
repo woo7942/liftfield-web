@@ -3,125 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-
-// ── 팔레트 ──────────────────────────────
-const C = {
-  bg: "#f3f5f9",
-  surface: "#ffffff",
-  ink: "#0f172a",
-  inkSoft: "#334155",
-  inkDim: "#64748b",
-  inkFaint: "#94a3b8",
-  line: "#e2e8f0",
-  primary: "#2563eb",
-  primaryDeep: "#1e40af",
-  primaryLight: "#dbeafe",
-  red: "#dc2626",
-  amber: "#d97706",
-  green: "#059669",
-  purple: "#7c3aed",
-  mono: "'Space Mono', monospace",
-};
-
-// ── 안전 필드 선택 헬퍼 (컬럼명 확정 전인 테이블용) ──
-function pick(obj: any, candidates: string[], fallback: any = "") {
-  if (!obj) return fallback;
-  for (const key of candidates) {
-    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
-  }
-  return fallback;
-}
-
-// ── 인라인 아이콘 ───────────────────────
-const Icon = {
-  wrench: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
-    </svg>
-  ),
-  box: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 8L12 3 3 8l9 5 9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" />
-    </svg>
-  ),
-  clipboard: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="6" y="4" width="12" height="16" rx="2" /><path d="M9 4V2h6v2" />
-    </svg>
-  ),
-  building: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="4" y="3" width="16" height="18" /><path d="M9 21v-4h6v4M9 7h.01M15 7h.01M9 11h.01M15 11h.01" />
-    </svg>
-  ),
-  alert: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.2 18a2 2 0 001.7 3h16.2a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
-    </svg>
-  ),
-  clock: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" />
-    </svg>
-  ),
-  bell: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 01-3.4 0" />
-    </svg>
-  ),
-   logout: (s = 16) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-      <path d="M16 17l5-5-5-5" />
-      <path d="M21 12H9" />
-    </svg>
-  ),
-  chevronRight: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  ),
-  settings: (s = 16) => (
-  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-  </svg>
-),
-
-  home: (s = 20) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 12l9-9 9 9" /><path d="M5 10v10h14V10" />
-    </svg>
-  ),
-  fileText: (s = 20) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" />
-    </svg>
-  ),
-  tool: (s = 20) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
-    </svg>
-  ),
-};
-
-// ── 유틸 함수 ───────────────────────────
-function parseYmd(ymd: string): Date {
-  return new Date(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8)));
-}
-function dDay(ymd: string): number {
-  const due = parseYmd(ymd);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.floor((due.getTime() - today.getTime()) / 86400000);
-}
-function timeAgo(iso: string): string {
-  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (min < 60) return `${min}분 전`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
-}
+import { C, Icon, pick, parseYmd, dDay, timeAgo } from "@/lib/theme";
+import TabBar from "@/components/TabBar";
 
 // ── 도넛 차트 ───────────────────────────
 function Donut({
@@ -505,66 +388,6 @@ function MaterialItemRow({ m, onClick }: { m: any; onClick: () => void }) {
   );
 }
 
-// ── 하단 탭바 ───────────────────────────
-const TABS = [
-  { key: "home", path: "/work", icon: Icon.home },
-  { key: "sites", path: "/team-sites", icon: Icon.building },
-  { key: "fault", path: "/fault", icon: Icon.wrench },
-  { key: "inspection", path: "/inspection", icon: Icon.tool },
-  { key: "inspect", path: "/inspect", icon: Icon.clipboard },
-  { key: "material", path: "/material", icon: Icon.box },
-  { key: "quote", path: "/quote", icon: Icon.fileText },
-];
-
-
-function TabBar({ active, router }: { active: string; router: ReturnType<typeof useRouter> }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 14,
-        left: 14,
-        right: 14,
-        maxWidth: 480,
-        margin: "0 auto",
-        background: "#fff",
-        borderRadius: 20,
-        padding: "10px 6px",
-        display: "flex",
-        justifyContent: "space-around",
-        zIndex: 40,
-        boxShadow: "0 8px 24px rgba(15,23,42,0.12), 0 2px 6px rgba(15,23,42,0.06)",
-        border: `1px solid ${C.line}`,
-      }}
-    >
-      {TABS.map((t) => {
-        const isActive = t.key === active;
-        return (
-          <div
-            key={t.key}
-            onClick={() => router.push(t.path)}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: isActive ? C.primary : "transparent",
-              color: isActive ? "#fff" : C.inkDim,
-              cursor: "pointer",
-              transition: "all .18s ease",
-              boxShadow: isActive ? `0 4px 12px ${C.primary}55` : "none",
-            }}
-          >
-            {t.icon(20)}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── 메인 페이지 ─────────────────────────
 export default function WorkPage() {
   const router = useRouter();
@@ -585,7 +408,6 @@ export default function WorkPage() {
     const { data: authData } = await supabase.auth.getUser();
     const uid = authData?.user?.id;
     if (!uid) return;
-      
 
     // 1) 로그인 사용자 정보
     const { data: userData, error: userErr } = await supabase.from("users").select("*").eq("id", uid).single();
@@ -625,7 +447,6 @@ export default function WorkPage() {
     setMaterials(pendingMaterials);
 
     // 4) 현장 목록(팀 기준) → 검사 필터 및 담당 현장 수
-    // sites 테이블은 team 컬럼에 팀 이름 문자열을 직접 저장하고 있음
     const userTeamName = pick(userData, ["team"], "");
     const userCompanyId = pick(userData, ["company_id"], null);
 
@@ -657,12 +478,10 @@ export default function WorkPage() {
         .select("id, site_name, hogi_no, applc_en_dt, site_id")
         .in("site_id", siteIds);
 
-            if (inspErr) {
+      if (inspErr) {
         console.error("INSPECT QUERY ERROR:", inspErr.message);
         setInspects([]);
       } else {
-        // 같은 현장 + 같은 호기의 검사 기록이 여러 건 있을 수 있으므로,
-        // "site_id + hogi_no" 기준으로 묶어서 가장 최신(applc_en_dt가 가장 큰) 1건만 남긴다.
         const latestByKey = new Map<string, any>();
         (inspectData ?? []).forEach((row: any) => {
           const key = `${row.site_id}_${row.hogi_no ?? ""}`;
@@ -690,15 +509,14 @@ export default function WorkPage() {
 
         setInspects(filtered.slice(0, 30));
       }
-
     }
   }
 
   async function handleLogout() {
-  if (!confirm("로그아웃 하시겠습니까?")) return;
-  await supabase.auth.signOut();
-  router.push("/login");
-}
+    if (!confirm("로그아웃 하시겠습니까?")) return;
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   const urgentCount = faults.filter((f) => {
     const created = pick(f, ["created_at"], new Date().toISOString());
@@ -742,44 +560,42 @@ export default function WorkPage() {
             </div>
           </div>
         </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-  <div
-    onClick={() => router.push('/settings')}
-    style={{
-      width: 40,
-      height: 40,
-      borderRadius: 12,
-      background: "#fff",
-      border: `1px solid ${C.line}`,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: C.inkDim,
-      cursor: "pointer",
-    }}
-  >
-    {Icon.settings(18)}
-  </div>
-  <div
-    onClick={handleLogout}
-    style={{
-      width: 40,
-      height: 40,
-      borderRadius: 12,
-      background: "#fff",
-      border: `1px solid ${C.line}`,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: C.red,
-      cursor: "pointer",
-    }}
-  >
-    {Icon.logout(18)}
-  </div>
-</div>
-
-
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            onClick={() => router.push('/settings')}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: "#fff",
+              border: `1px solid ${C.line}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: C.inkDim,
+              cursor: "pointer",
+            }}
+          >
+            {Icon.settings(18)}
+          </div>
+          <div
+            onClick={handleLogout}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: "#fff",
+              border: `1px solid ${C.line}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: C.red,
+              cursor: "pointer",
+            }}
+          >
+            {Icon.logout(18)}
+          </div>
+        </div>
       </div>
 
       <div style={{ maxWidth: 480, margin: "0 auto" }}>
@@ -827,7 +643,7 @@ export default function WorkPage() {
         </div>
       </div>
 
-      <TabBar active="home" router={router} />
+      <TabBar active="home" />
     </div>
   );
 }

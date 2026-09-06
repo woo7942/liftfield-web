@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { C, Icon } from '@/lib/theme';
+import TabBar from '@/components/TabBar';
 
 // ✅ 상태 흐름: 신청중 → 분출(발송) → 수령완료 → 교체완료
 const STATUS_STYLE: Record<string, { bg: string; text: string; border: string; label: string }> = {
@@ -419,205 +421,281 @@ export default function MaterialPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">자재신청 내역 불러오는 중...</div>
+      <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: C.inkDim, fontSize: 14 }}>자재신청 내역 불러오는 중...</div>
       </div>
     );
   }
 
   return (
-    <div className="p-4 max-w-7xl mx-auto">
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.ink, paddingBottom: 130 }}>
       {/* 헤더 */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">자재신청 관리</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setRegisterModal(true)}
-            className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-semibold hover:bg-amber-600"
-          >
-            + 자재신청하기
-          </button>
-          <button
-            onClick={() => setPdfModal(true)}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
-          >
-            📄 PDF 출력
-          </button>
-        </div>
-      </div>
+      <header
+        className="sticky top-0 z-10"
+        style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}
+      >
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                background: C.primaryLight,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: C.primary,
+              }}
+            >
+              {Icon.box(18)}
+            </div>
+            <div>
+              <h1 style={{ fontSize: 17, fontWeight: 800, color: C.ink }}>자재신청 관리</h1>
+              <p style={{ fontSize: 12, color: C.inkDim, marginTop: 2 }}>
+                신청부터 교체완료까지 한눈에 확인하세요
+              </p>
+            </div>
+          </div>
 
-      {/* 상태 요약 카드 */}
-      <div className="grid grid-cols-5 gap-3 mb-6">
-        {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
-          const cnt = requests.filter(r => r.status === s).length;
-          const style = STATUS_STYLE[s];
-          return (
-            <button key={s}
-              onClick={() => { setStatusFilter(s === statusFilter ? '전체' : s); setPage(1); }}
-              className={`p-3 rounded-xl border-2 text-center transition-all ${
-                statusFilter === s
-                  ? `${style.bg} ${style.border} ${style.text}`
-                  : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
-              }`}>
-              <div className="text-2xl font-bold">{cnt}</div>
-              <div className="text-xs mt-1">{style.label}</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setRegisterModal(true)}
+              style={{
+                padding: '9px 16px',
+                borderRadius: 10,
+                background: C.amber,
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              + 자재신청하기
             </button>
-          );
-        })}
-      </div>
+            <button
+              onClick={() => setPdfModal(true)}
+              style={{
+                padding: '9px 16px',
+                borderRadius: 10,
+                background: C.bg,
+                border: `1px solid ${C.line}`,
+                color: C.inkSoft,
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              📄 PDF 출력
+            </button>
+          </div>
+        </div>
+      </header>
 
-      {/* 필터 */}
-      <div className="flex flex-wrap gap-3 mb-4">
-        <input
-          type="text"
-          placeholder="현장명, 자재명, 호기, 신청자 검색"
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-72"
-        />
-        <select
-          value={statusFilter}
-          onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-        >
-          <option value="전체">전체 상태</option>
-          {Object.entries(STATUS_STYLE).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
-        </select>
-        <select
-          value={teamFilter}
-          onChange={e => { setTeamFilter(e.target.value); setPage(1); }}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-        >
-          {teams.map(t => <option key={t} value={t}>{t === '전체' ? '전체 팀' : t}</option>)}
-        </select>
-        <span className="ml-auto text-sm text-gray-500 self-center">
-          총 {filtered.length}건
-        </span>
-      </div>
-
-      {/* 테이블 */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <table className="w-full text-sm min-w-[820px]">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">신청일</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">현장 / 호기</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">자재명</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">수량</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">신청자</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">상태</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">처리</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {paginated.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
-                  자재신청 내역이 없습니다.
-                </td>
-              </tr>
-            ) : paginated.map(item => {
-              const style = STATUS_STYLE[item.status] || STATUS_STYLE['신청중'];
-              return (
-                <tr key={item.id} className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setDetailItem(item)}>
-                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
-                    {item.request_at ? item.request_at.slice(0, 10) : item.created_at?.slice(0, 10)}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="font-medium text-gray-900">{item.site_name}</div>
-                    <div className="text-xs text-gray-400 flex items-center gap-1 flex-wrap mt-0.5">
-                      <span>{formatHogi(item.hogi_no)}</span>
-                      {item.team && <span>· {item.team}</span>}
-                      {item.contract_type && (
-                        <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[10px] font-medium">
-                          {item.contract_type}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="font-medium text-gray-900">{item.material_name}</div>
-                    {item.spec && <div className="text-xs text-gray-400">{item.spec}</div>}
-                    {item.part_number && <div className="text-xs text-gray-400">P/N: {item.part_number}</div>}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-amber-600 whitespace-nowrap">
-                    {item.quantity}{item.unit}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{item.requester_name || '-'}</td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${style.bg} ${style.text} ${style.border}`}>
-                      {style.label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                    {item.status === '신청중' && userInfo?.role === 'admin' && (
-                      <button
-                        onClick={() => handleStatusChange(item, '접수')}
-                        className="px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 whitespace-nowrap"
-                      >
-                        ✅ 접수처리
-                      </button>
-                    )}
-                    {item.status === '접수' && (
-                      <button
-                        onClick={() => handleStatusChange(item, '수령')}
-                        className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 whitespace-nowrap"
-                      >
-                        📥 수령처리
-                      </button>
-                    )}
-                    {item.status === '수령' && (
-                      <button
-                        onClick={() => handleStatusChange(item, '교체완료')}
-                        className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 whitespace-nowrap"
-                      >
-                        🔧 교체완료 처리
-                      </button>
-                    )}
-                    {item.status === '교체완료' && (
-                      <span className="text-xs text-blue-600 font-medium whitespace-nowrap">
-                        교체완료{' '}
-                        <span className="text-gray-400">{item.replaced_at ? item.replaced_at.slice(0,10) : ''}</span>
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* 페이지네이션 */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 mt-4">
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-            className="px-3 py-1 rounded border text-sm disabled:opacity-40">이전</button>
-          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-            const p = Math.max(1, Math.min(page - 2, totalPages - 4)) + i;
+      <div className="p-4 max-w-7xl mx-auto">
+        {/* 상태 요약 카드 */}
+        <div className="grid grid-cols-5 gap-3 mb-6">
+          {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
+            const cnt = requests.filter(r => r.status === s).length;
+            const style = STATUS_STYLE[s];
+            const active = statusFilter === s;
             return (
-              <button key={p} onClick={() => setPage(p)}
-                className={`px-3 py-1 rounded border text-sm ${page === p ? 'bg-amber-500 text-white border-amber-500' : ''}`}>
-                {p}
+              <button
+                key={s}
+                onClick={() => { setStatusFilter(s === statusFilter ? '전체' : s); setPage(1); }}
+                className={`p-3 rounded-xl border-2 text-center transition-all ${
+                  active ? `${style.bg} ${style.border} ${style.text}` : ''
+                }`}
+                style={!active ? { background: C.surface, borderColor: C.line, color: C.inkDim } : undefined}
+              >
+                <div className="text-2xl font-bold">{cnt}</div>
+                <div className="text-xs mt-1">{style.label}</div>
               </button>
             );
           })}
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-            className="px-3 py-1 rounded border text-sm disabled:opacity-40">다음</button>
         </div>
-      )}
+
+        {/* 필터 */}
+        <div className="flex flex-wrap gap-3 mb-4">
+          <input
+            type="text"
+            placeholder="현장명, 자재명, 호기, 신청자 검색"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            className="px-3 py-2 rounded-lg text-sm w-72"
+            style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
+          />
+          <select
+            value={statusFilter}
+            onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+            className="px-3 py-2 rounded-lg text-sm"
+            style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
+          >
+            <option value="전체">전체 상태</option>
+            {Object.entries(STATUS_STYLE).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+          <select
+            value={teamFilter}
+            onChange={e => { setTeamFilter(e.target.value); setPage(1); }}
+            className="px-3 py-2 rounded-lg text-sm"
+            style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
+          >
+            {teams.map(t => <option key={t} value={t}>{t === '전체' ? '전체 팀' : t}</option>)}
+          </select>
+          <span className="ml-auto text-sm self-center" style={{ color: C.inkDim }}>
+            총 {filtered.length}건
+          </span>
+        </div>
+
+        {/* 테이블 */}
+        <div className="rounded-xl overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <table className="w-full text-sm min-w-[820px]">
+            <thead style={{ background: C.bg }}>
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>신청일</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>현장 / 호기</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>자재명</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>수량</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>신청자</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>상태</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap" style={{ color: C.inkDim }}>처리</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y" style={{ borderColor: C.line }}>
+              {paginated.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center" style={{ color: C.inkFaint }}>
+                    자재신청 내역이 없습니다.
+                  </td>
+                </tr>
+              ) : paginated.map(item => {
+                const style = STATUS_STYLE[item.status] || STATUS_STYLE['신청중'];
+                return (
+                  <tr
+                    key={item.id}
+                    className="cursor-pointer"
+                    style={{ transition: 'background 0.15s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = C.bg)}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    onClick={() => setDetailItem(item)}
+                  >
+                    <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: C.inkDim }}>
+                      {item.request_at ? item.request_at.slice(0, 10) : item.created_at?.slice(0, 10)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="font-medium" style={{ color: C.ink }}>{item.site_name}</div>
+                      <div className="text-xs flex items-center gap-1 flex-wrap mt-0.5" style={{ color: C.inkFaint }}>
+                        <span>{formatHogi(item.hogi_no)}</span>
+                        {item.team && <span>· {item.team}</span>}
+                        {item.contract_type && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{ background: C.bg, color: C.inkDim }}
+                          >
+                            {item.contract_type}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="font-medium" style={{ color: C.ink }}>{item.material_name}</div>
+                      {item.spec && <div className="text-xs" style={{ color: C.inkFaint }}>{item.spec}</div>}
+                      {item.part_number && <div className="text-xs" style={{ color: C.inkFaint }}>P/N: {item.part_number}</div>}
+                    </td>
+                    <td className="px-4 py-3 font-semibold whitespace-nowrap" style={{ color: C.amber }}>
+                      {item.quantity}{item.unit}
+                    </td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: C.inkDim }}>{item.requester_name || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${style.bg} ${style.text} ${style.border}`}>
+                        {style.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      {item.status === '신청중' && userInfo?.role === 'admin' && (
+                        <button
+                          onClick={() => handleStatusChange(item, '접수')}
+                          className="px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap"
+                          style={{ background: C.purple, color: '#fff' }}
+                        >
+                          ✅ 접수처리
+                        </button>
+                      )}
+                      {item.status === '접수' && (
+                        <button
+                          onClick={() => handleStatusChange(item, '수령')}
+                          className="px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap"
+                          style={{ background: C.green, color: '#fff' }}
+                        >
+                          📥 수령처리
+                        </button>
+                      )}
+                      {item.status === '수령' && (
+                        <button
+                          onClick={() => handleStatusChange(item, '교체완료')}
+                          className="px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap"
+                          style={{ background: C.primary, color: '#fff' }}
+                        >
+                          🔧 교체완료 처리
+                        </button>
+                      )}
+                      {item.status === '교체완료' && (
+                        <span className="text-xs font-medium whitespace-nowrap" style={{ color: C.primary }}>
+                          교체완료{' '}
+                          <span style={{ color: C.inkFaint }}>{item.replaced_at ? item.replaced_at.slice(0,10) : ''}</span>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 페이지네이션 */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1 rounded text-sm disabled:opacity-40"
+              style={{ border: `1px solid ${C.line}`, color: C.inkDim }}
+            >이전</button>
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              const p = Math.max(1, Math.min(page - 2, totalPages - 4)) + i;
+              const active = page === p;
+              return (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className="px-3 py-1 rounded text-sm"
+                  style={active
+                    ? { background: C.amber, color: '#fff', border: `1px solid ${C.amber}` }
+                    : { border: `1px solid ${C.line}`, color: C.inkDim }}
+                >
+                  {p}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="px-3 py-1 rounded text-sm disabled:opacity-40"
+              style={{ border: `1px solid ${C.line}`, color: C.inkDim }}
+            >다음</button>
+          </div>
+        )}
+      </div>
 
       {/* 상세 모달 */}
       {detailItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ background: C.surface }}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-gray-900">자재신청 상세</h2>
-                <button onClick={() => setDetailItem(null)} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
+                <h2 className="text-lg font-bold" style={{ color: C.ink }}>자재신청 상세</h2>
+                <button onClick={() => setDetailItem(null)} className="text-2xl" style={{ color: C.inkFaint }}>×</button>
               </div>
 
               <div className="mb-4">
@@ -633,43 +711,43 @@ export default function MaterialPage() {
 
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-2 gap-3">
-                  <div><span className="text-gray-400">현장</span><p className="font-medium">{detailItem.site_name}</p></div>
-                  <div><span className="text-gray-400">호기</span><p className="font-medium">{formatHogi(detailItem.hogi_no)}</p></div>
-                  <div><span className="text-gray-400">계약종류</span><p className="font-medium">{detailItem.contract_type || '-'}</p></div>
-                  <div><span className="text-gray-400">팀</span><p className="font-medium">{detailItem.team || '-'}</p></div>
-                  <div><span className="text-gray-400">자재명</span><p className="font-medium">{detailItem.material_name}</p></div>
-                  <div><span className="text-gray-400">수량</span><p className="font-medium">{detailItem.quantity}{detailItem.unit}</p></div>
-                  {detailItem.spec && <div><span className="text-gray-400">규격</span><p className="font-medium">{detailItem.spec}</p></div>}
-                  {detailItem.part_number && <div><span className="text-gray-400">파트넘버</span><p className="font-medium">{detailItem.part_number}</p></div>}
-                  <div><span className="text-gray-400">신청자</span><p className="font-medium">{detailItem.requester_name || '-'}</p></div>
-                  {detailItem.reason && <div className="col-span-2"><span className="text-gray-400">사유</span><p className="font-medium">{detailItem.reason}</p></div>}
-                  {detailItem.note && <div className="col-span-2"><span className="text-gray-400">비고</span><p className="font-medium">{detailItem.note}</p></div>}
+                  <div><span style={{ color: C.inkFaint }}>현장</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.site_name}</p></div>
+                  <div><span style={{ color: C.inkFaint }}>호기</span><p className="font-medium" style={{ color: C.ink }}>{formatHogi(detailItem.hogi_no)}</p></div>
+                  <div><span style={{ color: C.inkFaint }}>계약종류</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.contract_type || '-'}</p></div>
+                  <div><span style={{ color: C.inkFaint }}>팀</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.team || '-'}</p></div>
+                  <div><span style={{ color: C.inkFaint }}>자재명</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.material_name}</p></div>
+                  <div><span style={{ color: C.inkFaint }}>수량</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.quantity}{detailItem.unit}</p></div>
+                  {detailItem.spec && <div><span style={{ color: C.inkFaint }}>규격</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.spec}</p></div>}
+                  {detailItem.part_number && <div><span style={{ color: C.inkFaint }}>파트넘버</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.part_number}</p></div>}
+                  <div><span style={{ color: C.inkFaint }}>신청자</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.requester_name || '-'}</p></div>
+                  {detailItem.reason && <div className="col-span-2"><span style={{ color: C.inkFaint }}>사유</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.reason}</p></div>}
+                  {detailItem.note && <div className="col-span-2"><span style={{ color: C.inkFaint }}>비고</span><p className="font-medium" style={{ color: C.ink }}>{detailItem.note}</p></div>}
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-gray-100">
-                  <p className="text-xs font-semibold text-gray-400 mb-2">처리 이력</p>
+                <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: C.inkFaint }}>처리 이력</p>
                   <div className="space-y-1 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-gray-500">✅ 접수일시</span>
-                      <span className={`font-medium ${detailItem.dispatched_at ? 'text-purple-600' : 'text-gray-300'}`}>
+                      <span style={{ color: C.inkDim }}>✅ 접수일시</span>
+                      <span className="font-medium" style={{ color: detailItem.dispatched_at ? C.purple : C.inkFaint }}>
                         {fmtDate(detailItem.dispatched_at)}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">📦 분출일시</span>
-                      <span className={`font-medium ${detailItem.dispatched_at ? 'text-purple-600' : 'text-gray-300'}`}>
+                      <span style={{ color: C.inkDim }}>📦 분출일시</span>
+                      <span className="font-medium" style={{ color: detailItem.dispatched_at ? C.purple : C.inkFaint }}>
                         {fmtDate(detailItem.dispatched_at)}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">✅ 수령일시</span>
-                      <span className={`font-medium ${detailItem.received_at ? 'text-green-600' : 'text-gray-300'}`}>
+                      <span style={{ color: C.inkDim }}>✅ 수령일시</span>
+                      <span className="font-medium" style={{ color: detailItem.received_at ? C.green : C.inkFaint }}>
                         {fmtDate(detailItem.received_at)}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">🔧 교체일시</span>
-                      <span className={`font-medium ${detailItem.replaced_at ? 'text-blue-600' : 'text-gray-300'}`}>
+                      <span style={{ color: C.inkDim }}>🔧 교체일시</span>
+                      <span className="font-medium" style={{ color: detailItem.replaced_at ? C.primary : C.inkFaint }}>
                         {fmtDate(detailItem.replaced_at)}
                       </span>
                     </div>
@@ -682,7 +760,8 @@ export default function MaterialPage() {
                   <button
                     onClick={() => handleStatusChange(detailItem, '접수')}
                     disabled={actionLoading}
-                    className="w-full py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-50"
+                    className="w-full py-3 rounded-xl font-semibold disabled:opacity-50"
+                    style={{ background: C.purple, color: '#fff' }}
                   >
                     ✅ 접수처리
                   </button>
@@ -691,7 +770,8 @@ export default function MaterialPage() {
                   <button
                     onClick={() => handleStatusChange(detailItem, '수령')}
                     disabled={actionLoading}
-                    className="w-full py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50"
+                    className="w-full py-3 rounded-xl font-semibold disabled:opacity-50"
+                    style={{ background: C.green, color: '#fff' }}
                   >
                     📥 수령처리
                   </button>
@@ -700,7 +780,8 @@ export default function MaterialPage() {
                   <button
                     onClick={() => handleStatusChange(detailItem, '교체완료')}
                     disabled={actionLoading}
-                    className="w-full py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50"
+                    className="w-full py-3 rounded-xl font-semibold disabled:opacity-50"
+                    style={{ background: C.primary, color: '#fff' }}
                   >
                     🔧 교체완료 처리
                   </button>
@@ -709,7 +790,8 @@ export default function MaterialPage() {
                   <button
                     onClick={() => handleStatusChange(detailItem, '반려')}
                     disabled={actionLoading}
-                    className="w-full py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl font-semibold hover:bg-red-100 disabled:opacity-50"
+                    className="w-full py-3 rounded-xl font-semibold disabled:opacity-50"
+                    style={{ background: '#fef2f2', color: C.red, border: '1px solid #fecaca' }}
                   >
                     ✕ 반려 처리
                   </button>
@@ -717,7 +799,8 @@ export default function MaterialPage() {
 
                 <button
                   onClick={() => handleDelete(detailItem.id)}
-                  className="w-full py-2 text-gray-400 text-sm hover:text-red-500"
+                  className="w-full py-2 text-sm"
+                  style={{ color: C.inkFaint }}
                 >
                   삭제
                 </button>
@@ -730,44 +813,65 @@ export default function MaterialPage() {
       {/* PDF 모달 */}
       {pdfModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+          <div className="rounded-2xl w-full max-w-md p-6" style={{ background: C.surface }}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold">PDF 출력 옵션</h2>
-              <button onClick={() => setPdfModal(false)} className="text-gray-400 text-2xl">×</button>
+              <h2 className="text-lg font-bold" style={{ color: C.ink }}>PDF 출력 옵션</h2>
+              <button onClick={() => setPdfModal(false)} className="text-2xl" style={{ color: C.inkFaint }}>×</button>
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold text-gray-500">현장 선택 (선택 안 하면 전체)</label>
-                <select value={pdfSiteId} onChange={e => setPdfSiteId(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <label className="text-xs font-semibold" style={{ color: C.inkDim }}>현장 선택 (선택 안 하면 전체)</label>
+                <select
+                  value={pdfSiteId}
+                  onChange={e => setPdfSiteId(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-lg text-sm"
+                  style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                >
                   <option value="">전체 현장</option>
                   {sites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-semibold text-gray-500">시작일</label>
-                  <input type="date" value={pdfStart} onChange={e => setPdfStart(e.target.value)}
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  <label className="text-xs font-semibold" style={{ color: C.inkDim }}>시작일</label>
+                  <input
+                    type="date"
+                    value={pdfStart}
+                    onChange={e => setPdfStart(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 rounded-lg text-sm"
+                    style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                  />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-gray-500">종료일</label>
-                  <input type="date" value={pdfEnd} onChange={e => setPdfEnd(e.target.value)}
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  <label className="text-xs font-semibold" style={{ color: C.inkDim }}>종료일</label>
+                  <input
+                    type="date"
+                    value={pdfEnd}
+                    onChange={e => setPdfEnd(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 rounded-lg text-sm"
+                    style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                  />
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-gray-500">상태 필터</label>
-                <select value={pdfStatus} onChange={e => setPdfStatus(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <label className="text-xs font-semibold" style={{ color: C.inkDim }}>상태 필터</label>
+                <select
+                  value={pdfStatus}
+                  onChange={e => setPdfStatus(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-lg text-sm"
+                  style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                >
                   <option value="전체">전체 상태</option>
                   {Object.entries(STATUS_STYLE).map(([k, v]) => (
                     <option key={k} value={k}>{v.label}</option>
                   ))}
                 </select>
               </div>
-              <button onClick={exportPDF}
-                className="w-full py-3 bg-amber-500 text-white rounded-xl font-semibold hover:bg-amber-600">
+              <button
+                onClick={exportPDF}
+                className="w-full py-3 rounded-xl font-semibold"
+                style={{ background: C.amber, color: '#fff' }}
+              >
                 📄 PDF 출력
               </button>
             </div>
@@ -778,22 +882,23 @@ export default function MaterialPage() {
       {/* ✅ 자재신청 등록 모달 */}
       {registerModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900">자재신청 등록</h2>
+          <div className="rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" style={{ background: C.surface }}>
+            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
+              <h2 className="text-lg font-bold" style={{ color: C.ink }}>자재신청 등록</h2>
               <button
                 onClick={() => { setRegisterModal(false); resetRegisterForm(); }}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+                className="text-2xl leading-none"
+                style={{ color: C.inkFaint }}
               >×</button>
             </div>
 
             <div className="px-6 py-5 overflow-y-auto space-y-5">
-              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-bold text-gray-500 tracking-wide">현장 정보</p>
+              <div className="rounded-xl p-4 space-y-3" style={{ background: C.bg }}>
+                <p className="text-xs font-bold tracking-wide" style={{ color: C.inkDim }}>현장 정보</p>
 
                 <div className="relative">
-                  <label className="text-xs font-semibold text-gray-600">
-                    현장 선택 <span className="text-red-500">*</span>
+                  <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>
+                    현장 선택 <span style={{ color: C.red }}>*</span>
                   </label>
                   <input
                     type="text"
@@ -806,10 +911,14 @@ export default function MaterialPage() {
                     onFocus={() => setRegSiteOpen(true)}
                     onBlur={() => setTimeout(() => setRegSiteOpen(false), 150)}
                     placeholder="현장명을 검색하세요"
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-full mt-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                   />
                   {regSiteOpen && filteredSiteOptions.length > 0 && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div
+                      className="absolute z-10 mt-1 w-full rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                      style={{ background: C.surface, border: `1px solid ${C.line}` }}
+                    >
                       {filteredSiteOptions.map(s => (
                         <div
                           key={s.id}
@@ -819,7 +928,10 @@ export default function MaterialPage() {
                             setRegSiteOpen(false);
                             setRegHogi('');
                           }}
-                          className="px-3 py-2 text-sm hover:bg-amber-50 cursor-pointer"
+                          className="px-3 py-2 text-sm cursor-pointer"
+                          style={{ color: C.ink }}
+                          onMouseEnter={e => (e.currentTarget.style.background = C.bg)}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                         >
                           {s.site_name || '(이름 없음)'}
                         </div>
@@ -827,7 +939,10 @@ export default function MaterialPage() {
                     </div>
                   )}
                   {regSiteOpen && filteredSiteOptions.length === 0 && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs text-gray-400">
+                    <div
+                      className="absolute z-10 mt-1 w-full rounded-lg shadow-lg px-3 py-2 text-xs"
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }}
+                    >
                       일치하는 현장이 없습니다.
                     </div>
                   )}
@@ -835,7 +950,7 @@ export default function MaterialPage() {
                   {regSiteId && (() => {
                     const site = sites.find(s => s.id === regSiteId);
                     return (
-                      <p className="mt-1 text-xs text-gray-400">
+                      <p className="mt-1 text-xs" style={{ color: C.inkFaint }}>
                         소속팀: {site?.team || '미지정'} · 계약종류: {site?.contract_type || '미지정'}
                       </p>
                     );
@@ -843,7 +958,7 @@ export default function MaterialPage() {
                 </div>
 
                 <div className="relative">
-                  <label className="text-xs font-semibold text-gray-600">호기</label>
+                  <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>호기</label>
                   <input
                     type="text"
                     value={regHogi}
@@ -852,15 +967,22 @@ export default function MaterialPage() {
                     onBlur={() => setTimeout(() => setRegHogiOpen(false), 150)}
                     disabled={!regSiteId}
                     placeholder={regSiteId ? '호기 검색 (예: 901동 1호기)' : '먼저 현장을 선택하세요'}
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-full mt-1 px-3 py-2 rounded-lg text-sm focus:outline-none disabled:opacity-50"
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                   />
                   {regHogiOpen && regSiteId && filteredHogiOptions.length > 0 && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
+                    <div
+                      className="absolute z-10 mt-1 w-full rounded-lg shadow-lg max-h-44 overflow-y-auto"
+                      style={{ background: C.surface, border: `1px solid ${C.line}` }}
+                    >
                       {filteredHogiOptions.map(o => (
                         <div
                           key={o.id}
                           onMouseDown={() => { setRegHogi(o.label); setRegHogiOpen(false); }}
-                          className="px-3 py-2 text-sm hover:bg-amber-50 cursor-pointer"
+                          className="px-3 py-2 text-sm cursor-pointer"
+                          style={{ color: C.ink }}
+                          onMouseEnter={e => (e.currentTarget.style.background = C.bg)}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                         >
                           {o.label}
                         </div>
@@ -868,67 +990,75 @@ export default function MaterialPage() {
                     </div>
                   )}
                   {regHogiOpen && regSiteId && filteredHogiOptions.length === 0 && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs text-gray-400">
+                    <div
+                      className="absolute z-10 mt-1 w-full rounded-lg shadow-lg px-3 py-2 text-xs"
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }}
+                    >
                       일치하는 호기가 없습니다. 직접 입력한 값으로 등록됩니다.
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-bold text-gray-500 tracking-wide">자재 정보</p>
+              <div className="rounded-xl p-4 space-y-3" style={{ background: C.bg }}>
+                <p className="text-xs font-bold tracking-wide" style={{ color: C.inkDim }}>자재 정보</p>
 
                 <div>
-                  <label className="text-xs font-semibold text-gray-600">
-                    자재명 <span className="text-red-500">*</span>
+                  <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>
+                    자재명 <span style={{ color: C.red }}>*</span>
                   </label>
                   <input
                     type="text"
                     value={regMaterial}
                     onChange={e => setRegMaterial(e.target.value)}
                     placeholder="예: 비상구출배터리"
-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-full mt-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-semibold text-gray-600">파트넘버</label>
+                    <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>파트넘버</label>
                     <input
                       type="text"
                       value={regPartNumber}
                       onChange={e => setRegPartNumber(e.target.value)}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full mt-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-gray-600">규격</label>
+                    <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>규격</label>
                     <input
                       type="text"
                       value={regSpec}
                       onChange={e => setRegSpec(e.target.value)}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full mt-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-semibold text-gray-600">수량</label>
+                    <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>수량</label>
                     <input
                       type="number"
                       min={1}
                       value={regQuantity}
                       onChange={e => setRegQuantity(Number(e.target.value))}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full mt-1 px-3 py-2 rounded-lg text-sm focus:outline-none"
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-gray-600">단위</label>
+                    <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>단위</label>
                     <select
                       value={regUnit}
                       onChange={e => setRegUnit(e.target.value)}
-                      className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full mt-1 px-3 py-2 rounded-lg text-sm"
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                     >
                       {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
@@ -937,28 +1067,31 @@ export default function MaterialPage() {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-gray-600">신청 사유</label>
+                <label className="text-xs font-semibold" style={{ color: C.inkSoft }}>신청 사유</label>
                 <textarea
                   value={regReason}
                   onChange={e => setRegReason(e.target.value)}
                   rows={3}
                   placeholder="자재가 필요한 이유를 입력하세요 (선택)"
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="w-full mt-1 px-3 py-2 rounded-lg text-sm resize-none focus:outline-none"
+                  style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
                 />
               </div>
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
+            <div className="px-6 py-4 flex gap-2" style={{ borderTop: `1px solid ${C.line}` }}>
               <button
                 onClick={() => { setRegisterModal(false); resetRegisterForm(); }}
-                className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-semibold hover:bg-gray-200"
+                className="flex-1 py-3 rounded-xl font-semibold"
+                style={{ background: C.bg, color: C.inkDim }}
               >
                 취소
               </button>
               <button
                 onClick={handleRegister}
                 disabled={registerLoading || !regSiteId || !regMaterial.trim()}
-                className="flex-[2] py-3 bg-amber-500 text-white rounded-xl font-semibold hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-[2] py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: C.amber, color: '#fff' }}
               >
                 {registerLoading ? '등록 중...' : '자재신청 등록'}
               </button>
@@ -966,6 +1099,8 @@ export default function MaterialPage() {
           </div>
         </div>
       )}
+
+      <TabBar active="material" />
     </div>
   );
 }

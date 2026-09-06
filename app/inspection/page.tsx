@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { C, Icon } from '@/lib/theme';
+import TabBar from '@/components/TabBar';
 
 interface UserInfo {
   uid: string;
@@ -81,9 +83,9 @@ export default function InspectionPage() {
   const [selectedSite, setSelectedSite] = useState<SiteRow | null>(null);
   const [panelUnits, setPanelUnits] = useState<UnitInspection[]>([]);
   const [panelNote, setPanelNote] = useState('');
-  const [panelDate, setPanelDate] = useState(''); // ✅ 누락됐던 상태 선언 추가
+  const [panelDate, setPanelDate] = useState('');
   const [panelSaving, setPanelSaving] = useState(false);
-  const [reportGenerating, setReportGenerating] = useState(false); // ✅ 특이사항 리포트 PDF 생성 중 여부
+  const [reportGenerating, setReportGenerating] = useState(false);
 
   // 🔍 현장 검색
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
@@ -566,41 +568,61 @@ export default function InspectionPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: C.inkDim, fontSize: 16 }}>로딩 중...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-3">
-            <button onClick={() => router.push('/')} className="text-gray-400 hover:text-gray-600 text-sm">← 홈</button>
-            <span className="text-gray-300">|</span>
-            <h1 className="text-lg font-bold text-gray-800">🗺️ 점검 지도</h1>
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.ink, paddingBottom: 130 }}>
+      {/* 상단 헤더 (메인화면 스타일) */}
+      <div style={{ padding: '24px 20px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            onClick={() => router.push('/work')}
+            style={{
+              width: 40, height: 40, borderRadius: 12, background: C.primary, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 4px 12px ${C.primary}44`, cursor: 'pointer', fontSize: 18,
+            }}
+          >
+            🗺️
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>점검 지도</div>
             {userInfo?.companyDisplayName && (
-              <span className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full font-semibold">
+              <div style={{ fontSize: 11, color: C.inkDim, fontWeight: 600 }}>
                 🏢 {userInfo.companyDisplayName}
-              </span>
+              </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={prevMonth} className="text-gray-400 hover:text-gray-700 text-lg font-bold px-1">‹</button>
-            <span className="text-sm font-bold text-gray-700">{year}년 {MONTHS[month - 1]}</span>
-            <button onClick={nextMonth} className="text-gray-400 hover:text-gray-700 text-lg font-bold px-1">›</button>
-          </div>
         </div>
-      </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-5 space-y-4">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={prevMonth}
+            style={{ background: 'none', border: 'none', color: C.inkFaint, fontSize: 18, fontWeight: 800, padding: '0 4px', cursor: 'pointer' }}
+          >
+            ‹
+          </button>
+          <span style={{ fontSize: 13, fontWeight: 800, color: C.inkSoft }}>{year}년 {MONTHS[month - 1]}</span>
+          <button
+            onClick={nextMonth}
+            style={{ background: 'none', border: 'none', color: C.inkFaint, fontSize: 18, fontWeight: 800, padding: '0 4px', cursor: 'pointer' }}
+          >
+            ›
+          </button>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px' }} className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-2 text-sm">
-              전체 <strong className="text-gray-800">{stats.total}</strong>호기
+            <div style={{ background: C.surface, borderRadius: 12, border: `1px solid ${C.line}`, padding: '8px 14px', fontSize: 13, color: C.inkDim }}>
+              전체 <strong style={{ color: C.ink }}>{stats.total}</strong>호기
             </div>
-            <div className="bg-green-50 rounded-xl border border-green-100 shadow-sm px-4 py-2 text-sm text-green-700">
+            <div style={{ background: `${C.green}12`, borderRadius: 12, border: `1px solid ${C.green}30`, padding: '8px 14px', fontSize: 13, color: C.green }}>
               완료 <strong>{stats.done}</strong>호기 ({rate}%)
             </div>
           </div>
@@ -608,31 +630,41 @@ export default function InspectionPage() {
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {isAdmin && (
               <div className="flex gap-2 overflow-x-auto">
-                {['전체', ...teams.map(t => t.name)].map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setFilterTeam(t)}
-                    className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                      filterTeam === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
+                {['전체', ...teams.map(t => t.name)].map(t => {
+                  const active = filterTeam === t;
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => setFilterTeam(t)}
+                      style={{
+                        whiteSpace: 'nowrap', padding: '7px 12px', borderRadius: 10, fontSize: 12, fontWeight: 700,
+                        background: active ? C.primary : C.surface,
+                        color: active ? '#fff' : C.inkDim,
+                        border: active ? `1px solid ${C.primary}` : `1px solid ${C.line}`,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
             <button
               onClick={generateReport}
               disabled={reportGenerating}
-              className="whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 text-white hover:bg-gray-900 transition disabled:opacity-60"
+              style={{
+                whiteSpace: 'nowrap', padding: '7px 12px', borderRadius: 10, fontSize: 12, fontWeight: 800,
+                background: C.ink, color: '#fff', border: 'none', cursor: 'pointer', opacity: reportGenerating ? 0.6 : 1,
+              }}
             >
               {reportGenerating ? '생성 중...' : `📄 ${month}월 특이사항 리포트`}
             </button>
           </div>
         </div>
 
-        <div className="relative bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div style={{ position: 'relative', background: C.surface, borderRadius: 16, border: `1px solid ${C.line}`, overflow: 'hidden' }}>
           {/* 🔍 현장 검색 */}
           <div className="absolute top-3 left-3 right-3 z-20 sm:right-auto sm:w-80">
             <div className="relative">
@@ -642,12 +674,17 @@ export default function InspectionPage() {
                 onChange={e => { setSiteSearchQuery(e.target.value); setShowSearchResults(true); }}
                 onFocus={() => setShowSearchResults(true)}
                 placeholder="🔍 현장명 또는 주소로 검색"
-                className="w-full bg-white border border-gray-200 shadow-md rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                style={{
+                  width: '100%', background: C.surface, border: `1px solid ${C.line}`,
+                  boxShadow: '0 2px 10px rgba(0,0,0,.08)', borderRadius: 12, padding: '10px 16px',
+                  fontSize: 13, outline: 'none', color: C.ink,
+                }}
               />
               {siteSearchQuery && (
                 <button
                   onClick={() => { setSiteSearchQuery(''); setShowSearchResults(false); }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-sm"
+                  style={{ color: C.inkFaint, background: 'none', border: 'none', cursor: 'pointer' }}
                 >
                   ✕
                 </button>
@@ -655,31 +692,31 @@ export default function InspectionPage() {
             </div>
 
             {showSearchResults && siteSearchQuery.trim() && (
-              <div className="mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+              <div style={{ marginTop: 4, background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', maxHeight: 256, overflowY: 'auto' }}>
                 {searchResults.length === 0 ? (
-                  <p className="text-xs text-gray-400 px-4 py-3">검색 결과가 없어요</p>
+                  <p style={{ fontSize: 12, color: C.inkFaint, padding: '12px 16px' }}>검색 결과가 없어요</p>
                 ) : (
                   searchResults.map(site => {
                     const units = inspectionUnitsMap[site.id] || [];
                     const total = units.length;
                     const done = units.filter(u => u.completed).length;
-                    const badgeClass =
-                      total > 0 && done === total
-                        ? 'bg-green-100 text-green-700'
-                        : done > 0
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-gray-100 text-gray-500';
+                    const badgeColor =
+                      total > 0 && done === total ? C.green : done > 0 ? C.amber : C.inkFaint;
                     return (
                       <button
                         key={site.id}
                         onClick={() => goToSite(site)}
-                        className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center justify-between gap-2 border-b border-gray-50 last:border-0"
+                        style={{
+                          width: '100%', textAlign: 'left', padding: '10px 16px', display: 'flex',
+                          alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                          borderBottom: `1px solid ${C.bg}`, background: 'none', cursor: 'pointer',
+                        }}
                       >
-                        <span className="min-w-0">
-                          <span className="block text-sm font-semibold text-gray-800 truncate">{site.name}</span>
-                          <span className="block text-[11px] text-gray-400 truncate">{site.address}</span>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{site.name}</span>
+                          <span style={{ display: 'block', fontSize: 11, color: C.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{site.address}</span>
                         </span>
-                        <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ${badgeClass}`}>
+                        <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 9999, background: `${badgeColor}15`, color: badgeColor }}>
                           {done}/{total}
                         </span>
                       </button>
@@ -692,10 +729,10 @@ export default function InspectionPage() {
 
           <div ref={mapContainerRef} style={{ width: '100%', height: '65vh' }} />
         </div>
-        <p className="text-xs text-gray-400 text-center">
+        <p style={{ fontSize: 11, color: C.inkFaint, textAlign: 'center' }}>
           🟢 전체완료 · 🟠 일부완료 · ⚪ 미점검 &nbsp;|&nbsp; 현장 마커를 클릭하면 점검 처리를 할 수 있어요.
         </p>
-      </main>
+      </div>
 
       {selectedSite && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
@@ -806,6 +843,8 @@ export default function InspectionPage() {
           </div>
         </div>
       )}
+
+      <TabBar active="inspect" />
     </div>
   );
 }

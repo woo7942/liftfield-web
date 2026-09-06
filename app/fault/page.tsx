@@ -1,9 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState, useRef, useMemo } from 'react';
 
+import { supabase } from '@/lib/supabase';
+import { C, Icon, pick } from '@/lib/theme';
+import TabBar from '@/components/TabBar';
 
 interface FaultReport {
   id: string;
@@ -100,11 +102,13 @@ const toggleChipValue = (current: string, label: string): string => {
 const STATUS_LABEL: Record<string, string> = {
   '접수대기': '접수대기', '접수': '접수중', '처리중': '처리중', '완료': '완료',
 };
-const STATUS_STYLE: Record<string, string> = {
-  '접수대기': 'bg-yellow-100 text-yellow-700',
-  '접수':     'bg-orange-100 text-orange-600',
-  '처리중':   'bg-blue-100 text-blue-600',
-  '완료':     'bg-green-100 text-green-700',
+
+// ── 상태별 색상 (메인화면 팔레트 기준) ──
+const STATUS_COLOR: Record<string, string> = {
+  '접수대기': C.amber,
+  '접수':     C.amber,
+  '처리중':   C.primary,
+  '완료':     C.green,
 };
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -117,7 +121,6 @@ function urlBase64ToUint8Array(base64String: string) {
   }
   return outputArray;
 }
-
 
 const printHtml = (html: string) => {
   const win = window.open('', '_blank');
@@ -151,17 +154,15 @@ export default function FaultPage() {
   const [pdfSiteSearch, setPdfSiteSearch] = useState('');
   const [pdfDateFrom, setPdfDateFrom] = useState('');
   const [pdfDateTo, setPdfDateTo] = useState('');
-    const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [soundOn, setSoundOn] = useState(false);
   const [unseenCount, setUnseenCount] = useState(0);
   const [pushEnabled, setPushEnabled] = useState(false);
-
 
   useEffect(() => {
     const saved = localStorage.getItem('fault_sound_on');
     if (saved === 'true') setSoundOn(true);
   }, []);
-
 
   const [siteSearch, setSiteSearch] = useState('');
   const [elevSearch, setElevSearch] = useState('');
@@ -199,44 +200,36 @@ export default function FaultPage() {
     audioRef.current = new Audio('/sounds/alert.mp3');
   }, []);
   useEffect(() => {
-  if (!userInfo) return;
-  if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (!userInfo) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
 
-  // 이미 브라우저에서 허용된 상태면 조용히 소리만 활성화하고 끝
-  if (Notification.permission === 'granted') {
-    setSoundOn(true);
-    localStorage.setItem('fault_sound_on', 'true');
-    return;
-  }
-
-  // 이미 명시적으로 차단(denied)한 경우엔 브라우저가 재요청 자체를 막기 때문에
-  // 계속 팝업을 띄워도 의미가 없어 여기서는 더 묻지 않음
-  if (Notification.permission === 'denied') return;
-
-  // 아직 결정 전(default) 상태 → 확인을 누를 때까지 계속 물어봄
-  let confirmed = false;
-  while (!confirmed) {
-    confirmed = window.confirm(
-      '새 고장 접수를 실시간으로 알려드리려고 합니다.\n알림을 받으시겠습니까?'
-    );
-  }
-
-  // 확인을 누른 사용자 제스처를 이용해 알림음 재생 권한도 함께 미리 풀어둠
-  audioRef.current
-    ?.play()
-    .then(() => {
-      audioRef.current?.pause();
-      if (audioRef.current) audioRef.current.currentTime = 0;
+    if (Notification.permission === 'granted') {
       setSoundOn(true);
       localStorage.setItem('fault_sound_on', 'true');
-    })
-    .catch((err) => console.error('알림음 사전 재생 실패:', err));
+      return;
+    }
 
-  // 브라우저 네이티브 알림 권한 요청 + 푸시 구독
-  enablePushNotification(true);
+    if (Notification.permission === 'denied') return;
 
-}, [userInfo]);
+    let confirmed = false;
+    while (!confirmed) {
+      confirmed = window.confirm(
+        '새 고장 접수를 실시간으로 알려드리려고 합니다.\n알림을 받으시겠습니까?'
+      );
+    }
 
+    audioRef.current
+      ?.play()
+      .then(() => {
+        audioRef.current?.pause();
+        if (audioRef.current) audioRef.current.currentTime = 0;
+        setSoundOn(true);
+        localStorage.setItem('fault_sound_on', 'true');
+      })
+      .catch((err) => console.error('알림음 사전 재생 실패:', err));
+
+    enablePushNotification(true);
+  }, [userInfo]);
 
   useEffect(() => {
     if (!userInfo?.company_id) return;
@@ -247,7 +240,7 @@ export default function FaultPage() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'fault_reports' },
-                (payload) => {
+        (payload) => {
           const newFault = payload.new as FaultReport;
           if (newFault.company_id !== userInfo.company_id) return;
           if (!isOfficeAdmin && newFault.team !== userInfo.team) return;
@@ -262,7 +255,6 @@ export default function FaultPage() {
               .catch((err) => console.error('알림음 재생 실패:', err.name, err.message));
           }
         }
-
       )
       .subscribe();
 
@@ -289,7 +281,7 @@ export default function FaultPage() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
-    const loadData = async (info: any) => {
+  const loadData = async (info: any) => {
     const cid = info.company_id || '';
     if (!cid) { setLoading(false); return; }
     try {
@@ -305,17 +297,16 @@ export default function FaultPage() {
         faultQuery = faultQuery.eq('team', info.team || '__none__');
       }
 
-            const { data: faultData } = await faultQuery;
+      const { data: faultData } = await faultQuery;
       const faultList = (faultData || []) as FaultReport[];
       setFaults(faultList);
 
       const { data: siteData } = await supabase
-  .from('sites')
-  .select('*')
-  .eq('company_id', cid)
-  .order('name');   // ← site_name이 아니라 name 기준으로 정렬
-setSites(siteData || []);
-
+        .from('sites')
+        .select('*')
+        .eq('company_id', cid)
+        .order('name');
+      setSites(siteData || []);
 
       const siteIds = (siteData || []).map((s: any) => s.id);
       if (siteIds.length > 0) {
@@ -329,12 +320,10 @@ setSites(siteData || []);
       const userList = userData || [];
       setUsers(userList);
 
-      // 실제 존재하는 팀 전체(팀원이 배정된 팀 + 고장신고가 있는 팀)를 합쳐서 필터 목록 구성
       const teamFromUsers = userList.map((u: any) => u.team).filter(Boolean);
       const teamFromFaults = faultList.map((f) => f.team).filter(Boolean);
       const teamSet = new Set([...teamFromUsers, ...teamFromFaults]);
       setTeams([ALL_TEAMS, ...Array.from(teamSet)]);
-
     } catch (e) {
       console.error('loadData error:', e);
     } finally {
@@ -375,52 +364,49 @@ setSites(siteData || []);
   };
 
   async function enablePushNotification(silent = false) {
-  try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      if (!silent) alert('이 브라우저는 푸시 알림을 지원하지 않습니다.');
-      return;
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        if (!silent) alert('이 브라우저는 푸시 알림을 지원하지 않습니다.');
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        if (!silent) alert('알림 권한이 거부되었습니다.');
+        return;
+      }
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(
+          process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
+        ),
+      });
+
+      const subJson = subscription.toJSON();
+
+      await supabase.from('push_subscriptions').upsert(
+        {
+          user_id: userInfo?.uid,
+          company_id: userInfo?.company_id,
+          team: userInfo?.team,
+          endpoint: subJson.endpoint,
+          p256dh: subJson.keys?.p256dh,
+          auth: subJson.keys?.auth,
+        },
+        { onConflict: 'endpoint' }
+      );
+
+      setPushEnabled(true);
+      if (!silent) alert('푸시 알림이 활성화되었습니다.');
+    } catch (err) {
+      console.error('푸시 등록 실패:', err);
+      if (!silent) alert('푸시 알림 등록에 실패했습니다.');
     }
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      if (!silent) alert('알림 권한이 거부되었습니다.');
-      return;
-    }
-    const registration = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
-
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(
-        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!
-      ),
-    });
-
-    const subJson = subscription.toJSON();
-
-    await supabase.from('push_subscriptions').upsert(
-      {
-        user_id: userInfo?.uid,
-        company_id: userInfo?.company_id,
-        team: userInfo?.team,
-        endpoint: subJson.endpoint,
-        p256dh: subJson.keys?.p256dh,
-        auth: subJson.keys?.auth,
-      },
-      { onConflict: 'endpoint' }
-    );
-
-    setPushEnabled(true);
-    if (!silent) alert('푸시 알림이 활성화되었습니다.');
-  } catch (err) {
-    console.error('푸시 등록 실패:', err);
-    // 자동 실행 시에는 실패해도 사용자에게 팝업을 띄우지 않음 (알림음/화면 실시간 감지는 이미 켜졌으므로 핵심 기능엔 지장 없음)
-    if (!silent) alert('푸시 알림 등록에 실패했습니다.');
   }
-}
 
-
-
-    const handleReceive = async (fault: FaultReport) => {
+  const handleReceive = async (fault: FaultReport) => {
     if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 내가 접수하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
     try {
       const { data, error } = await supabase
@@ -446,7 +432,6 @@ setSites(siteData || []);
       alert('오류: ' + e.message);
     }
   };
-
 
   const handleSetInProgress = async (fault: FaultReport) => {
     try {
@@ -677,18 +662,34 @@ setSites(siteData || []);
   });
 
   const filteredSites = siteSearch.trim()
-  ? sites.filter(s =>
-      s.name?.toLowerCase().includes(siteSearch.toLowerCase()) ||
-      s.address?.toLowerCase().includes(siteSearch.toLowerCase()))
-  : sites;
-
+    ? sites.filter(s =>
+        s.name?.toLowerCase().includes(siteSearch.toLowerCase()) ||
+        s.address?.toLowerCase().includes(siteSearch.toLowerCase()))
+    : sites;
 
   const siteElevators = form.siteId ? elevators.filter(e => e.site_id === form.siteId) : [];
-  const filteredElevators = elevSearch.trim()
-    ? siteElevators.filter(e =>
-        e.hogi_no?.toLowerCase().includes(elevSearch.toLowerCase()) ||
-        e.elevator_no?.toLowerCase().includes(elevSearch.toLowerCase()))
-    : siteElevators;
+const filteredElevators = elevSearch.trim()
+  ? siteElevators.filter(e =>
+      e.hogi_no?.toLowerCase().includes(elevSearch.toLowerCase()) ||
+      e.elevator_no?.toLowerCase().includes(elevSearch.toLowerCase()) ||
+      e.dong?.toLowerCase().includes(elevSearch.toLowerCase()))
+  : siteElevators;
+
+// 🏢 동별 그룹핑 (InspectionPage와 동일한 정렬 규칙)
+const getHogiNum = (h?: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
+const groupedElevators = useMemo(() => {
+  const map: Record<string, any[]> = {};
+  filteredElevators.forEach(e => {
+    const key = e.dong || '동 미지정';
+    if (!map[key]) map[key] = [];
+    map[key].push(e);
+  });
+  Object.values(map).forEach(arr =>
+    arr.sort((a, b) => getHogiNum(a.hogi_no) - getHogiNum(b.hogi_no))
+  );
+  return Object.entries(map).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true }));
+}, [filteredElevators]);
+
 
   const activeCauseGroups = isEscalatorType(form.equipType) ? ESCALATOR_CAUSE_GROUPS : ELEVATOR_CAUSE_GROUPS;
 
@@ -698,168 +699,231 @@ setSites(siteData || []);
   const totalCompleted = faults.filter(f => f.status === '완료').length;
 
   const stats = [
-    { label: '전체', count: faults.length, color: 'bg-gray-100 text-gray-700' },
-    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length, color: 'bg-yellow-100 text-yellow-700' },
-    { label: '접수', count: faults.filter(f => f.status === '접수').length, color: 'bg-orange-100 text-orange-600' },
-    { label: '처리중', count: faults.filter(f => f.status === '처리중').length, color: 'bg-blue-100 text-blue-600' },
-    { label: '완료', count: faults.filter(f => f.status === '완료').length, color: 'bg-green-100 text-green-700' },
+    { label: '전체', count: faults.length, color: C.inkDim },
+    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length, color: C.amber },
+    { label: '접수', count: faults.filter(f => f.status === '접수').length, color: C.amber },
+    { label: '처리중', count: faults.filter(f => f.status === '처리중').length, color: C.primary },
+    { label: '완료', count: faults.filter(f => f.status === '완료').length, color: C.green },
   ];
 
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-gray-500 text-lg">로딩 중...</div>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: C.inkDim, fontSize: 16 }}>로딩 중...</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 pb-24">
-            {/* 상단 바 */}
-      <div className="bg-white border-b sticky top-0 z-20 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button onClick={() => router.push('/dashboard')} className="text-gray-500 text-xl px-1">←</button>
-          <h1 className="text-lg font-bold text-gray-800">고장신고 관리</h1>
-        </div>
-        <div className="flex gap-2">
-
-          <button
-            onClick={() => setPdfModal(true)}
-            className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700"
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.ink, paddingBottom: 130 }}>
+      {/* 상단 헤더 (메인화면 스타일) */}
+      <div style={{ padding: '24px 20px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            onClick={() => router.push('/work')}
+            style={{
+              width: 40, height: 40, borderRadius: 12, background: C.red, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 4px 12px ${C.red}44`, cursor: 'pointer',
+            }}
           >
-            📄 처리내역 PDF
-          </button>
-          <button
-            onClick={() => setReportModal(true)}
-            className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold"
-          >
-            + 고장 접수
-          </button>
-        </div>
-      </div>
-
-      {teamFilter !== ALL_TEAMS && (
-  <div className="px-4 pt-2 text-xs text-gray-500">
-    {teamFilter}팀 인원: {users.filter(u => u.team === teamFilter).length}명
-  </div>
-)}
-
-
-      {/* 통계 바 */}
-      <div className="px-4 py-3 flex gap-2 overflow-x-auto">
-        {stats.map((s) => (
-          <button
-            key={s.label}
-            onClick={() => setStatusFilter(s.label === '전체' ? '전체' : s.label)}
-            className={`px-4 py-2 rounded-xl flex flex-col items-center min-w-[68px] ${s.color} ${
-              statusFilter === s.label ? 'ring-2 ring-offset-1 ring-gray-400' : ''
-            }`}
-          >
-            <span className="text-xs font-medium">{s.label}</span>
-            <span className="font-bold text-lg leading-tight">{s.count}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* 검색/필터 */}
-      <div className="px-4 pb-2 flex flex-wrap gap-2">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="현장명·호기·담당자·내용 검색"
-          className="flex-1 min-w-[180px] px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
-        />
-        <select
-          value={teamFilter}
-          onChange={(e) => setTeamFilter(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm bg-white"
-        >
-          {teams.map((t) => (
-            <option key={t} value={t}>{t === ALL_TEAMS ? '전체 팀' : `${t}팀`}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* 목록 */}
-      <div className="px-4 space-y-3 mt-2">
-        {filteredFaults.length === 0 && (
-          <div className="text-center text-gray-400 py-20 text-sm">고장신고 내역이 없습니다</div>
-        )}
-
-        {filteredFaults.map((f) => (
-          <div key={f.id} className="bg-white rounded-xl border shadow-sm p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${STATUS_STYLE[f.status]}`}>
-                    {STATUS_LABEL[f.status] || f.status}
-                  </span>
-                  {f.team && <span className="text-xs text-gray-400">{f.team}팀</span>}
-                  {f.equip_type && <span className="text-xs text-gray-400">· {f.equip_type}</span>}
-                </div>
-                <div className="font-bold text-[15px] text-gray-900 truncate">
-                  {f.site_name} · {f.hogi_no}
-                  {f.elevator_no && <span className="text-gray-400 font-normal"> ({f.elevator_no})</span>}
-                </div>
-                <div className="text-sm text-gray-500 mt-1 line-clamp-2">{f.content}</div>
-              </div>
-              <div className="text-xs text-gray-400 whitespace-nowrap text-right">
-                {toDateStr(f.created_at)}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between border-t mt-3 pt-2">
-              <div className="text-xs text-gray-500">
-                담당: <span className="font-medium text-gray-700">{f.assigned_name || '미배정'}</span>
-              </div>
-              <div className="flex gap-1.5">
-                {f.status === '접수대기' && (
-                  <button
-                    onClick={() => handleReceive(f)}
-                    className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold"
-                  >
-                    접수하기
-                  </button>
-                )}
-                {f.status === '접수' && (
-                  <button
-                    onClick={() => handleSetInProgress(f)}
-                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold"
-                  >
-                    현장 도착·처리 시작
-                  </button>
-                )}
-                {(f.status === '처리중' || f.status === '접수') && (
-                  <button
-                    onClick={() => openDetail(f)}
-                    className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-semibold text-gray-700"
-                  >
-                    처리 입력
-                  </button>
-                )}
-                {f.status === '완료' && (
-                  <>
-                    <button
-                      onClick={() => openDetail(f)}
-                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-semibold text-gray-700"
-                    >
-                      상세보기
-                    </button>
-                    <button
-                      onClick={() => exportSinglePDF(f)}
-                      className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-bold"
-                    >
-                      🧾 고장처리 보고서
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => deleteFault(f)}
-                  className="px-2 py-1.5 text-red-400 hover:text-red-600 text-xs"
-                >
-                  삭제
-                </button>
-              </div>
-            </div>
+            {Icon.wrench(18)}
           </div>
-        ))}
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>고장신고 관리</div>
+            {teamFilter !== ALL_TEAMS && (
+              <div style={{ fontSize: 11, color: C.inkDim, fontWeight: 600 }}>
+                {teamFilter}팀 인원 {users.filter(u => u.team === teamFilter).length}명
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            onClick={() => setPdfModal(true)}
+            style={{
+              width: 40, height: 40, borderRadius: 12, background: '#fff',
+              border: `1px solid ${C.line}`, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: C.inkDim, cursor: 'pointer',
+            }}
+          >
+            {Icon.fileText(18)}
+          </div>
+          <div
+            onClick={() => setReportModal(true)}
+            style={{
+              width: 40, height: 40, borderRadius: 12, background: C.red, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 4px 12px ${C.red}44`, cursor: 'pointer', fontSize: 22, fontWeight: 700, lineHeight: 1,
+            }}
+          >
+            +
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 480, margin: '0 auto' }}>
+        {/* 통계 칩 */}
+        <div style={{ padding: '0 16px 12px', display: 'flex', gap: 8, overflowX: 'auto' }}>
+          {stats.map((s) => {
+            const active = statusFilter === s.label;
+            return (
+              <button
+                key={s.label}
+                onClick={() => setStatusFilter(s.label)}
+                style={{
+                  flexShrink: 0,
+                  minWidth: 68,
+                  padding: '10px 14px',
+                  borderRadius: 12,
+                  background: active ? `${s.color}15` : C.surface,
+                  border: active ? `1.5px solid ${s.color}` : `1px solid ${C.line}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 700, color: active ? s.color : C.inkDim }}>{s.label}</span>
+                <span style={{ fontSize: 18, fontWeight: 800, fontFamily: C.mono, color: active ? s.color : C.ink, lineHeight: 1.3 }}>
+                  {s.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 검색/필터 */}
+        <div style={{ padding: '0 16px 14px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="현장명·호기·담당자·내용 검색"
+            style={{
+              flex: 1, minWidth: 180, padding: '10px 12px', borderRadius: 10,
+              border: `1px solid ${C.line}`, fontSize: 13, outline: 'none', background: C.surface,
+            }}
+          />
+          <select
+            value={teamFilter}
+            onChange={(e) => setTeamFilter(e.target.value)}
+            style={{
+              padding: '10px 12px', borderRadius: 10, border: `1px solid ${C.line}`,
+              fontSize: 13, background: C.surface, color: C.ink,
+            }}
+          >
+            {teams.map((t) => (
+              <option key={t} value={t}>{t === ALL_TEAMS ? '전체 팀' : `${t}팀`}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* 목록 */}
+        <div style={{ padding: '0 16px' }}>
+          {filteredFaults.length === 0 && (
+            <p style={{ textAlign: 'center', color: C.inkFaint, padding: '60px 0', fontSize: 13 }}>
+              고장신고 내역이 없습니다
+            </p>
+          )}
+
+          {filteredFaults.map((f) => {
+            const color = STATUS_COLOR[f.status] || C.inkFaint;
+            const hoursAgo = f.created_at ? (Date.now() - new Date(f.created_at).getTime()) / 3600000 : 0;
+            const urgent = f.status === '접수대기' && hoursAgo >= 2;
+            const chipColor = urgent ? C.red : color;
+            return (
+              <div
+                key={f.id}
+                style={{
+                  background: C.surface, borderRadius: 14, border: `1px solid ${C.line}`,
+                  padding: '14px 16px', marginBottom: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                      background: `${chipColor}12`, color: chipColor,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: `1px solid ${chipColor}20`,
+                    }}
+                  >
+                    {Icon.wrench(20)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 6, background: `${chipColor}15`, color: chipColor, fontSize: 10.5, fontWeight: 800 }}>
+                        {urgent ? '긴급' : STATUS_LABEL[f.status] || f.status}
+                      </span>
+                      {f.team && <span style={{ fontSize: 10.5, color: C.inkFaint, fontWeight: 700 }}>{f.team}팀</span>}
+                      {f.equip_type && <span style={{ fontSize: 10.5, color: C.inkFaint }}>· {f.equip_type}</span>}
+                    </div>
+                    <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink, marginBottom: 2 }}>
+                      {f.site_name} · {f.hogi_no}
+                      {f.elevator_no && <span style={{ color: C.inkFaint, fontWeight: 500, fontSize: 12 }}> ({f.elevator_no})</span>}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: C.inkDim, marginBottom: 6 }}>{f.content}</div>
+                    <div style={{ fontSize: 10.5, color: C.inkFaint, fontFamily: C.mono }}>{toDateStr(f.created_at)}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
+                  <div style={{ fontSize: 11.5, color: C.inkDim }}>
+                    담당: <span style={{ fontWeight: 700, color: C.inkSoft }}>{f.assigned_name || '미배정'}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {f.status === '접수대기' && (
+                      <button
+                        onClick={() => handleReceive(f)}
+                        style={{ padding: '7px 12px', background: C.amber, color: '#fff', borderRadius: 8, fontSize: 11.5, fontWeight: 800, border: 'none', cursor: 'pointer' }}
+                      >
+                        접수하기
+                      </button>
+                    )}
+                    {f.status === '접수' && (
+                      <button
+                        onClick={() => handleSetInProgress(f)}
+                        style={{ padding: '7px 12px', background: C.primary, color: '#fff', borderRadius: 8, fontSize: 11.5, fontWeight: 800, border: 'none', cursor: 'pointer' }}
+                      >
+                        현장 도착·처리 시작
+                      </button>
+                    )}
+                    {(f.status === '처리중' || f.status === '접수') && (
+                      <button
+                        onClick={() => openDetail(f)}
+                        style={{ padding: '7px 12px', background: C.bg, color: C.inkSoft, borderRadius: 8, fontSize: 11.5, fontWeight: 700, border: `1px solid ${C.line}`, cursor: 'pointer' }}
+                      >
+                        처리 입력
+                      </button>
+                    )}
+                    {f.status === '완료' && (
+                      <>
+                        <button
+                          onClick={() => openDetail(f)}
+                          style={{ padding: '7px 12px', background: C.bg, color: C.inkSoft, borderRadius: 8, fontSize: 11.5, fontWeight: 700, border: `1px solid ${C.line}`, cursor: 'pointer' }}
+                        >
+                          상세보기
+                        </button>
+                        <button
+                          onClick={() => exportSinglePDF(f)}
+                          style={{ padding: '7px 12px', background: C.green, color: '#fff', borderRadius: 8, fontSize: 11.5, fontWeight: 800, border: 'none', cursor: 'pointer' }}
+                        >
+                          🧾 보고서
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => deleteFault(f)}
+                      style={{ padding: '7px 8px', background: 'transparent', color: C.red, fontSize: 11.5, border: 'none', cursor: 'pointer' }}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* ===================== 고장 접수 모달 ===================== */}
@@ -875,59 +939,56 @@ setSites(siteData || []);
             </div>
 
             <div className="p-5 space-y-4">
-              {/* 현장 선택 */}
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-1 block">현장 선택 *</label>
                 {form.siteId ? (
-  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-    <div>
-      <div className="font-semibold text-sm">{form.siteName}</div>
-      <div className="text-xs text-gray-500">
-        {sites.find((s) => s.id === form.siteId)?.address}
-      </div>
-    </div>
-    <button
-      onClick={() => setForm({ ...form, siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '' })}
-      className="text-xs text-blue-600 font-semibold"
-    >
-      변경
-    </button>
-  </div>
-) : (
-  <>
-    <input
-      value={siteSearch}
-      onChange={(e) => setSiteSearch(e.target.value)}
-      placeholder="현장명 또는 주소 검색"
-      className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
-    />
-    <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
-      {filteredSites.length === 0 && (
-        <div className="text-center text-gray-400 text-sm py-4">검색 결과가 없습니다</div>
-      )}
-      {filteredSites.map((s) => (
-        <button
-          key={s.id}
-          onClick={() =>
-            setForm({ ...form, siteId: s.id, siteName: s.name || s.address || '이름 미등록 현장', hogiNo: '', elevatorNo: '', equipType: '' })
-          }
-          className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
-        >
-          <div className="font-medium">
-            {s.name
-              ? s.name
-              : <span className="text-red-500">⚠ 현장명 미등록 (운영자 페이지에서 확인 필요)</span>}
-          </div>
-          <div className="text-xs text-gray-400">{s.address || '주소 미등록'}</div>
-        </button>
-      ))}
-    </div>
-  </>
-)}
-
+                  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                    <div>
+                      <div className="font-semibold text-sm">{form.siteName}</div>
+                      <div className="text-xs text-gray-500">
+                        {sites.find((s) => s.id === form.siteId)?.address}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setForm({ ...form, siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '' })}
+                      className="text-xs text-blue-600 font-semibold"
+                    >
+                      변경
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      value={siteSearch}
+                      onChange={(e) => setSiteSearch(e.target.value)}
+                      placeholder="현장명 또는 주소 검색"
+                      className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
+                    />
+                    <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
+                      {filteredSites.length === 0 && (
+                        <div className="text-center text-gray-400 text-sm py-4">검색 결과가 없습니다</div>
+                      )}
+                      {filteredSites.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() =>
+                            setForm({ ...form, siteId: s.id, siteName: s.name || s.address || '이름 미등록 현장', hogiNo: '', elevatorNo: '', equipType: '' })
+                          }
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+                        >
+                          <div className="font-medium">
+                            {s.name
+                              ? s.name
+                              : <span className="text-red-500">⚠ 현장명 미등록 (운영자 페이지에서 확인 필요)</span>}
+                          </div>
+                          <div className="text-xs text-gray-400">{s.address || '주소 미등록'}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* 설비(승강기/에스컬/무빙워크) 선택 - 현장 선택 후 노출 */}
               {form.siteId && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -949,31 +1010,44 @@ setSites(siteData || []);
                         className="w-full px-3 py-2 border rounded-lg text-sm mb-2 outline-none focus:border-blue-400"
                       />
                       <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
-                        {filteredElevators.length === 0 && (
-                          <div className="text-center text-gray-400 text-sm py-4">등록된 설비가 없습니다. 직접 입력을 이용하세요.</div>
-                        )}
-                        {filteredElevators.map((e) => (
-                          <button
-                            key={e.id}
-                            onClick={() =>
-                              setForm({
-                                ...form,
-                                hogiNo: e.hogi_no || '',
-                                elevatorNo: e.elevator_no || '',
-                                equipType: e.type || e.equip_type || '승강기',
-                              })
-                            }
-                            className={`w-full text-left px-3 py-2 hover:bg-gray-50 text-sm ${
-                              form.hogiNo === e.hogi_no ? 'bg-blue-50' : ''
-                            }`}
-                          >
-                            <div className="font-medium">
-                              {e.hogi_no} <span className="text-xs text-gray-400 font-normal">· {e.type || e.equip_type}</span>
-                            </div>
-                            {e.elevator_no && <div className="text-xs text-gray-400">등록번호 {e.elevator_no}</div>}
-                          </button>
-                        ))}
-                      </div>
+  {filteredElevators.length === 0 && (
+    <div className="text-center text-gray-400 text-sm py-4">등록된 설비가 없습니다. 직접 입력을 이용하세요.</div>
+  )}
+  {groupedElevators.map(([dong, list]) => (
+    <div key={dong}>
+      {dong !== '동 미지정' && (
+        <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-indigo-500">📍 {dong}</div>
+      )}
+      {list.map((e) => {
+        const dongPrefix = e.dong && e.dong !== '동 미지정' ? `${e.dong} ` : '';
+        const hogiDisplay = e.installation_place ? e.installation_place : (e.hogi_no || '');
+        const composedHogi = `${dongPrefix}${hogiDisplay}`.trim();
+        const isSelected = form.hogiNo === composedHogi;
+        return (
+          <button
+            key={e.id}
+            onClick={() =>
+              setForm({
+                ...form,
+                hogiNo: composedHogi,
+                elevatorNo: e.elevator_no || '',
+                equipType: e.type || e.equip_type || '승강기',
+              })
+            }
+            className={`w-full text-left px-3 py-2 hover:bg-gray-50 text-sm ${isSelected ? 'bg-blue-50' : ''}`}
+          >
+            <div className="font-medium">
+              {e.installation_place ? `(${e.installation_place})` : (e.hogi_no || '호기')}
+              <span className="text-xs text-gray-400 font-normal"> · {e.type || e.equip_type}</span>
+            </div>
+            {e.elevator_no && <div className="text-xs text-gray-400">등록번호 {e.elevator_no}</div>}
+          </button>
+        );
+      })}
+    </div>
+  ))}
+</div>
+
                     </>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
@@ -1010,7 +1084,6 @@ setSites(siteData || []);
                 </div>
               )}
 
-              {/* 고장 내용 */}
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-1 block">고장 내용 *</label>
                 <textarea
@@ -1072,7 +1145,10 @@ setSites(siteData || []);
                 <h2 className="text-lg font-bold">
                   {selectedFault.site_name} · {selectedFault.hogi_no}
                 </h2>
-                <span className={`inline-block mt-1 px-2 py-0.5 rounded-md text-xs font-bold ${STATUS_STYLE[selectedFault.status]}`}>
+                <span
+                  className="inline-block mt-1 px-2 py-0.5 rounded-md text-xs font-bold"
+                  style={{ background: `${STATUS_COLOR[selectedFault.status]}15`, color: STATUS_COLOR[selectedFault.status] }}
+                >
                   {STATUS_LABEL[selectedFault.status] || selectedFault.status}
                 </span>
               </div>
@@ -1080,7 +1156,6 @@ setSites(siteData || []);
             </div>
 
             <div className="p-5 space-y-4">
-              {/* 시간 내역 */}
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="bg-gray-50 rounded-lg p-2">
                   <div className="text-xs text-gray-400">고장 발생</div>
@@ -1092,7 +1167,6 @@ setSites(siteData || []);
                 </div>
               </div>
 
-              {/* ▼▼▼ 여기 새로 추가 ▼▼▼ */}
               {(selectedFault.reporter_phone || selectedFault.extra) && (
                 <div className="grid grid-cols-1 gap-2 text-sm">
                   {selectedFault.reporter_phone && (
@@ -1110,7 +1184,6 @@ setSites(siteData || []);
                 </div>
               )}
 
-              {/* 고장 내용 (읽기전용) */}
               <div>
                 <label className="text-sm font-semibold text-gray-700 mb-1 block">고장 내용</label>
                 <div className="bg-gray-50 rounded-lg p-3 text-sm whitespace-pre-wrap">{selectedFault.content}</div>
@@ -1149,7 +1222,6 @@ setSites(siteData || []);
                 </>
               ) : (
                 <>
-                  {/* 처리중 전환 (접수 상태에서만 노출) */}
                   {selectedFault.status === '접수' && (
                     <button
                       onClick={() => handleSetInProgress(selectedFault)}
@@ -1159,7 +1231,6 @@ setSites(siteData || []);
                     </button>
                   )}
 
-                  {/* 시간 입력 */}
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-xs font-semibold text-gray-500 mb-1 block">현장 도착 시간</label>
@@ -1181,7 +1252,6 @@ setSites(siteData || []);
                     </div>
                   </div>
 
-                  {/* 고장 원인 칩 (승강기/에스컬레이터 자동 분기) */}
                   <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">
                       고장 원인 {isEscalatorType(selectedFault.equip_type) ? '(에스컬레이터·무빙워크)' : '(승강기)'}
@@ -1220,7 +1290,6 @@ setSites(siteData || []);
                     />
                   </div>
 
-                  {/* 처리 내용 칩 */}
                   <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">처리 내용 *</label>
                     <div className="flex flex-wrap gap-1.5 mb-1.5">
@@ -1250,7 +1319,6 @@ setSites(siteData || []);
                     />
                   </div>
 
-                  {/* 비고 */}
                   <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">비고</label>
                     <textarea
@@ -1302,7 +1370,7 @@ setSites(siteData || []);
         </div>
       )}
 
-      {/* ===================== PDF 내보내기 모달 (기간·현장별) ===================== */}
+      {/* ===================== PDF 내보내기 모달 ===================== */}
       {pdfModal && (
         <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
@@ -1368,6 +1436,8 @@ setSites(siteData || []);
           </div>
         </div>
       )}
+
+      <TabBar active="fault" />
     </div>
   );
 }
