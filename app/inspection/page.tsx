@@ -76,12 +76,18 @@ export default function InspectionPage() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapObjRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
+  const boundsFitSiteIdsRef = useRef<string>(''); // ✅ 지도 확대 유지용: 이전에 범위를 맞춘 현장 목록 저장
 
   const [selectedSite, setSelectedSite] = useState<SiteRow | null>(null);
   const [panelUnits, setPanelUnits] = useState<UnitInspection[]>([]);
   const [panelNote, setPanelNote] = useState('');
   const [panelDate, setPanelDate] = useState(''); // ✅ 누락됐던 상태 선언 추가
   const [panelSaving, setPanelSaving] = useState(false);
+  const [reportGenerating, setReportGenerating] = useState(false); // ✅ 특이사항 리포트 PDF 생성 중 여부
+
+  // 🔍 현장 검색
+  const [siteSearchQuery, setSiteSearchQuery] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
 
   // ── 인증 ──────────────────────────────────────
   useEffect(() => {
@@ -249,6 +255,19 @@ export default function InspectionPage() {
     return map;
   }, [sites, siteUnitsBase, rawUnits]);
 
+  // ── 현장 검색 결과 (이름/주소 매칭, 최대 8개) ──
+  const searchResults = useMemo(() => {
+    const q = siteSearchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return filteredSites
+      .filter(s => s.lat != null && s.lng != null)
+      .filter(s =>
+        s.name?.toLowerCase().includes(q) ||
+        s.address?.toLowerCase().includes(q)
+      )
+      .slice(0, 8);
+  }, [siteSearchQuery, filteredSites]);
+
   // ── 카카오맵 SDK 스크립트 로드 ──
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -270,6 +289,11 @@ export default function InspectionPage() {
     });
     const zoomControl = new w.kakao.maps.ZoomControl();
     mapObjRef.current.addControl(zoomControl, w.kakao.maps.ControlPosition.RIGHT);
+
+    // ✅ 지도 클릭 시 검색 드롭다운 닫기
+    w.kakao.maps.event.addListener(mapObjRef.current, 'click', () => {
+      setShowSearchResults(false);
+    });
   }, [mapReady, loading]);
 
   // ── 현장/점검현황이 바뀔 때마다 마커 갱신 (완료/일부완료/미완료 3색) ──
@@ -330,7 +354,14 @@ export default function InspectionPage() {
     });
 
     mapObjRef.current.relayout();
-    mapObjRef.current.setBounds(bounds);
+
+    // ✅ 실제로 "표시되는 현장 목록"이 바뀌었을 때만 지도 범위를 재조정한다.
+    //    점검 완료 상태만 바뀐 경우(체크 후 저장)에는 사용자가 맞춰둔 줌/위치를 그대로 유지.
+    const currentSiteIds = valid.map(s => s.id).sort().join(',');
+    if (currentSiteIds !== boundsFitSiteIdsRef.current) {
+      mapObjRef.current.setBounds(bounds);
+      boundsFitSiteIdsRef.current = currentSiteIds;
+    }
   }, [mapReady, filteredSites, inspectionUnitsMap, noteMap]);
 
   // ── 호기별 완료 + 비고 + 점검일 저장 ──
@@ -410,6 +441,101 @@ export default function InspectionPage() {
     setPanelUnits(prev => prev.map(u => ({ ...u, completed: value })));
   };
 
+  // ── 이번 달 특이사항이 있는 현장만 모아 PDF 리포트 생성 ──
+  const generateReport = async () => {
+    const targets = filteredSites.filter(s => (noteMap[s.id]?.note || '').trim() !== '');
+    if (targets.length === 0) {
+      alert(`${year}년 ${month}월에는 특이사항이 등록된 현장이 없어요.`);
+      return;
+    }
+
+    setReportGenerating(true);
+    try {
+      const { default: html2canvas } = await import('html2canvas');
+      const { jsPDF } = await import('jspdf');
+
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'fixed';
+      wrapper.style.top = '0';
+      wrapper.style.left = '-99999px';
+      wrapper.style.width = '800px';
+      wrapper.style.background = '#ffffff';
+      wrapper.style.padding = '32px';
+      wrapper.style.fontFamily = "'Pretendard','Malgun Gothic',sans-serif";
+
+      const rows = targets.map(site => {
+        const units = inspectionUnitsMap[site.id] || [];
+        const total = units.length;
+        const done = units.filter(u => u.completed).length;
+        const note = (noteMap[site.id]?.note || '')
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br/>');
+        return `
+          <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+              <span style="font-size:16px;font-weight:800;color:#1f2937;">${site.name}</span>
+              <span style="font-size:12px;color:#6b7280;">${month}월 점검 · ${done}/${total}호기 완료</span>
+            </div>
+            <div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">${site.address || ''}</div>
+            <div style="font-size:13px;color:#374151;line-height:1.6;">${note}</div>
+          </div>
+        `;
+      }).join('');
+
+      wrapper.innerHTML = `
+        <div style="text-align:center;margin-bottom:24px;">
+          <h1 style="font-size:20px;font-weight:900;color:#111827;margin:0 0 4px;">${year}년 ${month}월 특이사항 점검 리포트</h1>
+          <p style="font-size:12px;color:#9ca3af;margin:0;">총 ${targets.length}개 현장</p>
+        </div>
+        ${rows}
+      `;
+
+      document.body.appendChild(wrapper);
+      const canvas = await html2canvas(wrapper, { scale: 2, backgroundColor: '#ffffff' });
+      document.body.removeChild(wrapper);
+
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const imgData = canvas.toDataURL('image/png');
+
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`${year}년_${month}월_특이사항_리포트.pdf`);
+    } catch (e: any) {
+      alert('리포트 생성 실패: ' + e.message);
+    } finally {
+      setReportGenerating(false);
+    }
+  };
+
+  // ── 검색 결과 클릭 시 해당 현장으로 지도 이동 + 패널 오픈 ──
+  const goToSite = (site: SiteRow) => {
+    const w = window as any;
+    if (mapObjRef.current && site.lat != null && site.lng != null) {
+      const position = new w.kakao.maps.LatLng(site.lat, site.lng);
+      mapObjRef.current.setLevel(3);
+      mapObjRef.current.panTo(position);
+    }
+    setSelectedSite(site);
+    setPanelUnits((inspectionUnitsMap[site.id] || []).map(u => ({ ...u })));
+    setPanelNote(noteMap[site.id]?.note || '');
+    setPanelDate(new Date().toISOString().slice(0, 10));
+    setSiteSearchQuery('');
+    setShowSearchResults(false);
+  };
+
   const prevMonth = () => { if (month === 1) { setYear(y => y - 1); setMonth(12); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 12) { setYear(y => y + 1); setMonth(1); } else setMonth(m => m + 1); };
 
@@ -478,24 +604,92 @@ export default function InspectionPage() {
               완료 <strong>{stats.done}</strong>호기 ({rate}%)
             </div>
           </div>
-          {isAdmin && (
-            <div className="flex gap-2 overflow-x-auto">
-              {['전체', ...teams.map(t => t.name)].map(t => (
-                <button
-                  key={t}
-                  onClick={() => setFilterTeam(t)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                    filterTeam === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          )}
+
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {isAdmin && (
+              <div className="flex gap-2 overflow-x-auto">
+                {['전체', ...teams.map(t => t.name)].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setFilterTeam(t)}
+                    className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      filterTeam === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={generateReport}
+              disabled={reportGenerating}
+              className="whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-800 text-white hover:bg-gray-900 transition disabled:opacity-60"
+            >
+              {reportGenerating ? '생성 중...' : `📄 ${month}월 특이사항 리포트`}
+            </button>
+          </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="relative bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          {/* 🔍 현장 검색 */}
+          <div className="absolute top-3 left-3 right-3 z-20 sm:right-auto sm:w-80">
+            <div className="relative">
+              <input
+                type="text"
+                value={siteSearchQuery}
+                onChange={e => { setSiteSearchQuery(e.target.value); setShowSearchResults(true); }}
+                onFocus={() => setShowSearchResults(true)}
+                placeholder="🔍 현장명 또는 주소로 검색"
+                className="w-full bg-white border border-gray-200 shadow-md rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              {siteSearchQuery && (
+                <button
+                  onClick={() => { setSiteSearchQuery(''); setShowSearchResults(false); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {showSearchResults && siteSearchQuery.trim() && (
+              <div className="mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                {searchResults.length === 0 ? (
+                  <p className="text-xs text-gray-400 px-4 py-3">검색 결과가 없어요</p>
+                ) : (
+                  searchResults.map(site => {
+                    const units = inspectionUnitsMap[site.id] || [];
+                    const total = units.length;
+                    const done = units.filter(u => u.completed).length;
+                    const badgeClass =
+                      total > 0 && done === total
+                        ? 'bg-green-100 text-green-700'
+                        : done > 0
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-gray-100 text-gray-500';
+                    return (
+                      <button
+                        key={site.id}
+                        onClick={() => goToSite(site)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center justify-between gap-2 border-b border-gray-50 last:border-0"
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-semibold text-gray-800 truncate">{site.name}</span>
+                          <span className="block text-[11px] text-gray-400 truncate">{site.address}</span>
+                        </span>
+                        <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ${badgeClass}`}>
+                          {done}/{total}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
           <div ref={mapContainerRef} style={{ width: '100%', height: '65vh' }} />
         </div>
         <p className="text-xs text-gray-400 text-center">
