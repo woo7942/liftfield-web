@@ -491,27 +491,27 @@ export default function MaterialPage() {
       </header>
 
       <div className="p-4 max-w-7xl mx-auto">
-        {/* 상태 요약 카드 */}
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
-            const cnt = requests.filter(r => r.status === s).length;
-            const style = STATUS_STYLE[s];
-            const active = statusFilter === s;
-            return (
-              <button
-                key={s}
-                onClick={() => { setStatusFilter(s === statusFilter ? '전체' : s); setPage(1); }}
-                className={`p-3 rounded-xl border-2 text-center transition-all ${
-                  active ? `${style.bg} ${style.border} ${style.text}` : ''
-                }`}
-                style={!active ? { background: C.surface, borderColor: C.line, color: C.inkDim } : undefined}
-              >
-                <div className="text-2xl font-bold">{cnt}</div>
-                <div className="text-xs mt-1">{style.label}</div>
-              </button>
-            );
-          })}
-        </div>
+        <div className="grid grid-cols-5 gap-1.5 mb-6">
+  {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
+    const cnt = requests.filter(r => r.status === s).length;
+    const style = STATUS_STYLE[s];
+    const active = statusFilter === s;
+    return (
+      <button
+        key={s}
+        onClick={() => { setStatusFilter(s === statusFilter ? '전체' : s); setPage(1); }}
+        className={`px-1 py-2.5 rounded-xl border-2 text-center transition-all ${
+          active ? `${style.bg} ${style.border} ${style.text}` : ''
+        }`}
+        style={!active ? { background: C.surface, borderColor: C.line, color: C.inkDim } : undefined}
+      >
+        <div className="text-xl font-bold">{cnt}</div>
+        <div className="text-[10px] mt-1 whitespace-nowrap">{style.label}</div>
+      </button>
+    );
+  })}
+</div>
+
 
         {/* 필터 */}
         <div className="flex flex-wrap gap-3 mb-4">

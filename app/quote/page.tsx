@@ -497,51 +497,63 @@ export default function QuotePage() {
               </button>
             </div>
 
-            <table className="quote-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 70 }}>No.</th>
-                  <th>공사명 · 현장</th>
-                  <th className="center" style={{ width: 100 }}>팀</th>
-                  <th className="num" style={{ width: 130 }}>금액</th>
-                  <th className="center" style={{ width: 110 }}>일자</th>
-                  <th className="center" style={{ width: 100 }}>상태</th>
-                  <th style={{ width: 40 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {quotes.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: 48, color: 'var(--text-dim)', fontFamily: 'var(--sans)' }}>등록된 견적서가 없습니다.</td></tr>
-                ) : quotes.map((q, idx) => (
-                  <tr key={q.id} onClick={() => setSelectedQuote(q)}>
-                    <td><span className="qt-num">№ {String(quotes.length - idx).padStart(3, '0')}</span></td>
-                    <td>
-                      <div className="qt-title">
-                        {q.title}
-                        {q.invoice_issued && <span className="mini-tag">계산서</span>}
-                        {q.payment_confirmed && <span className="mini-tag">결제완료</span>}
-                      </div>
-                    </td>
-                    <td className="qt-team" style={{ textAlign: 'center' }}>{q.team_id}</td>
-                    <td className="qt-amount">{won(q.amount)}</td>
-                    <td className="qt-date">{fmtDate(q.created_at)}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className={`status-badge ${q.status === '승인' ? 'status-ok' : q.status === '반려' ? 'status-rej' : 'status-pend'}`}>
-                        {q.status}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {canEdit(q) && (
-                        <button onClick={(e) => handleDeleteQuote(q, e)}
-                          style={{ color: 'var(--text-dim)', fontSize: 16, cursor: 'pointer' }} title="삭제">✕</button>
-                      )}
-                    </td>
+                        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <table className="quote-table" style={{ minWidth: 640 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 70 }}>No.</th>
+                    <th style={{ minWidth: 220, textAlign: 'left' }}>공사명 · 현장</th>
+                    <th className="center" style={{ width: 100 }}>팀</th>
+                    <th className="num" style={{ width: 130 }}>금액</th>
+                    <th className="center" style={{ width: 110 }}>일자</th>
+                    <th className="center" style={{ width: 100 }}>상태</th>
+                    <th style={{ width: 40 }}></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {quotes.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: 'var(--text-dim)', fontFamily: 'var(--sans)' }}>
+                        등록된 견적서가 없습니다.
+                      </td>
+                    </tr>
+                  ) : quotes.map((q, idx) => (
+                    <tr key={q.id} onClick={() => setSelectedQuote(q)}>
+                      <td><span className="qt-num">№ {String(quotes.length - idx).padStart(3, '0')}</span></td>
+                      <td>
+                        <div className="qt-title">
+                          {q.title}
+                          {q.invoice_issued && <span className="mini-tag">계산서</span>}
+                          {q.payment_confirmed && <span className="mini-tag">결제완료</span>}
+                        </div>
+                      </td>
+                      <td className="qt-team" style={{ textAlign: 'center' }}>{q.team_id}</td>
+                      <td className="qt-amount">{won(q.amount)}</td>
+                      <td className="qt-date">{fmtDate(q.created_at)}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span className={`status-badge ${q.status === '승인' ? 'status-ok' : q.status === '반려' ? 'status-rej' : 'status-pend'}`}>
+                          {q.status}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {canEdit(q) && (
+                          <button
+                            onClick={(e) => handleDeleteQuote(q, e)}
+                            style={{ color: 'var(--text-dim)', fontSize: 16, cursor: 'pointer' }}
+                            title="삭제"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
+
 
         {/* ===== 회사정보 뷰 ===== */}
         {tab === 'company' && isAdmin && (
