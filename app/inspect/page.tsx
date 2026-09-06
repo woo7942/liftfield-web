@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { C, Icon } from '@/lib/theme';
+import TabBar from '@/components/TabBar';
 
 const SERVICE_KEY = '4c4e8677cc42223329b997aee1cbc0dffa8cd337ecb0e8c47364825dc2c76577';
 
@@ -45,10 +47,15 @@ export default function InspectPage() {
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewList, setOverviewList] = useState<any[]>([]);
 
+  // ── D-day 정보: 급한 정도에 따라 색상을 구분 (팔레트 C 기준) ──
   function getDdayInfo(elev: any) {
     const { examDate, installDate, ncStatus } = elev;
     if (ncStatus && !ncStatus.includes('운행중')) {
-      return { label: ncStatus, color: 'text-gray-500 bg-gray-100', urgent: false };
+      return {
+        label: ncStatus,
+        style: { color: C.inkDim, background: '#eef1f5' },
+        urgent: false,
+      };
     }
     const baseStr = examDate || installDate;
     if (!baseStr) return null;
@@ -59,9 +66,27 @@ export default function InspectPage() {
     const today = new Date();
     const diffDays = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-    if (diffDays < 0) return { label: '검사기한초과', color: 'text-white bg-red-600', urgent: true, diffDays };
-    if (diffDays <= 30) return { label: `D-${diffDays}`, color: 'text-red-600 bg-red-50', urgent: true, diffDays };
-    if (diffDays <= 90) return { label: `D-${diffDays}`, color: 'text-orange-600 bg-orange-50', urgent: true, diffDays };
+    if (diffDays < 0)
+      return {
+        label: '검사기한초과',
+        style: { color: '#fff', background: C.red },
+        urgent: true,
+        diffDays,
+      };
+    if (diffDays <= 30)
+      return {
+        label: `D-${diffDays}`,
+        style: { color: C.red, background: '#fee2e2' },
+        urgent: true,
+        diffDays,
+      };
+    if (diffDays <= 90)
+      return {
+        label: `D-${diffDays}`,
+        style: { color: C.amber, background: '#fef3c7' },
+        urgent: true,
+        diffDays,
+      };
     return null;
   }
 
@@ -107,12 +132,12 @@ export default function InspectPage() {
         if (sitesError) throw sitesError;
 
         const mapped = (allSites || []).map((s: any) => ({
-  id: s.id,
-  siteName: s.name || s.site_name,   // ← name을 우선 사용
-  name: s.name,
-  source: s.source,
-  teamName: s.team,
-}));
+          id: s.id,
+          siteName: s.name || s.site_name,
+          name: s.name,
+          source: s.source,
+          teamName: s.team,
+        }));
 
         const isAdmin = userData.role === 'admin' || userData.super_admin === true;
 
@@ -327,8 +352,6 @@ export default function InspectPage() {
       return;
     }
 
-    // ── 개별 호기 상세를 열 때는 이전에 만들어둔 "전체 보고서 PDF" 데이터를 비워서
-    //    두 화면(전체 보고서 / 개별 상세)이 동시에 인쇄되는 문제를 방지
     setSiteReportRows([]);
 
     setSelectedElev(elev);
@@ -590,8 +613,6 @@ export default function InspectPage() {
   const loadSiteReportAndPrint = async () => {
     if (!selectedSite || !userInfo || elevators.length === 0) return;
 
-    // ── 전체 보고서를 만들 때는 개별 호기 상세 화면을 반드시 닫아서
-    //    개별 상세 페이지가 전체 보고서 인쇄물에 함께 딸려나오는 것을 방지
     setSelectedElev(null);
     setHistory([]);
     setFailList([]);
@@ -689,480 +710,584 @@ export default function InspectPage() {
 
   if (loading)
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-500">로딩 중...</p>
+      <div
+        style={{ background: C.bg, color: C.inkDim }}
+        className="min-h-screen flex items-center justify-center"
+      >
+        <p className="text-sm">로딩 중...</p>
       </div>
     );
 
   return (
-    <div className="min-h-screen bg-gray-50 print:bg-white">
-      <header className="bg-white border-b px-4 py-3 flex items-center gap-2 sticky top-0 z-10 print:hidden">
-        <button onClick={() => router.push('/dashboard')} className="text-gray-500 hover:text-gray-700 text-lg">
-          ←
-        </button>
-        <h1 className="font-bold text-lg">🔍 검사 지적사항</h1>
-        {selectedSite && (
-          <span className="text-sm text-gray-400 ml-1">/ {selectedSite.siteName || selectedSite.name}</span>
-        )}
-        {selectedElev && <span className="text-sm text-gray-400">/ {selectedElev.hogiNo}호기</span>}
-        {selectedSite && (
+    <>
+      <div style={{ background: C.bg, minHeight: '100vh', paddingBottom: 100 }} className="print:bg-white print:pb-0">
+        <header
+          style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}
+          className="px-4 py-3 flex items-center gap-3 sticky top-0 z-10 print:hidden"
+        >
           <button
-            onClick={() => {
-              setSelectedSite(null);
-              setSelectedElev(null);
-              setElevators([]);
-            }}
-            className="ml-auto text-xs text-gray-400 hover:text-gray-600"
+            onClick={() => router.push('/dashboard')}
+            style={{ color: C.inkFaint }}
+            className="text-lg leading-none shrink-0"
           >
-            처음으로
+            ←
           </button>
-        )}
-      </header>
+          <div
+            style={{ width: 40, height: 40, borderRadius: 12, background: C.primary, color: '#fff' }}
+            className="flex items-center justify-center shrink-0"
+          >
+            {Icon.clipboard(20)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h1 style={{ color: C.ink }} className="font-bold text-base leading-tight truncate">
+              검사 지적사항
+            </h1>
+            <p style={{ color: C.inkDim }} className="text-xs truncate">
+              {selectedSite
+                ? `${selectedSite.siteName || selectedSite.name}${
+                    selectedElev ? ` · ${selectedElev.hogiNo}호기` : ''
+                  }`
+                : '승강기 안전검사 이력 확인'}
+            </p>
+          </div>
+          {selectedSite && (
+            <button
+              onClick={() => {
+                setSelectedSite(null);
+                setSelectedElev(null);
+                setElevators([]);
+              }}
+              style={{ color: C.inkFaint }}
+              className="text-xs shrink-0"
+            >
+              처음으로
+            </button>
+          )}
+        </header>
 
-      <div className="max-w-5xl mx-auto px-4 py-4 print:px-0 print:py-0 print:max-w-none">
-        {!selectedSite && (
-          <div className="max-w-2xl mx-auto mt-6">
-            <div className="mb-8">
-              <h2 className="text-sm font-bold text-gray-600 mb-2">⏰ 검사 예정 알림</h2>
-              <p className="text-xs text-gray-400 mb-3">
-                다음 예상 검사일이 90일 이내로 임박한 승강기입니다. 클릭하면 바로 상세 이력으로 이동합니다.
-              </p>
-
-              {overviewLoading ? (
-                <div className="text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">불러오는 중...</div>
-              ) : overviewList.length === 0 ? (
-                <div className="text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
-                  90일 이내 예정된 검사가 없습니다
-                </div>
-              ) : (
-                <div className="bg-white border rounded-xl overflow-hidden divide-y">
-                  {overviewList.map((r: any) => (
+        <div className="max-w-5xl mx-auto px-4 py-4 print:px-0 print:py-0 print:max-w-none">
+          {!selectedSite && (
+            <div className="max-w-2xl mx-auto mt-6">
+              {/* ── ① 현장 검색창을 맨 위로 이동 ── */}
+              <div>
+                <p style={{ color: C.inkDim }} className="text-sm mb-3 text-center">
+                  현장을 검색해서 확인할 수 있습니다
+                </p>
+                <div className="relative">
+                  <input
+                    value={siteSearch}
+                    onChange={(e) => setSiteSearch(e.target.value)}
+                    placeholder="현장명 검색..."
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
+                    className="w-full rounded-xl px-4 py-3 text-sm shadow-sm focus:outline-none"
+                  />
+                  {siteSearch && (
                     <button
-                      key={r.elev.id}
-                      onClick={() => goToElevator(r.site, r.elev)}
-                      className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center justify-between gap-3 transition-colors"
+                      onClick={() => setSiteSearch('')}
+                      style={{ color: C.inkFaint }}
+                      className="absolute right-3 top-3"
                     >
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-800 truncate">
-                          🏢 {r.site.siteName || r.site.name}
-                        </div>
-                        <div className="text-xs text-gray-400 truncate">
-                          {r.elev.dong ? `${r.elev.dong} ` : ''}
-                          {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                        </div>
-                      </div>
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-bold shrink-0 ${r.dday.color}`}>
-                        {r.dday.label}
-                      </span>
+                      ✕
                     </button>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
 
-            <div className="border-t pt-6">
-              <p className="text-gray-500 text-sm mb-3 text-center">또는 현장을 직접 검색해서 확인할 수 있습니다</p>
-              <div className="relative">
-                <input
-                  value={siteSearch}
-                  onChange={(e) => setSiteSearch(e.target.value)}
-                  placeholder="🔍 현장명 검색..."
-                  className="w-full border rounded-xl px-4 py-3 text-sm bg-white shadow-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-300"
-                />
-                {siteSearch && (
-                  <button
-                    onClick={() => setSiteSearch('')}
-                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-                  >
-                    ✕
-                  </button>
-                )}
+                {siteSearch &&
+                  (filteredSites.length > 0 ? (
+                    <div
+                      style={{ background: C.surface, border: `1px solid ${C.line}` }}
+                      className="mt-2 rounded-xl shadow-sm overflow-hidden"
+                    >
+                      {filteredSites.map((site: any) => (
+                        <button
+                          key={site.id}
+                          onClick={() => handleSiteClick(site)}
+                          style={{ borderColor: C.line, color: C.inkSoft }}
+                          className="w-full text-left px-4 py-3 hover:bg-black/[0.02] border-b last:border-0 text-sm font-medium transition-colors flex items-center gap-1.5"
+                        >
+                          {Icon.building(14)} {site.siteName || site.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }}
+                      className="mt-4 text-center text-sm py-8 rounded-xl"
+                    >
+                      검색 결과가 없습니다
+                    </div>
+                  ))}
               </div>
 
-              {siteSearch &&
-                (filteredSites.length > 0 ? (
-                  <div className="mt-2 bg-white border rounded-xl shadow-sm overflow-hidden">
-                    {filteredSites.map((site: any) => (
+              {/* ── ② 임박 검사 알림은 검색창 아래로, D-day 색상 구분 적용 ── */}
+              <div className="mt-8 pt-6" style={{ borderTop: `1px solid ${C.line}` }}>
+                <h2 style={{ color: C.inkSoft }} className="text-sm font-bold mb-2 flex items-center gap-1.5">
+                  {Icon.clock(15)} 검사 예정 알림
+                </h2>
+                <p style={{ color: C.inkFaint }} className="text-xs mb-3">
+                  다음 예상 검사일이 90일 이내로 임박한 승강기입니다. 클릭하면 바로 상세 이력으로 이동합니다.
+                </p>
+
+                {overviewLoading ? (
+                  <div
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }}
+                    className="text-center text-sm py-8 rounded-xl"
+                  >
+                    불러오는 중...
+                  </div>
+                ) : overviewList.length === 0 ? (
+                  <div
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }}
+                    className="text-center text-sm py-8 rounded-xl"
+                  >
+                    90일 이내 예정된 검사가 없습니다
+                  </div>
+                ) : (
+                  <div
+                    style={{ background: C.surface, border: `1px solid ${C.line}` }}
+                    className="rounded-xl overflow-hidden divide-y"
+                  >
+                    {overviewList.map((r: any) => (
                       <button
-                        key={site.id}
-                        onClick={() => handleSiteClick(site)}
-                        className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b
-                                   last:border-0 text-sm font-medium text-gray-700 transition-colors"
+                        key={r.elev.id}
+                        onClick={() => goToElevator(r.site, r.elev)}
+                        style={{ borderColor: C.line }}
+                        className="w-full text-left px-4 py-3 hover:bg-black/[0.02] flex items-center justify-between gap-3 transition-colors"
                       >
-                        🏢 {site.siteName || site.name}
+                        <div className="min-w-0">
+                          <div style={{ color: C.ink }} className="text-sm font-medium truncate flex items-center gap-1">
+                            {Icon.building(14)} {r.site.siteName || r.site.name}
+                          </div>
+                          <div style={{ color: C.inkFaint }} className="text-xs truncate">
+                            {r.elev.dong ? `${r.elev.dong} ` : ''}
+                            {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                          </div>
+                        </div>
+                        <span
+                          style={{ ...r.dday.style }}
+                          className="text-xs px-2.5 py-1 rounded-full font-bold shrink-0 whitespace-nowrap"
+                        >
+                          {r.dday.label}
+                        </span>
                       </button>
                     ))}
                   </div>
-                ) : (
-                  <div className="mt-4 text-center text-gray-400 text-sm py-8 bg-white border rounded-xl">
-                    검색 결과가 없습니다
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
-        {selectedSite && (
-          <div className="flex gap-4 print:block">
-            <div className="w-56 shrink-0 print:hidden">
-              <div className="bg-white border rounded-xl overflow-hidden">
-                <div className="px-3 py-2.5 border-b bg-gray-50 flex items-center justify-between">
-                  <span className="text-sm font-bold text-gray-700">
-                    🏢 {selectedSite.siteName || selectedSite.name}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setSelectedSite(null);
-                      setSelectedElev(null);
-                      setElevators([]);
-                    }}
-                    className="text-xs text-gray-400 hover:text-gray-600"
-                  >
-                    변경
-                  </button>
-                </div>
-
-                {elevators.length > 0 && (
-                  <div className="px-3 py-2 border-b bg-white">
-                    <button
-                      onClick={loadSiteReportAndPrint}
-                      disabled={siteReportLoading}
-                      className="w-full text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-800
-                                 text-white rounded-lg font-medium disabled:opacity-50"
-                    >
-                      {siteReportLoading ? reportProgress || '준비 중...' : '📄 전체 보고서 PDF (동별)'}
-                    </button>
-                  </div>
-                )}
-
-                {elevsLoading ? (
-                  <div className="py-8 text-center text-gray-400 text-sm">로딩 중...</div>
-                ) : elevators.length === 0 ? (
-                  <div className="py-8 text-center text-gray-400 text-sm">호기 없음</div>
-                ) : (
-                  sortedElevators.map((elev: any) => {
-                    const dday = getDdayInfo(elev);
-                    return (
-                      <button
-                        key={elev.id}
-                        onClick={() => handleElevClick(elev)}
-                        className={`w-full text-left px-3 py-2.5 border-b last:border-0 text-sm transition-colors
-                          ${
-                            selectedElev?.id === elev.id
-                              ? 'bg-blue-50 text-blue-700 font-semibold'
-                              : 'hover:bg-gray-50 text-gray-700'
-                          }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="font-medium">
-                            {elev.dong ? `${elev.dong} ` : ''}
-                            {String(elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                          </div>
-                          {dday && dday.urgent && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${dday.color}`}>
-                              {dday.label}
-                            </span>
-                          )}
-                        </div>
-                        {elev.installationPlace && (
-                          <div className="text-xs text-gray-400">{elev.installationPlace}</div>
-                        )}
-                        <div className="text-xs text-gray-400">{elev.elevatorNo || '번호없음'}</div>
-                      </button>
-                    );
-                  })
                 )}
               </div>
             </div>
+          )}
 
-            <div className="flex-1">
-              {!selectedElev && siteReportRows.length === 0 && (
-                <div className="bg-white border rounded-xl py-20 text-center text-gray-400">
-                  <p className="text-3xl mb-3">🔍</p>
-                  <p className="text-sm">왼쪽에서 호기를 선택하세요</p>
-                </div>
-              )}
+          {selectedSite && (
+            <div className="flex gap-4 print:block">
+              <div className="w-56 shrink-0 print:hidden">
+                <div style={{ background: C.surface, border: `1px solid ${C.line}` }} className="rounded-xl overflow-hidden">
+                  <div
+                    style={{ borderColor: C.line, background: C.bg }}
+                    className="px-3 py-2.5 border-b flex items-center justify-between"
+                  >
+                    <span style={{ color: C.inkSoft }} className="text-sm font-bold flex items-center gap-1">
+                      {Icon.building(14)} {selectedSite.siteName || selectedSite.name}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSelectedSite(null);
+                        setSelectedElev(null);
+                        setElevators([]);
+                      }}
+                      style={{ color: C.inkFaint }}
+                      className="text-xs"
+                    >
+                      변경
+                    </button>
+                  </div>
 
-              {/* ── 전체 보고서 PDF (동별) : selectedElev가 항상 null인 상태에서만 렌더링되도록 위에서 보장 ── */}
-              {siteReportRows.length > 0 && !selectedElev && (
-                <div className="hidden print:block p-4">
-                  <h2 className="text-lg font-bold mb-1">
-                    {selectedSite?.siteName || selectedSite?.name} 전체 승강기 검사현황
-                  </h2>
-                  <p className="text-xs text-gray-500 mb-4">출력일 {new Date().toLocaleDateString('ko-KR')}</p>
-
-                  {Object.entries(groupedByDong).map(([dong, rows]) => (
-                    <div key={dong} className="mb-4 print:break-inside-avoid">
-                      <h3 className="font-bold text-sm border-b pb-1 mb-2">{dong}</h3>
-                      <table className="w-full text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left py-1">호기</th>
-                            <th className="text-left py-1">최근검사일</th>
-                            <th className="text-left py-1">종류</th>
-                            <th className="text-left py-1">결과</th>
-                            <th className="text-left py-1">대응상태</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows
-                            .sort(
-                              (a, b) =>
-                                parseInt(String(a.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0') -
-                                parseInt(String(b.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0')
-                            )
-                            .map((r) => (
-                              <tr key={r.elev.id} className="border-b">
-                                <td className="py-1">{String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기</td>
-                                <td className="py-1">{r.latest ? fmtYmd(r.latest.inspct_de) : '-'}</td>
-                                <td className="py-1">{r.latest?.inspct_kind_nm || '-'}</td>
-                                <td className="py-1">{r.latest?.disp_words || '-'}</td>
-                                <td className="py-1">{r.latest?.status || '-'}</td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))}
-
-                  {conditionalSummaryRows.length > 0 && (
-                    <div className="mt-6 pt-4 border-t-2 border-gray-400 print:break-inside-avoid">
-                      <h3 className="font-bold text-sm mb-3">⚠ 조건부합격 / 불합격 지적사항</h3>
-                      {conditionalSummaryRows.map((r) => {
-                        const dateNote =
-                          r.failSourceRow && r.failSourceRow.inspct_de !== r.latest?.inspct_de
-                            ? ` (${fmtYmd(r.failSourceRow.inspct_de)} 검사 기준)`
-                            : '';
-                        return (
-                          <div key={r.elev.id} className="mb-2 text-xs print:break-inside-avoid">
-                            <p className="font-semibold text-gray-800">
-                              {r.elev.dong ? `${r.elev.dong} ` : ''}
-                              {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                              <span className="ml-2 text-red-600">{r.latest?.disp_words}</span>
-                              <span className="ml-2 text-gray-400 font-normal">{dateNote}</span>
-                            </p>
-                            <ul className="pl-4 list-disc text-gray-600">
-                              {r.fails.map((f: any, fi: number) => (
-                                <li key={fi}>{formatFailText(f)}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        );
-                      })}
+                  {elevators.length > 0 && (
+                    <div style={{ borderColor: C.line }} className="px-3 py-2 border-b">
+                      <button
+                        onClick={loadSiteReportAndPrint}
+                        disabled={siteReportLoading}
+                        style={{ background: C.inkSoft, color: '#fff' }}
+                        className="w-full text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        {Icon.fileText(13)} {siteReportLoading ? reportProgress || '준비 중...' : '전체 보고서 PDF (동별)'}
+                      </button>
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* ── 개별 호기 상세 PDF : siteReportRows는 handleElevClick 시작 시 항상 비워지므로 서로 겹치지 않음 ── */}
-              {selectedElev && (
-                <div className="bg-white border rounded-xl overflow-hidden print:border-none print:rounded-none">
-                  <div className="px-4 py-3 bg-purple-50 border-b flex items-center justify-between print:hidden">
-                    <div>
-                      <span className="font-bold text-purple-700">
-                        {selectedElev.dong ? `${selectedElev.dong} ` : ''}
-                        {String(selectedElev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                      </span>
-                      {selectedElev.installationPlace && (
-                        <span className="text-sm text-gray-500 ml-2">({selectedElev.installationPlace})</span>
-                      )}
+                  {elevsLoading ? (
+                    <div style={{ color: C.inkFaint }} className="py-8 text-center text-sm">
+                      로딩 중...
                     </div>
-                    <span className="text-xs text-gray-500">승강기번호: {selectedElev.elevatorNo || '없음'}</span>
-                  </div>
-
-                  <div className="hidden print:block px-4 pt-4">
-                    <h2 className="text-lg font-bold">
-                      {selectedSite?.siteName || selectedSite?.name} ·{' '}
-                      {selectedElev.dong ? `${selectedElev.dong} ` : ''}
-                      {String(selectedElev.hogiNo || '').replace(/[^0-9]/g, '')}호기 검사이력
-                    </h2>
-                    <p className="text-xs text-gray-500 mt-1">
-                      승강기번호 {selectedElev.elevatorNo || '없음'} · 출력일 {new Date().toLocaleDateString('ko-KR')}
-                    </p>
-                  </div>
-
-                  <div className="p-4">
-                    {apiLoading && (
-                      <div className="py-16 text-center print:hidden">
-                        <div className="inline-block w-8 h-8 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin mb-3" />
-                        <p className="text-gray-500 text-sm">검사이력 조회 중...</p>
-                      </div>
-                    )}
-
-                    {apiError && (
-                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm print:hidden">
-                        {apiError}
-                      </div>
-                    )}
-
-                    {!apiLoading && !apiError && history.length === 0 && (
-                      <div className="py-16 text-center text-gray-400 print:hidden">
-                        <p className="text-3xl mb-3">📄</p>
-                        <p className="text-sm">검사이력이 없습니다</p>
-                      </div>
-                    )}
-
-                    {!apiLoading && !apiError && history.length > 0 && dataSource && (
-                      <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 print:hidden">
-                        <span className="text-xs text-blue-600">
-                          {dataSource === 'cache'
-                            ? `저장된 데이터입니다${
-                                lastSyncedAt ? ` (최근 확인: ${new Date(lastSyncedAt).toLocaleDateString('ko-KR')})` : ''
-                              }`
-                            : '방금 최신 정보를 가져와 저장했습니다'}
-                        </span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            onClick={() => window.print()}
-                            className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-medium"
-                          >
-                            PDF 저장
-                          </button>
-                          <button
-                            onClick={() => handleElevClick(selectedElev, true)}
-                            className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
-                          >
-                            새로고침
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {!apiLoading && history.length > 0 && (
-                      <div className="space-y-3">
-                        <h3 className="font-bold text-gray-700 text-sm print:hidden">
-                          최근 검사이력 ({history.length}건)
-                        </h3>
-                        {(() => {
-                          const latestFailRecord = history.find((h) => failList.some((f) => f.examYmd === h.inspctDe));
-                          return history.map((h, i) => {
-                            const key = `${selectedElev.id}_${h.inspctDe}`;
-                            const memoData = memos[key] || { memo: '', status: '미대응' };
-                            const isSaving = savingKey === key;
-                            const fails = failList.filter((f) => f.examYmd === h.inspctDe);
-                            const dotColor =
-                              h.dispWords === '합격'
-                                ? 'bg-green-500'
-                                : h.dispWords === '조건부합격'
-                                ? 'bg-yellow-500'
-                                : 'bg-red-500';
-                            const textColor =
-                              h.dispWords === '합격'
-                                ? 'text-green-600'
-                                : h.dispWords === '조건부합격'
-                                ? 'text-yellow-600'
-                                : 'text-red-600';
-                            return (
-                              <div
-                                key={i}
-                                className={`border-b border-gray-200 pb-4 last:border-0 print:break-inside-avoid
-                                  ${i > 0 ? 'print:hidden' : ''}`}
+                  ) : elevators.length === 0 ? (
+                    <div style={{ color: C.inkFaint }} className="py-8 text-center text-sm">
+                      호기 없음
+                    </div>
+                  ) : (
+                    sortedElevators.map((elev: any) => {
+                      const dday = getDdayInfo(elev);
+                      const isActive = selectedElev?.id === elev.id;
+                      return (
+                        <button
+                          key={elev.id}
+                          onClick={() => handleElevClick(elev)}
+                          style={{
+                            borderColor: C.line,
+                            background: isActive ? C.primaryLight : 'transparent',
+                            color: isActive ? C.primaryDeep : C.inkSoft,
+                          }}
+                          className={`w-full text-left px-3 py-2.5 border-b last:border-0 text-sm transition-colors ${
+                            isActive ? 'font-semibold' : 'hover:bg-black/[0.02]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="font-medium">
+                              {elev.dong ? `${elev.dong} ` : ''}
+                              {String(elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                            </div>
+                            {dday && dday.urgent && (
+                              <span
+                                style={{ ...dday.style }}
+                                className="text-[10px] px-1.5 py-0.5 rounded font-bold"
                               >
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                                  <span className="font-semibold text-gray-800 text-sm">{fmtYmd(h.inspctDe)}</span>
-                                  <span className="text-xs text-gray-400">{h.inspctKindNm}</span>
-                                  <span className={`text-xs font-bold ml-auto ${textColor}`}>{h.dispWords}</span>
-                                </div>
-                                <p className="text-xs text-gray-400 mb-2 pl-4">
-                                  {h.inspctInsttNm} · 유효기간 {fmtYmd(h.applcBeDt)} ~ {fmtYmd(h.applcEnDt)}
-                                </p>
+                                {dday.label}
+                              </span>
+                            )}
+                          </div>
+                          {elev.installationPlace && (
+                            <div style={{ color: C.inkFaint }} className="text-xs">
+                              {elev.installationPlace}
+                            </div>
+                          )}
+                          <div style={{ color: C.inkFaint }} className="text-xs">
+                            {elev.elevatorNo || '번호없음'}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
 
-                                {fails.length > 0 && (
-                                  <div className="pl-4 mb-2 space-y-1.5">
-                                    {fails.map((f, fi) => (
-                                      <div key={fi} className="text-xs text-gray-600">
-                                        <p className="font-medium text-red-500">
-                                          {f.standardArticle} {f.standardTitle1}
-                                        </p>
-                                        <p>{f.failDesc}</p>
-                                        {f.failDescInspector && (
-                                          <p className="text-gray-400 italic">👤 {f.failDescInspector}</p>
-                                        )}
-                                      </div>
-                                    ))}
+              <div className="flex-1">
+                {!selectedElev && siteReportRows.length === 0 && (
+                  <div
+                    style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }}
+                    className="rounded-xl py-20 text-center"
+                  >
+                    <div className="flex justify-center mb-3" style={{ color: C.inkFaint }}>
+                      {Icon.clipboard(32)}
+                    </div>
+                    <p className="text-sm">왼쪽에서 호기를 선택하세요</p>
+                  </div>
+                )}
+
+                {siteReportRows.length > 0 && !selectedElev && (
+                  <div className="hidden print:block p-4">
+                    <h2 className="text-lg font-bold mb-1">
+                      {selectedSite?.siteName || selectedSite?.name} 전체 승강기 검사현황
+                    </h2>
+                    <p className="text-xs text-gray-500 mb-4">출력일 {new Date().toLocaleDateString('ko-KR')}</p>
+
+                    {Object.entries(groupedByDong).map(([dong, rows]) => (
+                      <div key={dong} className="mb-4 print:break-inside-avoid">
+                        <h3 className="font-bold text-sm border-b pb-1 mb-2">{dong}</h3>
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left py-1">호기</th>
+                              <th className="text-left py-1">최근검사일</th>
+                              <th className="text-left py-1">종류</th>
+                              <th className="text-left py-1">결과</th>
+                              <th className="text-left py-1">대응상태</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows
+                              .sort(
+                                (a, b) =>
+                                  parseInt(String(a.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0') -
+                                  parseInt(String(b.elev.hogiNo || '0').replace(/[^0-9]/g, '') || '0')
+                              )
+                              .map((r) => (
+                                <tr key={r.elev.id} className="border-b">
+                                  <td className="py-1">{String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기</td>
+                                  <td className="py-1">{r.latest ? fmtYmd(r.latest.inspct_de) : '-'}</td>
+                                  <td className="py-1">{r.latest?.inspct_kind_nm || '-'}</td>
+                                  <td className="py-1">{r.latest?.disp_words || '-'}</td>
+                                  <td className="py-1">{r.latest?.status || '-'}</td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+
+                    {conditionalSummaryRows.length > 0 && (
+                      <div className="mt-6 pt-4 border-t-2 border-gray-400 print:break-inside-avoid">
+                        <h3 className="font-bold text-sm mb-3">⚠ 조건부합격 / 불합격 지적사항</h3>
+                        {conditionalSummaryRows.map((r) => {
+                          const dateNote =
+                            r.failSourceRow && r.failSourceRow.inspct_de !== r.latest?.inspct_de
+                              ? ` (${fmtYmd(r.failSourceRow.inspct_de)} 검사 기준)`
+                              : '';
+                          return (
+                            <div key={r.elev.id} className="mb-2 text-xs print:break-inside-avoid">
+                              <p className="font-semibold text-gray-800">
+                                {r.elev.dong ? `${r.elev.dong} ` : ''}
+                                {String(r.elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                                <span className="ml-2 text-red-600">{r.latest?.disp_words}</span>
+                                <span className="ml-2 text-gray-400 font-normal">{dateNote}</span>
+                              </p>
+                              <ul className="pl-4 list-disc text-gray-600">
+                                {r.fails.map((f: any, fi: number) => (
+                                  <li key={fi}>{formatFailText(f)}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedElev && (
+                  <div
+                    style={{ background: C.surface, border: `1px solid ${C.line}` }}
+                    className="rounded-xl overflow-hidden print:border-none print:rounded-none"
+                  >
+                    <div
+                      style={{ background: C.primaryLight, borderColor: C.line }}
+                      className="px-4 py-3 border-b flex items-center justify-between print:hidden"
+                    >
+                      <div>
+                        <span style={{ color: C.primaryDeep }} className="font-bold">
+                          {selectedElev.dong ? `${selectedElev.dong} ` : ''}
+                          {String(selectedElev.hogiNo || '').replace(/[^0-9]/g, '')}호기
+                        </span>
+                        {selectedElev.installationPlace && (
+                          <span style={{ color: C.inkDim }} className="text-sm ml-2">
+                            ({selectedElev.installationPlace})
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ color: C.inkDim }} className="text-xs">
+                        승강기번호: {selectedElev.elevatorNo || '없음'}
+                      </span>
+                    </div>
+
+                    <div className="hidden print:block px-4 pt-4">
+                      <h2 className="text-lg font-bold">
+                        {selectedSite?.siteName || selectedSite?.name} ·{' '}
+                        {selectedElev.dong ? `${selectedElev.dong} ` : ''}
+                        {String(selectedElev.hogiNo || '').replace(/[^0-9]/g, '')}호기 검사이력
+                      </h2>
+                      <p className="text-xs text-gray-500 mt-1">
+                        승강기번호 {selectedElev.elevatorNo || '없음'} · 출력일 {new Date().toLocaleDateString('ko-KR')}
+                      </p>
+                    </div>
+
+                    <div className="p-4">
+                      {apiLoading && (
+                        <div className="py-16 text-center print:hidden">
+                          <div
+                            style={{ borderColor: C.primaryLight, borderTopColor: C.primary }}
+                            className="inline-block w-8 h-8 border-4 rounded-full animate-spin mb-3"
+                          />
+                          <p style={{ color: C.inkFaint }} className="text-sm">
+                            검사이력 조회 중...
+                          </p>
+                        </div>
+                      )}
+
+                      {apiError && (
+                        <div
+                          style={{ background: '#fef2f2', border: '1px solid #fecaca', color: C.red }}
+                          className="rounded-xl p-4 text-sm print:hidden"
+                        >
+                          {apiError}
+                        </div>
+                      )}
+
+                      {!apiLoading && !apiError && history.length === 0 && (
+                        <div style={{ color: C.inkFaint }} className="py-16 text-center print:hidden">
+                          <div className="flex justify-center mb-3">{Icon.fileText(28)}</div>
+                          <p className="text-sm">검사이력이 없습니다</p>
+                        </div>
+                      )}
+
+                      {!apiLoading && !apiError && history.length > 0 && dataSource && (
+                        <div
+                          style={{ background: C.primaryLight, border: `1px solid ${C.primaryLight}` }}
+                          className="mb-4 flex items-center justify-between rounded-lg px-3 py-2 print:hidden"
+                        >
+                          <span style={{ color: C.primaryDeep }} className="text-xs">
+                            {dataSource === 'cache'
+                              ? `저장된 데이터입니다${
+                                  lastSyncedAt ? ` (최근 확인: ${new Date(lastSyncedAt).toLocaleDateString('ko-KR')})` : ''
+                                }`
+                              : '방금 최신 정보를 가져와 저장했습니다'}
+                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => window.print()}
+                              style={{ background: C.inkSoft, color: '#fff' }}
+                              className="text-xs px-3 py-1 rounded-lg font-medium"
+                            >
+                              PDF 저장
+                            </button>
+                            <button
+                              onClick={() => handleElevClick(selectedElev, true)}
+                              style={{ background: C.primary, color: '#fff' }}
+                              className="text-xs px-3 py-1 rounded-lg font-medium"
+                            >
+                              새로고침
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {!apiLoading && history.length > 0 && (
+                        <div className="space-y-3">
+                          <h3 style={{ color: C.inkSoft }} className="font-bold text-sm print:hidden">
+                            최근 검사이력 ({history.length}건)
+                          </h3>
+                          {(() => {
+                            const latestFailRecord = history.find((h) => failList.some((f) => f.examYmd === h.inspctDe));
+                            return history.map((h, i) => {
+                              const key = `${selectedElev.id}_${h.inspctDe}`;
+                              const memoData = memos[key] || { memo: '', status: '미대응' };
+                              const isSaving = savingKey === key;
+                              const fails = failList.filter((f) => f.examYmd === h.inspctDe);
+                              const resultColor =
+                                h.dispWords === '합격' ? C.green : h.dispWords === '조건부합격' ? C.amber : C.red;
+                              return (
+                                <div
+                                  key={i}
+                                  style={{ borderColor: C.line }}
+                                  className={`border-b pb-4 last:border-0 print:break-inside-avoid ${
+                                    i > 0 ? 'print:hidden' : ''
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span
+                                      style={{ background: resultColor }}
+                                      className="w-2 h-2 rounded-full shrink-0"
+                                    />
+                                    <span style={{ color: C.ink }} className="font-semibold text-sm">
+                                      {fmtYmd(h.inspctDe)}
+                                    </span>
+                                    <span style={{ color: C.inkFaint }} className="text-xs">
+                                      {h.inspctKindNm}
+                                    </span>
+                                    <span style={{ color: resultColor }} className="text-xs font-bold ml-auto">
+                                      {h.dispWords}
+                                    </span>
                                   </div>
-                                )}
+                                  <p style={{ color: C.inkFaint }} className="text-xs mb-2 pl-4">
+                                    {h.inspctInsttNm} · 유효기간 {fmtYmd(h.applcBeDt)} ~ {fmtYmd(h.applcEnDt)}
+                                  </p>
 
-                                {i === 0 &&
-                                  fails.length === 0 &&
-                                  h.dispWords !== '합격' &&
-                                  latestFailRecord &&
-                                  latestFailRecord.inspctDe !== h.inspctDe && (
-                                    <div className="hidden print:block pl-4 mb-2 space-y-1.5">
-                                      <p className="text-xs text-gray-400 font-medium">
-                                        ※ {fmtYmd(latestFailRecord.inspctDe)} 검사 지적사항
-                                      </p>
-                                      {failList
-                                        .filter((f) => f.examYmd === latestFailRecord.inspctDe)
-                                        .map((f, fi) => (
-                                          <div key={fi} className="text-xs text-gray-600">
-                                            <p className="font-medium text-red-500">
-                                              {f.standardArticle} {f.standardTitle1}
+                                  {fails.length > 0 && (
+                                    <div className="pl-4 mb-2 space-y-1.5">
+                                      {fails.map((f, fi) => (
+                                        <div key={fi} style={{ color: C.inkDim }} className="text-xs">
+                                          <p style={{ color: C.red }} className="font-medium">
+                                            {f.standardArticle} {f.standardTitle1}
+                                          </p>
+                                          <p>{f.failDesc}</p>
+                                          {f.failDescInspector && (
+                                            <p style={{ color: C.inkFaint }} className="italic">
+                                              👤 {f.failDescInspector}
                                             </p>
-                                            <p>{f.failDesc}</p>
-                                            {f.failDescInspector && (
-                                              <p className="text-gray-400 italic">👤 {f.failDescInspector}</p>
-                                            )}
-                                          </div>
-                                        ))}
+                                          )}
+                                        </div>
+                                      ))}
                                     </div>
                                   )}
 
-                                <div className="pl-4 print:hidden">
-                                  <div className="flex gap-1.5 mb-1.5">
-                                    {['미대응', '대응중', '완료'].map((s) => (
-                                      <button
-                                        key={s}
-                                        onClick={() => updateMemo(key, 'status', s)}
-                                        className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors
-                                          ${
-                                            memoData.status === s
-                                              ? 'bg-purple-600 text-white'
-                                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                                          }`}
-                                      >
-                                        {s}
-                                      </button>
-                                    ))}
-                                  </div>
-                                  <textarea
-                                    value={memoData.memo}
-                                    onChange={(e) => updateMemo(key, 'memo', e.target.value)}
-                                    placeholder="대응 내역, 특이사항 등을 입력하세요"
-                                    className="w-full text-xs border border-gray-200 rounded-md px-3 py-2 resize-none h-16
-                                               focus:outline-none focus:ring-1 focus:ring-purple-300"
-                                  />
-                                  <button
-                                    onClick={() => saveMemo(h)}
-                                    disabled={isSaving}
-                                    className="mt-1.5 text-xs px-4 py-1.5 bg-purple-600 hover:bg-purple-700
-                                               text-white rounded-md font-medium disabled:opacity-50"
-                                  >
-                                    {isSaving ? '저장 중...' : memoData.docId ? '수정 저장' : '저장'}
-                                  </button>
-                                </div>
+                                  {i === 0 &&
+                                    fails.length === 0 &&
+                                    h.dispWords !== '합격' &&
+                                    latestFailRecord &&
+                                    latestFailRecord.inspctDe !== h.inspctDe && (
+                                      <div className="hidden print:block pl-4 mb-2 space-y-1.5">
+                                        <p className="text-xs text-gray-400 font-medium">
+                                          ※ {fmtYmd(latestFailRecord.inspctDe)} 검사 지적사항
+                                        </p>
+                                        {failList
+                                          .filter((f) => f.examYmd === latestFailRecord.inspctDe)
+                                          .map((f, fi) => (
+                                            <div key={fi} className="text-xs text-gray-600">
+                                              <p className="font-medium text-red-500">
+                                                {f.standardArticle} {f.standardTitle1}
+                                              </p>
+                                              <p>{f.failDesc}</p>
+                                              {f.failDescInspector && (
+                                                <p className="text-gray-400 italic">👤 {f.failDescInspector}</p>
+                                              )}
+                                            </div>
+                                          ))}
+                                      </div>
+                                    )}
 
-                                {(memoData.memo || memoData.status !== '미대응') && (
-                                  <div className="hidden print:block pl-4 text-xs text-gray-600">
-                                    상태: {memoData.status}
-                                    {memoData.memo ? ` · 메모: ${memoData.memo}` : ''}
+                                  <div className="pl-4 print:hidden">
+                                    <div className="flex gap-1.5 mb-1.5">
+                                      {['미대응', '대응중', '완료'].map((s) => (
+                                        <button
+                                          key={s}
+                                          onClick={() => updateMemo(key, 'status', s)}
+                                          style={{
+                                            background: memoData.status === s ? C.purple : '#f1f5f9',
+                                            color: memoData.status === s ? '#fff' : C.inkDim,
+                                          }}
+                                          className="text-xs px-2.5 py-1 rounded-md font-medium transition-colors"
+                                        >
+                                          {s}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <textarea
+                                      value={memoData.memo}
+                                      onChange={(e) => updateMemo(key, 'memo', e.target.value)}
+                                      placeholder="대응 내역, 특이사항 등을 입력하세요"
+                                      style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                                      className="w-full text-xs rounded-md px-3 py-2 resize-none h-16 focus:outline-none"
+                                    />
+                                    <button
+                                      onClick={() => saveMemo(h)}
+                                      disabled={isSaving}
+                                      style={{ background: C.purple, color: '#fff' }}
+                                      className="mt-1.5 text-xs px-4 py-1.5 rounded-md font-medium disabled:opacity-50"
+                                    >
+                                      {isSaving ? '저장 중...' : memoData.docId ? '수정 저장' : '저장'}
+                                    </button>
                                   </div>
-                                )}
-                              </div>
-                            );
-                          });
-                        })()}
-                      </div>
-                    )}
+
+                                  {(memoData.memo || memoData.status !== '미대응') && (
+                                    <div className="hidden print:block pl-4 text-xs text-gray-600">
+                                      상태: {memoData.status}
+                                      {memoData.memo ? ` · 메모: ${memoData.memo}` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+
+      <div className="print:hidden">
+        <TabBar active="inspect" />
+      </div>
+    </>
   );
 }
