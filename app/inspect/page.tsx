@@ -6,8 +6,6 @@ import { supabase } from '@/lib/supabase';
 import { C, Icon } from '@/lib/theme';
 import TabBar from '@/components/TabBar';
 
-const SERVICE_KEY = '4c4e8677cc42223329b997aee1cbc0dffa8cd337ecb0e8c47364825dc2c76577';
-
 const getTag = (xml: string, tag: string) =>
   xml.match(new RegExp(`<${tag}>(.*?)<\/${tag}>`))?.[1] || '';
 const getItems = (xml: string) =>
@@ -90,8 +88,6 @@ export default function InspectPage() {
     return null;
   }
 
-  // ── 지적사항 텍스트 정리: failDesc가 보일러플레이트("안전검사기준에 적합하지 않음")일 때는
-  //    failDescInspector를 우선하고, 둘 다 의미 있는 값이면 함께 보여줘서 "3층"처럼 위치만 남는 문제 방지
   const GENERIC_FAIL_DESC = '안전검사기준에 적합하지 않음';
   const formatFailText = (f: any) => {
     const desc = f.failDesc && f.failDesc !== GENERIC_FAIL_DESC ? f.failDesc : '';
@@ -409,10 +405,8 @@ export default function InspectPage() {
         }
       }
 
-      const histRes = await fetch(
-        `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectsafeList` +
-          `?serviceKey=${SERVICE_KEY}&elevator_no=${elev.elevatorNo}&numOfRows=50&pageNo=1`
-      );
+      // ── 서버 API 라우트 경유 호출 (기존 직접 fetch → /api/inspect) ──
+      const histRes = await fetch(`/api/inspect?type=history&elevator_no=${elev.elevatorNo}`);
       const histText = await histRes.text();
       const histData = getItems(histText)
         .map((xml) => ({
@@ -431,10 +425,7 @@ export default function InspectPage() {
 
       const allFails: any[] = [];
       for (const h of histData.filter((h) => h.failCd)) {
-        const failRes = await fetch(
-          `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectFailList` +
-            `?serviceKey=${SERVICE_KEY}&fail_cd=${h.failCd}&numOfRows=50&pageNo=1`
-        );
+        const failRes = await fetch(`/api/inspect?type=fail&fail_cd=${h.failCd}`);
         const failText = await failRes.text();
         getItems(failText).forEach((xml) =>
           allFails.push({
@@ -535,10 +526,8 @@ export default function InspectPage() {
   const fetchAndSaveForReport = async (elev: any, site: any) => {
     if (!elev.elevatorNo) return null;
     try {
-      const histRes = await fetch(
-        `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectsafeList` +
-          `?serviceKey=${SERVICE_KEY}&elevator_no=${elev.elevatorNo}&numOfRows=50&pageNo=1`
-      );
+      // ── 서버 API 라우트 경유 호출 ──
+      const histRes = await fetch(`/api/inspect?type=history&elevator_no=${elev.elevatorNo}`);
       const histText = await histRes.text();
       const histData = getItems(histText)
         .map((xml) => ({
@@ -558,10 +547,7 @@ export default function InspectPage() {
 
       const allFails: any[] = [];
       for (const h of histData.filter((h) => h.failCd)) {
-        const failRes = await fetch(
-          `https://apis.data.go.kr/B553664/ElevatorInspectsafeService/getInspectFailList` +
-            `?serviceKey=${SERVICE_KEY}&fail_cd=${h.failCd}&numOfRows=50&pageNo=1`
-        );
+        const failRes = await fetch(`/api/inspect?type=fail&fail_cd=${h.failCd}`);
         const failText = await failRes.text();
         getItems(failText).forEach((xml) =>
           allFails.push({
@@ -768,7 +754,6 @@ export default function InspectPage() {
         <div className="max-w-5xl mx-auto px-4 py-4 print:px-0 print:py-0 print:max-w-none">
           {!selectedSite && (
             <div className="max-w-2xl mx-auto mt-6">
-              {/* ── ① 현장 검색창을 맨 위로 이동 ── */}
               <div>
                 <p style={{ color: C.inkDim }} className="text-sm mb-3 text-center">
                   현장을 검색해서 확인할 수 있습니다
@@ -819,7 +804,6 @@ export default function InspectPage() {
                   ))}
               </div>
 
-              {/* ── ② 임박 검사 알림은 검색창 아래로, D-day 색상 구분 적용 ── */}
               <div className="mt-8 pt-6" style={{ borderTop: `1px solid ${C.line}` }}>
                 <h2 style={{ color: C.inkSoft }} className="text-sm font-bold mb-2 flex items-center gap-1.5">
                   {Icon.clock(15)} 검사 예정 알림
