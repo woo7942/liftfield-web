@@ -939,7 +939,7 @@ export default function QuotePage() {
                   <tr className="total-row">
                     <td colSpan={4} className="right">합 계 금 액</td>
                     <td className="right">{won(selectedQuote.amount)}</td>
-                    <td style={{ fontFamily: 'var(--sans)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 }}>천단위절사</td>
+                    <td style={{ fontFamily: 'var(--sans)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 }}>백단위절사</td>
                   </tr>
                 </tbody>
               </table>

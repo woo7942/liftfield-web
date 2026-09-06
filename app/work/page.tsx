@@ -81,6 +81,13 @@ const Icon = {
       <path d="M9 6l6 6-6 6" />
     </svg>
   ),
+  settings: (s = 16) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+  </svg>
+),
+
   home: (s = 20) => (
     <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M3 12l9-9 9 9" /><path d="M5 10v10h14V10" />
@@ -735,23 +742,43 @@ export default function WorkPage() {
             </div>
           </div>
         </div>
-                <div
-          onClick={handleLogout}
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            background: "#fff",
-            border: `1px solid ${C.line}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: C.red,
-            cursor: "pointer",
-          }}
-        >
-          {Icon.logout(18)}
-        </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+  <div
+    onClick={() => router.push('/settings')}
+    style={{
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      background: "#fff",
+      border: `1px solid ${C.line}`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: C.inkDim,
+      cursor: "pointer",
+    }}
+  >
+    {Icon.settings(18)}
+  </div>
+  <div
+    onClick={handleLogout}
+    style={{
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      background: "#fff",
+      border: `1px solid ${C.line}`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: C.red,
+      cursor: "pointer",
+    }}
+  >
+    {Icon.logout(18)}
+  </div>
+</div>
+
 
       </div>
 
