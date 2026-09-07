@@ -6,6 +6,16 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { C, Icon, pick } from '@/lib/theme';
 import TabBar from '@/components/TabBar';
+import {
+  isEscalatorType,
+  ELEVATOR_CAUSE_GROUPS,
+  ESCALATOR_CAUSE_GROUPS,
+  ACTION_GROUPS,
+} from '@/lib/fault-taxonomy';
+import ChipAccordion from '@/components/fault/ChipAccordion';
+import ErrorCodeList from '@/components/fault/ErrorCodeList';
+
+
 
 interface FaultReport {
   id: string;
@@ -29,6 +39,7 @@ interface FaultReport {
   fault_cause: string;
   fault_action: string;
   fault_note: string;
+  error_codes: string[];
 }
 
 const toDateStr = (v: string | null): string => {
@@ -63,40 +74,6 @@ const parseDatetimeInput = (s: string): string | null => {
   if (!s.trim()) return null;
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d.toISOString();
-};
-
-const isEscalatorType = (t?: string | null): boolean =>
-  !!t && (t.includes('에스컬레이터') || t.includes('무빙워크'));
-
-const ELEVATOR_CAUSE_GROUPS: Record<string, string[]> = {
-  '전기·전원': ['정전·전원 차단', '배선 접촉불량·단선', '누전'],
-  '제어반': ['제어반(인버터) 에러', '기판 소손', '통신·신호 오류'],
-  '도어': ['도어 개폐 불량', '도어 스위치 불량', '도어 레일 이물질 끼임', '도어 벨트 마모·이탈'],
-  '권상기·모터': ['권상기 이상음', '메인모터 과열', '브레이크 라이닝 마모', '브레이크 미개방(작동불량)'],
-  '로프·안전장치': ['로프 장력 불균형', '로프 마모·소선단선', '조속기(과속조절기) 작동', '리미트·안전스위치 오동작', '완충기 이상'],
-  '조작반·표시': ['버튼·조작반 고장', '층수표시기 오류', '인터폰 불량'],
-  '기타': ['정지위치 불량(착상오차)', '승강로 이물질 끼임', '진동·소음 발생', '노후 부품열화', '사용자 과실(비정상 사용)', '원인불명', '기타'],
-};
-const ESCALATOR_CAUSE_GROUPS: Record<string, string[]> = {
-  '스텝·디딤판': ['스텝 변형·파손', '스텝체인 장력불량(늘어짐)', '스텝 롤러 마모', '스텝 정렬 불량'],
-  '핸드레일': ['핸드레일 이탈', '핸드레일 속도불일치', '핸드레일 마모·손상', '핸드레일 급정지'],
-  '구동부': ['구동체인 이상', '감속기 소음·마모', '메인브레이크 이상', '전동기 과열'],
-  '콤플레이트·스커트': ['콤플레이트 파손', '스커트가드 마찰·간섭', '안전브러시(스커트 디플렉터) 이탈'],
-  '안전장치': ['비상정지스위치 작동', '인렛가드 안전스위치 작동', '역행방지장치 작동'],
-  '전기·제어': ['제어반 오류', '릴레이 불량', '정전·전원차단'],
-  '기타': ['이물질 끼임', '소음·진동', '노후 부품열화', '원인불명', '기타'],
-};
-const ACTION_CHIPS = [
-  '리셋 후 정상 작동 확인', '부품 교체', '조정·재조임',
-  '청소·이물질 제거', '부품 주문 후 재방문 예정',
-  '제조사·외주업체 A/S 요청', '고객 안내 후 종료',
-];
-const CHIP_SEP = ' · ';
-const toggleChipValue = (current: string, label: string): string => {
-  const parts = current.split(CHIP_SEP).map(p => p.trim()).filter(Boolean);
-  const idx = parts.indexOf(label);
-  if (idx >= 0) parts.splice(idx, 1); else parts.push(label);
-  return parts.join(CHIP_SEP);
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -167,16 +144,18 @@ export default function FaultPage() {
   const [siteSearch, setSiteSearch] = useState('');
   const [elevSearch, setElevSearch] = useState('');
   const [manualHogi, setManualHogi] = useState(false);
-  const [form, setForm] = useState({
+    const [form, setForm] = useState({
     siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '',
-    content: '', reporterPhone: '', extra: '',
+    content: '', reporterPhone: '', extra: '', errorCodes: [] as string[],
   });
+
 
   const [faultCause, setFaultCause] = useState('');
   const [faultAction, setFaultAction] = useState('');
   const [faultNote, setFaultNote] = useState('');
   const [arrivedAtInput, setArrivedAtInput] = useState('');
   const [completedAtInput, setCompletedAtInput] = useState('');
+  const [errorCodesInput, setErrorCodesInput] = useState<string[]>([]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -345,6 +324,8 @@ export default function FaultPage() {
         site_id: form.siteId, site_name: form.siteName,
         hogi_no: form.hogiNo, elevator_no: form.elevatorNo || '', equip_type: form.equipType || '',
         content: form.content, reporter_phone: form.reporterPhone, extra: form.extra,
+        error_codes: (form.errorCodes || []).map(c => c.trim()).filter(Boolean),
+
         assigned_to: '', assigned_name: '',
         team: siteTeam, company_id: userInfo?.company_id || '',
         status: '접수대기', created_at: now,
@@ -452,6 +433,8 @@ export default function FaultPage() {
     try {
       const { error } = await supabase.from('fault_reports').update({
         fault_cause: faultCause, fault_action: faultAction, fault_note: faultNote,
+        error_codes: (errorCodesInput || []).map(c => c.trim()).filter(Boolean),
+
         arrived_at: arrivedDate, completed_at: completedDate, status: '완료',
       }).eq('id', selectedFault.id);
       if (error) throw error;
@@ -484,17 +467,20 @@ export default function FaultPage() {
     setFaultNote(fault.fault_note || '');
     setArrivedAtInput(fault.arrived_at ? toDatetimeLocal(fault.arrived_at) : '');
     setCompletedAtInput(fault.completed_at ? toDatetimeLocal(fault.completed_at) : '');
+    setErrorCodesInput(fault.error_codes || []);
     setDetailModal(true);
   };
 
-  const resetForm = () => {
-    setForm({ siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '', content: '', reporterPhone: '', extra: '' });
+    const resetForm = () => {
+    setForm({ siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '', content: '', reporterPhone: '', extra: '', errorCodes: [] });
     setSiteSearch(''); setElevSearch(''); setManualHogi(false);
   };
-  const resetDetailFields = () => {
+
+    const resetDetailFields = () => {
     setFaultCause(''); setFaultAction(''); setFaultNote('');
-    setArrivedAtInput(''); setCompletedAtInput('');
+    setArrivedAtInput(''); setCompletedAtInput(''); setErrorCodesInput([]);
   };
+
 
   const safeFileTitle = (s: string) => s.replace(/[\\/:*?"<>|]/g, '').trim();
 
@@ -542,6 +528,7 @@ export default function FaultPage() {
     <tr><th>주소</th><td colspan="3">${site?.address||'-'}</td></tr>
     <tr><th>담당자</th><td>${fault.assigned_name||'-'}</td><th>처리상태</th><td><span class="badge">${STATUS_LABEL[fault.status]||fault.status}</span></td></tr>
     ${fault.reporter_phone?`<tr><th>신고자 연락처</th><td colspan="3">${fault.reporter_phone}</td></tr>`:''}
+    ${fault.error_codes && fault.error_codes.length > 0 ? `<tr><th>에러코드</th><td colspan="3">${fault.error_codes.join(', ')}</td></tr>` : ''}
   </table>
   <div class="section-title">📋 시간 내역</div>
   <table class="time-table">
@@ -691,7 +678,12 @@ const groupedElevators = useMemo(() => {
 }, [filteredElevators]);
 
 
-  const activeCauseGroups = isEscalatorType(form.equipType) ? ESCALATOR_CAUSE_GROUPS : ELEVATOR_CAUSE_GROUPS;
+  // ⚠️ 수정 1: form.equipType이 아니라 selectedFault.equip_type을 기준으로 판단해야 합니다.
+  // (form.equipType은 "새 고장 접수" 모달 전용 값이라 처리 모달에서는 항상 비어있어서
+  //  에스컬레이터 고장을 처리할 때도 승강기 원인 목록만 보이는 버그가 있었습니다.)
+  const activeCauseGroups = isEscalatorType(selectedFault?.equip_type)
+    ? ESCALATOR_CAUSE_GROUPS
+    : ELEVATOR_CAUSE_GROUPS;
 
   const getCompletedCount = (siteId: string) => faults.filter(f => f.site_id === siteId && f.status === '완료').length;
   const sitesForPdf = sites.filter(s => getCompletedCount(s.id) > 0)
@@ -928,9 +920,8 @@ const groupedElevators = useMemo(() => {
 
       {/* ===================== 고장 접수 모달 ===================== */}
       {reportModal && (
-  <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[calc(90vh-90px)] overflow-y-auto">
-
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[calc(90vh-90px)] overflow-y-auto">
 
             <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">고장 접수</h2>
@@ -1021,9 +1012,10 @@ const groupedElevators = useMemo(() => {
         <div className="px-3 py-1.5 bg-gray-50 text-xs font-bold text-indigo-500">📍 {dong}</div>
       )}
       {list.map((e) => {
-        const dongPrefix = e.dong && e.dong !== '동 미지정' ? `${e.dong} ` : '';
+        
         const hogiDisplay = e.installation_place ? e.installation_place : (e.hogi_no || '');
-        const composedHogi = `${dongPrefix}${hogiDisplay}`.trim();
+const composedHogi = hogiDisplay.trim();
+
         const isSelected = form.hogiNo === composedHogi;
         return (
           <button
@@ -1097,6 +1089,14 @@ const groupedElevators = useMemo(() => {
                 />
               </div>
 
+              <div>
+                <label className="text-sm font-semibold text-gray-700 mb-1 block">에러코드 (선택)</label>
+                <ErrorCodeList
+                  codes={form.errorCodes}
+                  onChange={(codes) => setForm({ ...form, errorCodes: codes })}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-sm font-semibold text-gray-700 mb-1 block">신고자 연락처</label>
@@ -1140,8 +1140,8 @@ const groupedElevators = useMemo(() => {
 
       {/* ===================== 상세/처리 모달 ===================== */}
       {detailModal && selectedFault && (
-        <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[calc(90vh-90px)] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold">
@@ -1203,6 +1203,12 @@ const groupedElevators = useMemo(() => {
                       <div className="font-medium">{toDateStr(selectedFault.completed_at)}</div>
                     </div>
                   </div>
+                  {selectedFault.error_codes && selectedFault.error_codes.length > 0 && (
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 mb-1 block">에러코드</label>
+                      <ErrorCodeList codes={selectedFault.error_codes} onChange={() => {}} disabled />
+                    </div>
+                  )}
                   <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">고장 원인</label>
                     <div className="bg-gray-50 rounded-lg p-3 text-sm whitespace-pre-wrap">
@@ -1255,34 +1261,25 @@ const groupedElevators = useMemo(() => {
                   </div>
 
                   <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">에러코드</label>
+                    <ErrorCodeList
+                      codes={errorCodesInput}
+                      onChange={setErrorCodesInput}
+                      reportedCodes={selectedFault.error_codes || []}
+                    />
+                  </div>
+
+                  <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">
                       고장 원인 {isEscalatorType(selectedFault.equip_type) ? '(에스컬레이터·무빙워크)' : '(승강기)'}
                     </label>
-                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                      {Object.entries(activeCauseGroups).map(([group, items]) => (
-                        <div key={group}>
-                          <div className="text-xs font-semibold text-gray-400 mb-1">{group}</div>
-                          <div className="flex flex-wrap gap-1.5 mb-1">
-                            {items.map((label) => {
-                              const active = faultCause.split(CHIP_SEP).map((s) => s.trim()).includes(label);
-                              return (
-                                <button
-                                  key={label}
-                                  onClick={() => setFaultCause(toggleChipValue(faultCause, label))}
-                                  className={`px-2.5 py-1 rounded-full text-xs border ${
-                                    active
-                                      ? 'bg-red-500 text-white border-red-500'
-                                      : 'bg-white text-gray-600 border-gray-300'
-                                  }`}
-                                >
-                                  {label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <ChipAccordion
+                    title="고장 원인"
+                      groups={activeCauseGroups}
+                      value={faultCause}
+                      onChange={setFaultCause}
+                      accent="orange"
+                    />
                     <textarea
                       value={faultCause}
                       onChange={(e) => setFaultCause(e.target.value)}
@@ -1294,30 +1291,19 @@ const groupedElevators = useMemo(() => {
 
                   <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">처리 내용 *</label>
-                    <div className="flex flex-wrap gap-1.5 mb-1.5">
-                      {ACTION_CHIPS.map((label) => {
-                        const active = faultAction.split(CHIP_SEP).map((s) => s.trim()).includes(label);
-                        return (
-                          <button
-                            key={label}
-                            onClick={() => setFaultAction(toggleChipValue(faultAction, label))}
-                            className={`px-2.5 py-1 rounded-full text-xs border ${
-                              active
-                                ? 'bg-blue-500 text-white border-blue-500'
-                                : 'bg-white text-gray-600 border-gray-300'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <ChipAccordion
+                    title="처리 내용"
+                      groups={ACTION_GROUPS}
+                      value={faultAction}
+                      onChange={setFaultAction}
+                      accent="blue"
+                    />
                     <textarea
                       value={faultAction}
                       onChange={(e) => setFaultAction(e.target.value)}
                       rows={2}
                       placeholder="선택된 처리내용이 자동으로 표시됩니다. 필요시 직접 수정하세요."
-                      className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
+                      className="w-full mt-1.5 px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
                     />
                   </div>
 
@@ -1374,8 +1360,8 @@ const groupedElevators = useMemo(() => {
 
       {/* ===================== PDF 내보내기 모달 ===================== */}
       {pdfModal && (
-        <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md max-h-[calc(90vh-90px)] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">고장처리 내역 PDF</h2>
               <button onClick={() => setPdfModal(false)} className="text-gray-400 text-xl">✕</button>
