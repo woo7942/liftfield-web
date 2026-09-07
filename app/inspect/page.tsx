@@ -1102,33 +1102,38 @@ export default function InspectPage() {
 
                       {!apiLoading && !apiError && history.length > 0 && dataSource && (
                         <div
-                          style={{ background: C.primaryLight, border: `1px solid ${C.primaryLight}` }}
-                          className="mb-4 flex items-center justify-between rounded-lg px-3 py-2 print:hidden"
-                        >
-                          <span style={{ color: C.primaryDeep }} className="text-xs">
-                            {dataSource === 'cache'
-                              ? `저장된 데이터입니다${
-                                  lastSyncedAt ? ` (최근 확인: ${new Date(lastSyncedAt).toLocaleDateString('ko-KR')})` : ''
-                                }`
-                              : '방금 최신 정보를 가져와 저장했습니다'}
-                          </span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              onClick={() => window.print()}
-                              style={{ background: C.inkSoft, color: '#fff' }}
-                              className="text-xs px-3 py-1 rounded-lg font-medium"
-                            >
-                              PDF 저장
-                            </button>
-                            <button
-                              onClick={() => handleElevClick(selectedElev, true)}
-                              style={{ background: C.primary, color: '#fff' }}
-                              className="text-xs px-3 py-1 rounded-lg font-medium"
-                            >
-                              새로고침
-                            </button>
-                          </div>
-                        </div>
+  style={{ background: C.primaryLight, border: `1px solid ${C.primaryLight}` }}
+  className="mb-4 flex items-center gap-3 rounded-lg px-3 py-2 print:hidden overflow-x-auto"
+>
+  <span
+    style={{ color: C.primaryDeep }}
+    className="text-xs whitespace-nowrap flex-1"
+  >
+    {dataSource === 'cache'
+      ? `저장된 데이터입니다${
+          lastSyncedAt ? ` (최근 확인: ${new Date(lastSyncedAt).toLocaleDateString('ko-KR')})` : ''
+        }`
+      : '방금 최신 정보를 가져와 저장했습니다'}
+  </span>
+  <div className="flex items-center gap-1.5 shrink-0">
+    <button
+      onClick={() => window.print()}
+      style={{ background: C.inkSoft, color: '#fff' }}
+      className="text-xs px-3 py-1 rounded-lg font-medium whitespace-nowrap"
+    >
+      PDF 저장
+    </button>
+    <button
+      onClick={() => handleElevClick(selectedElev, true)}
+      style={{ background: C.primary, color: '#fff' }}
+      className="text-xs px-3 py-1 rounded-lg font-medium whitespace-nowrap"
+    >
+      새로고침
+    </button>
+  </div>
+</div>
+
+
                       )}
 
                       {!apiLoading && history.length > 0 && (

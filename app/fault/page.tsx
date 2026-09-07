@@ -928,8 +928,10 @@ const groupedElevators = useMemo(() => {
 
       {/* ===================== 고장 접수 모달 ===================== */}
       {reportModal && (
-        <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+  <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[calc(90vh-90px)] overflow-y-auto">
+
+
             <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">고장 접수</h2>
               <button

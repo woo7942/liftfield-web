@@ -844,7 +844,8 @@ export default function InspectionPage() {
         </div>
       )}
 
-      <TabBar active="inspect" />
+      <TabBar active="inspection" />
+
     </div>
   );
 }
