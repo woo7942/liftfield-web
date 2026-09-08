@@ -426,7 +426,7 @@ export default function TeamSitesPage() {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true }));
   }, [siteElevators]);
 
-  // ── 주소/건물명 기반 승강기 캐시 조회 (버튼을 눌렀을 때만 실행) ──
+  // ── 주소/건물명 기반 승강기 캐시 조회 (승강기 번호 검색 결과 등에서 필요 시 사용) ──
   async function searchElevatorCache(overrideQuery?: string) {
     const rawQ = (overrideQuery ?? addForm.address ?? '').trim();
     if (!rawQ) {
@@ -1045,7 +1045,7 @@ export default function TeamSitesPage() {
                   </button>
                 </div>
                 <p className="text-xs text-indigo-400 mt-1">
-                  현장명·주소만 자동으로 채워져요. 같은 건물의 승강기 전체 목록은 아래 "🔍 자동 조회" 버튼을 눌러야 조회돼요.
+                  현장명·주소만 자동으로 채워져요.
                 </p>
 
                 {elevatorNoResults.length > 1 && (
@@ -1078,87 +1078,16 @@ export default function TeamSitesPage() {
                 />
               </div>
 
-              {/* 주소 + 자동 조회 */}
+              {/* 주소 (자동 조회 버튼 삭제됨) */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">주소</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={addForm.address || ''}
-                    onChange={e => setAddForm(prev => ({ ...prev, address: e.target.value }))}
-                    className="flex-1 border rounded-xl px-3 py-2 text-sm"
-                    placeholder="도로명주소 또는 건물(아파트)명"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => searchElevatorCache()}
-                    disabled={cacheSearching}
-                    className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium whitespace-nowrap disabled:opacity-50"
-                  >
-                    {cacheSearching ? '조회 중...' : '🔍 자동 조회'}
-                  </button>
-                </div>
-
-                {cacheResults.length > 0 && (
-                  <div className="mt-2 bg-blue-50 rounded-xl p-3 text-sm">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="font-medium text-blue-700">
-                        ✅ 총 {cacheResults.length}대 조회됨 · <span className="text-green-700">{selectedCacheKeys.size}대 선택됨</span>
-                      </p>
-                      <div className="flex gap-1">
-                        <button type="button" onClick={selectAllCache}
-                          className="text-xs bg-white border border-blue-300 text-blue-600 px-2 py-0.5 rounded-full">
-                          전체 선택
-                        </button>
-                        <button type="button" onClick={clearAllCache}
-                          className="text-xs bg-white border border-gray-300 text-gray-500 px-2 py-0.5 rounded-full">
-                          전체 해제
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-orange-600 mb-2">
-                      ⚠️ 같은 주소에 다른 관리업체 승강기가 섞여 나올 수 있어요. 관리업체명을 확인해서 우리 회사가 관리하는 호기만 체크해주세요.
-                    </p>
-
-                    <div className="max-h-60 overflow-y-auto space-y-1 bg-white rounded-lg border border-blue-100 p-1.5">
-                      {cacheResults.map((r, idx) => {
-                        const key = cacheRowKey(r, idx);
-                        const checked = selectedCacheKeys.has(key);
-                        return (
-                          <label key={key}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-xs ${
-                              checked ? 'bg-green-50' : 'hover:bg-gray-50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleCacheRow(key)}
-                              className="shrink-0"
-                            />
-                            <span className="w-14 shrink-0 font-medium text-gray-700">
-                              {r.dong ? `${r.dong}동` : '동 없음'}
-                            </span>
-                            <span className="w-14 shrink-0 text-gray-600">{r.hogi_no || '-'}호기</span>
-                            <span className="w-20 shrink-0 text-gray-400 font-mono">{r.elevator_no || '-'}</span>
-                            <span className="flex-1 truncate text-gray-500">{r.mnt_cpny_nm || '관리업체 정보 없음'}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-
-                    {cacheGrouped.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {cacheGrouped.map(g => (
-                          <span key={g.dong} className="text-xs bg-white border border-blue-200 px-2 py-0.5 rounded-full text-blue-600">
-                            {g.dong} {g.count}대
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <input
+                  type="text"
+                  value={addForm.address || ''}
+                  onChange={e => setAddForm(prev => ({ ...prev, address: e.target.value }))}
+                  className="w-full border rounded-xl px-3 py-2 text-sm"
+                  placeholder="도로명주소 또는 건물(아파트)명"
+                />
               </div>
 
               {[
@@ -1325,38 +1254,38 @@ export default function TeamSitesPage() {
                     </div>
                   )}
 
-                  {/* 전화번호: 순번대로, 각각 클릭 시 전화 걸기 */}
+                  {/* 전화번호: 순서대로 줄바꿈, 파란색 아이콘 */}
                   {selectedSite.phones && selectedSite.phones.length > 0 && (
                     <div className="py-1.5 border-b last:border-0">
                       <span className="text-gray-500 block mb-1">전화번호</span>
-                      <div className="space-y-1">
+                      <div className="flex flex-col gap-1">
                         {selectedSite.phones.map((phone, i) => (
                           <a
                             key={i}
                             href={`tel:${phone}`}
                             className="flex items-center justify-between text-blue-600 font-medium py-0.5"
                           >
-                            <span>{i + 1}. {phone}</span>
-                            <span>📞</span>
+                            <span>{phone}</span>
+                            <PhoneIcon color="#2563eb" />
                           </a>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {/* 비통번호: 순번대로, 각각 클릭 시 전화 걸기 */}
+                  {/* 비통번호: 순서대로 줄바꿈, 빨간색 아이콘 */}
                   {selectedSite.emergencyPhones && selectedSite.emergencyPhones.length > 0 && (
                     <div className="py-1.5 border-b last:border-0">
                       <span className="text-gray-500 block mb-1">비통번호</span>
-                      <div className="space-y-1">
+                      <div className="flex flex-col gap-1">
                         {selectedSite.emergencyPhones.map((phone, i) => (
                           <a
                             key={i}
                             href={`tel:${phone}`}
-                            className="flex items-center justify-between text-orange-600 font-medium py-0.5"
+                            className="flex items-center justify-between text-red-600 font-medium py-0.5"
                           >
-                            <span>{i + 1}. {phone}</span>
-                            <span>📞</span>
+                            <span>{phone}</span>
+                            <PhoneIcon color="#dc2626" />
                           </a>
                         ))}
                       </div>
@@ -1584,6 +1513,15 @@ export default function TeamSitesPage() {
   );
 }
 
+// ─── 색상 지정 가능한 전화 아이콘 (전화번호=파랑, 비통번호=빨강) ───
+function PhoneIcon({ color }: { color: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill={color} xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+      <path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z"/>
+    </svg>
+  );
+}
+
 // ─── 전화번호 여러 개 입력 컴포넌트 (전화번호/비통번호 공용) ───
 function PhoneListEditor({
   phones, onChange,
@@ -1660,15 +1598,31 @@ function SiteRow({
         {site.elevatorCount ? `${site.elevatorCount}대` : '-'}
       </td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.managerName || '-'}</td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">
-        {site.phones && site.phones.length > 0
-          ? site.phones.map((p, i) => `${i + 1}. ${p}`).join(', ')
-          : '-'}
+
+      <td className="px-3 py-2.5 text-center text-gray-600">
+        {site.phones && site.phones.length > 0 ? (
+          <div className="flex flex-col items-center gap-0.5">
+            {site.phones.map((p, i) => (
+              <span key={i} className="flex items-center gap-1 text-blue-600 text-xs whitespace-normal break-words">
+                <PhoneIcon color="#2563eb" />
+                {p}
+              </span>
+            ))}
+          </div>
+        ) : '-'}
       </td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">
-        {site.emergencyPhones && site.emergencyPhones.length > 0
-          ? site.emergencyPhones.map((p, i) => `${i + 1}. ${p}`).join(', ')
-          : '-'}
+
+      <td className="px-3 py-2.5 text-center text-gray-600">
+        {site.emergencyPhones && site.emergencyPhones.length > 0 ? (
+          <div className="flex flex-col items-center gap-0.5">
+            {site.emergencyPhones.map((p, i) => (
+              <span key={i} className="flex items-center gap-1 text-red-600 text-xs whitespace-normal break-words">
+                <PhoneIcon color="#dc2626" />
+                {p}
+              </span>
+            ))}
+          </div>
+        ) : '-'}
       </td>
 
       <td className="px-3 py-2.5 text-center whitespace-nowrap">
