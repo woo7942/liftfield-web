@@ -426,7 +426,7 @@ export default function TeamSitesPage() {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true }));
   }, [siteElevators]);
 
-  // ── 주소/건물명 기반 승강기 캐시 조회 (승강기 번호 검색 결과 등에서 필요 시 사용) ──
+  // ── 주소/건물명 기반 승강기 캐시 조회 (버튼을 눌렀을 때만 실행 — 아파트 등 여러 대 한꺼번에 등록용) ──
   async function searchElevatorCache(overrideQuery?: string) {
     const rawQ = (overrideQuery ?? addForm.address ?? '').trim();
     if (!rawQ) {
@@ -545,7 +545,7 @@ export default function TeamSitesPage() {
   }
 
   // ── 번호 조회 결과 중 하나를 선택 → 현장명은 현장명 칸에만, 주소는 주소 칸에만 각각 채움 ──
-  // (건물명을 주소의 대체값으로 쓰지 않으며, 자동조회 버튼은 사용자가 직접 눌러야만 동작합니다)
+  // (건물명을 주소의 대체값으로 쓰지 않으며, 건물 전체 조회 버튼은 사용자가 직접 눌러야만 동작합니다)
   function selectElevatorNoResult(row: CacheRow) {
     const buildingName = row.building || '';
     const addressText = row.road_name
@@ -1045,7 +1045,7 @@ export default function TeamSitesPage() {
                   </button>
                 </div>
                 <p className="text-xs text-indigo-400 mt-1">
-                  현장명·주소만 자동으로 채워져요.
+                  현장명·주소만 자동으로 채워져요. 승강기가 여러 대인 아파트 등은 아래 주소칸의 "🏢 건물 전체 조회" 버튼을 눌러 한꺼번에 등록할 수 있어요.
                 </p>
 
                 {elevatorNoResults.length > 1 && (
@@ -1078,16 +1078,90 @@ export default function TeamSitesPage() {
                 />
               </div>
 
-              {/* 주소 (자동 조회 버튼 삭제됨) */}
+              {/* 주소 + 이 건물 승강기 전체 조회 (버튼을 눌러야만 검색됨, 아파트 등 여러 대 등록용) */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">주소</label>
-                <input
-                  type="text"
-                  value={addForm.address || ''}
-                  onChange={e => setAddForm(prev => ({ ...prev, address: e.target.value }))}
-                  className="w-full border rounded-xl px-3 py-2 text-sm"
-                  placeholder="도로명주소 또는 건물(아파트)명"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={addForm.address || ''}
+                    onChange={e => setAddForm(prev => ({ ...prev, address: e.target.value }))}
+                    className="flex-1 border rounded-xl px-3 py-2 text-sm"
+                    placeholder="도로명주소 또는 건물(아파트)명"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => searchElevatorCache()}
+                    disabled={cacheSearching}
+                    className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium whitespace-nowrap disabled:opacity-50"
+                  >
+                    {cacheSearching ? '조회 중...' : '🏢 건물 전체 조회'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  아파트처럼 승강기가 여러 대인 현장은 이 버튼을 눌러 같은 건물의 승강기를 한꺼번에 불러올 수 있어요. 누르지 않으면 승강기 번호 조회로 채운 현장명·주소만 저장돼요.
+                </p>
+
+                {cacheResults.length > 0 && (
+                  <div className="mt-2 bg-blue-50 rounded-xl p-3 text-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-medium text-blue-700">
+                        ✅ 총 {cacheResults.length}대 조회됨 · <span className="text-green-700">{selectedCacheKeys.size}대 선택됨</span>
+                      </p>
+                      <div className="flex gap-1">
+                        <button type="button" onClick={selectAllCache}
+                          className="text-xs bg-white border border-blue-300 text-blue-600 px-2 py-0.5 rounded-full">
+                          전체 선택
+                        </button>
+                        <button type="button" onClick={clearAllCache}
+                          className="text-xs bg-white border border-gray-300 text-gray-500 px-2 py-0.5 rounded-full">
+                          전체 해제
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-orange-600 mb-2">
+                      ⚠️ 같은 주소에 다른 관리업체 승강기가 섞여 나올 수 있어요. 관리업체명을 확인해서 우리 회사가 관리하는 호기만 체크해주세요.
+                    </p>
+
+                    <div className="max-h-60 overflow-y-auto space-y-1 bg-white rounded-lg border border-blue-100 p-1.5">
+                      {cacheResults.map((r, idx) => {
+                        const key = cacheRowKey(r, idx);
+                        const checked = selectedCacheKeys.has(key);
+                        return (
+                          <label key={key}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-xs ${
+                              checked ? 'bg-green-50' : 'hover:bg-gray-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCacheRow(key)}
+                              className="shrink-0"
+                            />
+                            <span className="w-14 shrink-0 font-medium text-gray-700">
+                              {r.dong ? `${r.dong}동` : '동 없음'}
+                            </span>
+                            <span className="w-14 shrink-0 text-gray-600">{r.hogi_no || '-'}호기</span>
+                            <span className="w-20 shrink-0 text-gray-400 font-mono">{r.elevator_no || '-'}</span>
+                            <span className="flex-1 truncate text-gray-500">{r.mnt_cpny_nm || '관리업체 정보 없음'}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {cacheGrouped.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {cacheGrouped.map(g => (
+                          <span key={g.dong} className="text-xs bg-white border border-blue-200 px-2 py-0.5 rounded-full text-blue-600">
+                            {g.dong} {g.count}대
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {[
