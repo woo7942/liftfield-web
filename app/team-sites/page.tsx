@@ -24,8 +24,8 @@ interface SiteItem {
   name: string;
   address?: string;
   elevatorCount?: number;
-  phones?: string[];          // 전화번호 여러 개
-  emergencyPhone?: string;    // 비통번호
+  phones?: string[];            // 전화번호 여러 개
+  emergencyPhones?: string[];   // 비통번호 여러 개
   contractType?: string;      // 계약종류
   contractStart?: string;     // 계약 시작일
   contractEnd?: string;       // 계약 종료일
@@ -79,6 +79,8 @@ interface CacheRow {
   install_date?: string;
   main_no?: string;
   road_name?: string;
+  address1?: string;
+  address2?: string;
 }
 
 type SortKey = 'name' | 'teamName' | 'elevatorCount' | 'contractType';
@@ -123,6 +125,16 @@ function extractRoadAndNumber(q: string): { road: string; number: string } | nul
   const match = q.match(/([가-힣0-9]+(?:로|길))\s*(\d+(?:-\d+)?)/);
   if (!match) return null;
   return { road: match[1], number: match[2] };
+}
+
+// ── 승강기 번호(7자리) 정규화: "0000000" / "0000-000" 둘 다 지원 ──
+function normalizeElevatorNo(raw: string): { plain: string; formatted: string } | null {
+  const digits = raw.replace(/[^0-9]/g, '');
+  if (digits.length !== 7) return null;
+  return {
+    plain: digits,
+    formatted: `${digits.slice(0, 4)}-${digits.slice(4)}`,
+  };
 }
 
 function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
@@ -205,6 +217,11 @@ export default function TeamSitesPage() {
   const [cacheGrouped, setCacheGrouped] = useState<{ dong: string; count: number }[]>([]);
   const [selectedCacheKeys, setSelectedCacheKeys] = useState<Set<string>>(new Set());
 
+  // ── 승강기 번호로 빠른 검색 ──
+  const [elevatorNoSearch, setElevatorNoSearch] = useState('');
+  const [elevatorNoSearching, setElevatorNoSearching] = useState(false);
+  const [elevatorNoResults, setElevatorNoResults] = useState<CacheRow[]>([]);
+
   const isAdmin = userInfo?.role === 'admin';
   const isSuperAdmin = userInfo?.superAdmin === true;
   const canEdit = isAdmin || isSuperAdmin;
@@ -279,7 +296,7 @@ export default function TeamSitesPage() {
 
     let query = supabase
       .from('sites')
-      .select('id, name, address, lat, lng, elevator_count, phones, emergency_phone, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, access_code, maintenance_fee')
+      .select('id, name, address, lat, lng, elevator_count, phones, emergency_phones, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, access_code, maintenance_fee')
       .eq('company_id', cid);
 
     if (!isAdminUser) {
@@ -298,7 +315,7 @@ export default function TeamSitesPage() {
       lng: d.lng ?? undefined,
       elevatorCount: d.elevator_count || 0,
       phones: Array.isArray(d.phones) ? d.phones : [],
-      emergencyPhone: d.emergency_phone || '',
+      emergencyPhones: Array.isArray(d.emergency_phones) ? d.emergency_phones : [],
       contractType: d.contract_type || '',
       contractStart: d.contract_start || '',
       contractEnd: d.contract_end || '',
@@ -409,8 +426,9 @@ export default function TeamSitesPage() {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b, 'ko', { numeric: true }));
   }, [siteElevators]);
 
-  async function searchElevatorCache() {
-    const rawQ = (addForm.address || '').trim();
+  // ── 주소/건물명 기반 승강기 캐시 조회 (버튼을 눌렀을 때만 실행) ──
+  async function searchElevatorCache(overrideQuery?: string) {
+    const rawQ = (overrideQuery ?? addForm.address ?? '').trim();
     if (!rawQ) {
       alert('먼저 주소나 건물명을 입력해주세요.');
       return;
@@ -488,6 +506,61 @@ export default function TeamSitesPage() {
     }
   }
 
+  // ── 승강기 번호(7자리)로 검색 → 현장명/주소 입력칸에만 각각 채워줌 (자동조회는 실행하지 않음) ──
+  async function searchByElevatorNo() {
+    const norm = normalizeElevatorNo(elevatorNoSearch);
+    if (!norm) {
+      alert('승강기 번호 7자리를 정확히 입력해주세요. (예: 1234567 또는 1234-567)');
+      return;
+    }
+
+    setElevatorNoSearching(true);
+    setElevatorNoResults([]);
+
+    try {
+      const { data, error } = await supabase
+        .from('elevator_national_cache')
+        .select('*')
+        .or(`elevator_no.eq.${norm.plain},elevator_no.eq.${norm.formatted}`)
+        .limit(20);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        alert('해당 번호의 승강기를 찾지 못했어요. 번호를 다시 확인해주세요.');
+        return;
+      }
+
+      if (data.length === 1) {
+        selectElevatorNoResult(data[0]);
+      } else {
+        setElevatorNoResults(data);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('조회 중 오류가 발생했어요.');
+    } finally {
+      setElevatorNoSearching(false);
+    }
+  }
+
+  // ── 번호 조회 결과 중 하나를 선택 → 현장명은 현장명 칸에만, 주소는 주소 칸에만 각각 채움 ──
+  // (건물명을 주소의 대체값으로 쓰지 않으며, 자동조회 버튼은 사용자가 직접 눌러야만 동작합니다)
+  function selectElevatorNoResult(row: CacheRow) {
+    const buildingName = row.building || '';
+    const addressText = row.road_name
+      ? `${row.road_name}${row.main_no ? ` ${row.main_no}` : ''}`
+      : (row.address1 || row.address2 || '');
+
+    setAddForm(prev => ({
+      ...prev,
+      name: buildingName || prev.name,
+      address: addressText || prev.address,
+    }));
+    setElevatorNoResults([]);
+    setElevatorNoSearch('');
+  }
+
   function toggleCacheRow(key: string) {
     setSelectedCacheKeys(prev => {
       const next = new Set(prev);
@@ -524,7 +597,7 @@ export default function TeamSitesPage() {
           s.teamName?.toLowerCase().includes(q) ||
           s.managerName?.toLowerCase().includes(q) ||
           (s.phones || []).some(p => p.toLowerCase().includes(q)) ||
-          s.emergencyPhone?.toLowerCase().includes(q)
+          (s.emergencyPhones || []).some(p => p.toLowerCase().includes(q))
         );
       }
       return true;
@@ -581,6 +654,7 @@ export default function TeamSitesPage() {
       const teamToSave = canEdit ? (addForm.teamName || '') : (userInfo.team || '');
 
       const cleanedPhones = (addForm.phones || []).map(p => p.trim()).filter(p => p !== '');
+      const cleanedEmergencyPhones = (addForm.emergencyPhones || []).map(p => p.trim()).filter(p => p !== '');
 
       const { data: newSite, error } = await supabase
         .from('sites')
@@ -591,7 +665,7 @@ export default function TeamSitesPage() {
           lat: coords?.lat ?? null,
           lng: coords?.lng ?? null,
           phones: cleanedPhones,
-          emergency_phone: addForm.emergencyPhone || '',
+          emergency_phones: cleanedEmergencyPhones,
           contract_type: addForm.contractType || '',
           contract_start: addForm.contractStart || null,
           contract_end: addForm.contractEnd || null,
@@ -660,6 +734,8 @@ export default function TeamSitesPage() {
       setCacheResults([]);
       setCacheGrouped([]);
       setSelectedCacheKeys(new Set());
+      setElevatorNoSearch('');
+      setElevatorNoResults([]);
       await reloadSites();
     } catch (e) {
       console.error(e);
@@ -682,6 +758,7 @@ export default function TeamSitesPage() {
       }
 
       const cleanedPhones = (editForm.phones || []).map(p => p.trim()).filter(p => p !== '');
+      const cleanedEmergencyPhones = (editForm.emergencyPhones || []).map(p => p.trim()).filter(p => p !== '');
 
       const { error } = await supabase
         .from('sites')
@@ -691,7 +768,7 @@ export default function TeamSitesPage() {
           address: editForm.address || '',
           ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
           phones: cleanedPhones,
-          emergency_phone: editForm.emergencyPhone || '',
+          emergency_phones: cleanedEmergencyPhones,
           contract_type: editForm.contractType || '',
           contract_start: editForm.contractStart || null,
           contract_end: editForm.contractEnd || null,
@@ -711,6 +788,7 @@ export default function TeamSitesPage() {
         ...selectedSite,
         ...editForm,
         phones: cleanedPhones,
+        emergencyPhones: cleanedEmergencyPhones,
         ...(addressChanged ? { lat: coords?.lat, lng: coords?.lng } : {}),
       };
       setEditMode(false);
@@ -779,6 +857,8 @@ export default function TeamSitesPage() {
               setCacheResults([]);
               setCacheGrouped([]);
               setSelectedCacheKeys(new Set());
+              setElevatorNoSearch('');
+              setElevatorNoResults([]);
               setShowAddModal(true);
             }}
             style={{
@@ -942,6 +1022,51 @@ export default function TeamSitesPage() {
             <h2 className="font-bold text-lg mb-4">+ 팀별 현장 추가</h2>
             <div className="space-y-3">
 
+              {/* 승강기 번호로 빠른 검색 */}
+              <div className="bg-indigo-50 rounded-xl p-3">
+                <label className="text-sm font-medium text-indigo-700 mb-1 block">
+                  🔢 승강기 번호로 현장명·주소 채우기
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={elevatorNoSearch}
+                    onChange={e => setElevatorNoSearch(e.target.value)}
+                    placeholder="예: 1234567 또는 1234-567"
+                    className="flex-1 border rounded-xl px-3 py-2 text-sm bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={searchByElevatorNo}
+                    disabled={elevatorNoSearching}
+                    className="px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-sm font-medium whitespace-nowrap disabled:opacity-50"
+                  >
+                    {elevatorNoSearching ? '조회 중...' : '🔍 번호 조회'}
+                  </button>
+                </div>
+                <p className="text-xs text-indigo-400 mt-1">
+                  현장명·주소만 자동으로 채워져요. 같은 건물의 승강기 전체 목록은 아래 "🔍 자동 조회" 버튼을 눌러야 조회돼요.
+                </p>
+
+                {elevatorNoResults.length > 1 && (
+                  <div className="mt-2 space-y-1 bg-white rounded-lg border border-indigo-100 p-1.5 max-h-40 overflow-y-auto">
+                    <p className="text-xs text-gray-500 px-1 pb-1">일치하는 결과가 여러 건이에요. 하나를 선택해주세요.</p>
+                    {elevatorNoResults.map((r, idx) => (
+                      <button
+                        type="button"
+                        key={`${r.elevator_no}_${idx}`}
+                        onClick={() => selectElevatorNoResult(r)}
+                        className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-indigo-50 text-xs"
+                      >
+                        <span className="font-medium text-gray-700">{r.building || '건물명 없음'}</span>
+                        <span className="text-gray-400 ml-1">{r.road_name}{r.main_no ? ` ${r.main_no}` : ''}</span>
+                        <span className="text-gray-400 ml-1 font-mono">· {r.elevator_no}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* 현장명 */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">현장명 *</label>
@@ -966,7 +1091,7 @@ export default function TeamSitesPage() {
                   />
                   <button
                     type="button"
-                    onClick={searchElevatorCache}
+                    onClick={() => searchElevatorCache()}
                     disabled={cacheSearching}
                     className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium whitespace-nowrap disabled:opacity-50"
                   >
@@ -1038,7 +1163,6 @@ export default function TeamSitesPage() {
 
               {[
                 { label: '담당자', field: 'managerName', type: 'text' },
-                { label: '비통번호', field: 'emergencyPhone', type: 'text' },
                 { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                 { label: '비밀번호', field: 'password', type: 'text' },
                 { label: '보수료(원)', field: 'maintenanceFee', type: 'number' },
@@ -1064,6 +1188,15 @@ export default function TeamSitesPage() {
                 <PhoneListEditor
                   phones={addForm.phones || []}
                   onChange={(phones) => setAddForm(prev => ({ ...prev, phones }))}
+                />
+              </div>
+
+              {/* 비통번호 (여러 개) */}
+              <div>
+                <label className="text-sm text-gray-600 mb-0.5 block">비통번호</label>
+                <PhoneListEditor
+                  phones={addForm.emergencyPhones || []}
+                  onChange={(phones) => setAddForm(prev => ({ ...prev, emergencyPhones: phones }))}
                 />
               </div>
 
@@ -1128,6 +1261,8 @@ export default function TeamSitesPage() {
                   setCacheResults([]);
                   setCacheGrouped([]);
                   setSelectedCacheKeys(new Set());
+                  setElevatorNoSearch('');
+                  setElevatorNoResults([]);
                 }}
                 className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
               >
@@ -1160,7 +1295,6 @@ export default function TeamSitesPage() {
                   {[
                     { label: '배정 팀', value: selectedSite.teamName },
                     { label: '담당자', value: selectedSite.managerName },
-                    { label: '비통번호', value: selectedSite.emergencyPhone },
                     { label: '계약종류', value: selectedSite.contractType },
                     {
                       label: '계약 기간',
@@ -1201,6 +1335,25 @@ export default function TeamSitesPage() {
                             key={i}
                             href={`tel:${phone}`}
                             className="flex items-center justify-between text-blue-600 font-medium py-0.5"
+                          >
+                            <span>{i + 1}. {phone}</span>
+                            <span>📞</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 비통번호: 순번대로, 각각 클릭 시 전화 걸기 */}
+                  {selectedSite.emergencyPhones && selectedSite.emergencyPhones.length > 0 && (
+                    <div className="py-1.5 border-b last:border-0">
+                      <span className="text-gray-500 block mb-1">비통번호</span>
+                      <div className="space-y-1">
+                        {selectedSite.emergencyPhones.map((phone, i) => (
+                          <a
+                            key={i}
+                            href={`tel:${phone}`}
+                            className="flex items-center justify-between text-orange-600 font-medium py-0.5"
                           >
                             <span>{i + 1}. {phone}</span>
                             <span>📞</span>
@@ -1325,7 +1478,6 @@ export default function TeamSitesPage() {
                     { label: '현장명', field: 'name', type: 'text' },
                     { label: '주소', field: 'address', type: 'text' },
                     { label: '담당자', field: 'managerName', type: 'text' },
-                    { label: '비통번호', field: 'emergencyPhone', type: 'text' },
                     { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                     { label: '비밀번호', field: 'password', type: 'text' },
                     { label: '보수료(원)', field: 'maintenanceFee', type: 'number' },
@@ -1351,6 +1503,15 @@ export default function TeamSitesPage() {
                     <PhoneListEditor
                       phones={editForm.phones || []}
                       onChange={(phones) => setEditForm(prev => ({ ...prev, phones }))}
+                    />
+                  </div>
+
+                  {/* 비통번호 (여러 개) */}
+                  <div>
+                    <label className="text-sm text-gray-600 mb-0.5 block">비통번호</label>
+                    <PhoneListEditor
+                      phones={editForm.emergencyPhones || []}
+                      onChange={(phones) => setEditForm(prev => ({ ...prev, emergencyPhones: phones }))}
                     />
                   </div>
 
@@ -1423,7 +1584,7 @@ export default function TeamSitesPage() {
   );
 }
 
-// ─── 전화번호 여러 개 입력 컴포넌트 ───
+// ─── 전화번호 여러 개 입력 컴포넌트 (전화번호/비통번호 공용) ───
 function PhoneListEditor({
   phones, onChange,
 }: {
@@ -1500,9 +1661,15 @@ function SiteRow({
       </td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.managerName || '-'}</td>
       <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">
-        {site.phones && site.phones.length > 0 ? site.phones.join(', ') : '-'}
+        {site.phones && site.phones.length > 0
+          ? site.phones.map((p, i) => `${i + 1}. ${p}`).join(', ')
+          : '-'}
       </td>
-      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">{site.emergencyPhone || '-'}</td>
+      <td className="px-3 py-2.5 text-center text-gray-600 whitespace-normal break-words">
+        {site.emergencyPhones && site.emergencyPhones.length > 0
+          ? site.emergencyPhones.map((p, i) => `${i + 1}. ${p}`).join(', ')
+          : '-'}
+      </td>
 
       <td className="px-3 py-2.5 text-center whitespace-nowrap">
         {site.contractType ? (
