@@ -122,7 +122,7 @@ function stripSidoPrefix(raw: string): string {
 }
 
 function extractRoadAndNumber(q: string): { road: string; number: string } | null {
-  const match = q.match(/([가-힣0-9]+(?:로|길))\s*(\d+(?:-\d+)?)/);
+  const match = q.match(/([가-힣0-9]+(?:로|길)(?:\d*번길)?)\s*(\d+(?:-\d+)?)/);
   if (!match) return null;
   return { road: match[1], number: match[2] };
 }
@@ -498,13 +498,14 @@ export default function TeamSitesPage() {
       } else if (autoSelected.size === 0) {
         alert(`${rows.length}대가 조회됐어요. 이 중 우리 회사가 관리하는 호기만 체크한 뒤 저장해주세요. (같은 주소에 다른 관리업체 승강기가 섞여 있을 수 있어요)`);
       }
-    } catch (e) {
+        } catch (e: any) {
       console.error(e);
-      alert('조회 중 오류가 발생했어요.');
+      alert(`조회 중 오류가 발생했어요\n\n[디버그] ${e?.message || e?.details || e?.hint || JSON.stringify(e)}`);
     } finally {
       setCacheSearching(false);
     }
   }
+
 
   // ── 승강기 번호(7자리)로 검색 → 현장명/주소 입력칸에만 각각 채워줌 (자동조회는 실행하지 않음) ──
   async function searchByElevatorNo() {
