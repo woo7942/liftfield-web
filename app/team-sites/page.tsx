@@ -121,6 +121,7 @@ function stripSidoPrefix(raw: string): string {
   return q;
 }
 
+// 도로명 + 번지 추출 (예: "청석로 300", "청석로12번길 45" 모두 지원)
 function extractRoadAndNumber(q: string): { road: string; number: string } | null {
   const match = q.match(/([가-힣0-9]+(?:로|길)(?:\d*번길)?)\s*(\d+(?:-\d+)?)/);
   if (!match) return null;
@@ -279,7 +280,7 @@ export default function TeamSitesPage() {
     document.head.appendChild(script);
   }, []);
 
-  // ─── 현장 목록 로드 ───
+  // ─── 현장 목록 로드 (관리자·팀원 모두 회사 전체 현장을 불러오고, 화면의 팀별 검색 메뉴로 필터링) ───
   const reloadSites = async (companyId?: string) => {
     const cid = companyId ?? userInfo?.companyId;
     if (!cid) return;
@@ -294,16 +295,11 @@ export default function TeamSitesPage() {
       return;
     }
 
-    let query = supabase
+    const { data: sitesData, error } = await supabase
       .from('sites')
       .select('id, name, address, lat, lng, elevator_count, phones, emergency_phones, contract_type, contract_start, contract_end, team, source, created_at, manager_name, memo, access_code, maintenance_fee')
-      .eq('company_id', cid);
-
-    if (!isAdminUser) {
-      query = query.eq('team', myTeam);
-    }
-
-    const { data: sitesData, error } = await query.order('created_at', { ascending: false });
+      .eq('company_id', cid)
+      .order('created_at', { ascending: false });
 
     if (error) { console.error(error); return; }
 
@@ -498,14 +494,13 @@ export default function TeamSitesPage() {
       } else if (autoSelected.size === 0) {
         alert(`${rows.length}대가 조회됐어요. 이 중 우리 회사가 관리하는 호기만 체크한 뒤 저장해주세요. (같은 주소에 다른 관리업체 승강기가 섞여 있을 수 있어요)`);
       }
-        } catch (e: any) {
+    } catch (e: any) {
       console.error(e);
       alert(`조회 중 오류가 발생했어요\n\n[디버그] ${e?.message || e?.details || e?.hint || JSON.stringify(e)}`);
     } finally {
       setCacheSearching(false);
     }
   }
-
 
   // ── 승강기 번호(7자리)로 검색 → 현장명/주소 입력칸에만 각각 채워줌 (자동조회는 실행하지 않음) ──
   async function searchByElevatorNo() {
@@ -586,10 +581,10 @@ export default function TeamSitesPage() {
     new Set(sites.map(s => s.contractType).filter((v): v is string => !!v))
   ).sort();
 
+  // ─── 목록 필터 (팀원도 전체 팀 현장을 볼 수 있고, 팀별 검색 메뉴로 원하는 팀만 골라볼 수 있음) ───
   const filteredSites = sites
     .filter(s => {
-      if (!canEdit && s.teamName !== userInfo?.team) return false;
-      if (canEdit && selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
+      if (selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
       if (canEdit && selectedContractType !== '전체' && s.contractType !== selectedContractType) return false;
       if (searchText) {
         const q = searchText.toLowerCase();
@@ -886,20 +881,22 @@ export default function TeamSitesPage() {
               border: `1px solid ${C.line}`, fontSize: 13, outline: 'none', background: C.surface, color: C.ink,
             }}
           />
+
+          {/* 팀별 검색 메뉴 - 관리자와 팀원 모두 사용 가능 */}
+          <select
+            value={selectedTeam}
+            onChange={e => setSelectedTeam(e.target.value)}
+            style={{
+              padding: '10px 12px', borderRadius: 10, border: `1px solid ${C.line}`,
+              fontSize: 13, background: C.surface, color: C.ink,
+            }}
+          >
+            <option value="전체">전체 팀</option>
+            {teams.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+
           {canEdit && (
             <>
-              <select
-                value={selectedTeam}
-                onChange={e => setSelectedTeam(e.target.value)}
-                style={{
-                  padding: '10px 12px', borderRadius: 10, border: `1px solid ${C.line}`,
-                  fontSize: 13, background: C.surface, color: C.ink,
-                }}
-              >
-                <option value="전체">전체 팀</option>
-                {teams.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-
               <select
                 value={selectedContractType}
                 onChange={e => setSelectedContractType(e.target.value)}
@@ -967,10 +964,12 @@ export default function TeamSitesPage() {
                   <tr>
                     <td colSpan={emptyColSpan} className="text-center py-16" style={{ color: C.inkFaint }}>
                       <p className="text-3xl mb-2">🏢</p>
-                      {canEdit && selectedTeam !== '전체' ? (
+                      {selectedTeam !== '전체' ? (
                         <>
                           <p style={{ color: C.inkDim }}>{selectedTeam}에 배정된 현장이 없어요</p>
-                          <p className="text-xs mt-1">+ 추가 버튼으로 배정하거나, 기존 현장을 수정해 팀을 바꿀 수 있어요</p>
+                          {canEdit && (
+                            <p className="text-xs mt-1">+ 추가 버튼으로 배정하거나, 기존 현장을 수정해 팀을 바꿀 수 있어요</p>
+                          )}
                         </>
                       ) : (
                         <p>팀별 현장이 없어요</p>
