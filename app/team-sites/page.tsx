@@ -24,18 +24,18 @@ interface SiteItem {
   name: string;
   address?: string;
   elevatorCount?: number;
-  phones?: string[];            // 전화번호 여러 개
-  emergencyPhones?: string[];   // 비통번호 여러 개
-  contractType?: string;      // 계약종류
-  contractStart?: string;     // 계약 시작일
-  contractEnd?: string;       // 계약 종료일
+  phones?: string[];
+  emergencyPhones?: string[];
+  contractType?: string;
+  contractStart?: string;
+  contractEnd?: string;
   teamName?: string;
   source?: 'admin' | 'member' | 'team';
   createdAt?: string;
   managerName?: string;
   memo?: string;
-  password?: string;          // 출입/공동현관 비밀번호
-  maintenanceFee?: number;    // 보수료
+  password?: string;
+  maintenanceFee?: number;
   lat?: number;
   lng?: number;
 }
@@ -121,14 +121,12 @@ function stripSidoPrefix(raw: string): string {
   return q;
 }
 
-// 도로명 + 번지 추출 (예: "청석로 300", "청석로12번길 45" 모두 지원)
 function extractRoadAndNumber(q: string): { road: string; number: string } | null {
   const match = q.match(/([가-힣0-9]+(?:로|길)(?:\d*번길)?)\s*(\d+(?:-\d+)?)/);
   if (!match) return null;
   return { road: match[1], number: match[2] };
 }
 
-// ── 승강기 번호(7자리) 정규화: "0000000" / "0000-000" 둘 다 지원 ──
 function normalizeElevatorNo(raw: string): { plain: string; formatted: string } | null {
   const digits = raw.replace(/[^0-9]/g, '');
   if (digits.length !== 7) return null;
@@ -168,7 +166,6 @@ function cacheRowKey(row: CacheRow, idx: number): string {
   return `${row.elevator_no || 'no'}_${row.hogi_no || ''}_${idx}`;
 }
 
-// 주소/좌표 기반 카카오맵 길찾기
 function openNavigation(site: { name?: string; address?: string; lat?: number; lng?: number }) {
   if (!site.address && !(site.lat && site.lng)) {
     alert('주소 정보가 없습니다.');
@@ -182,7 +179,6 @@ function openNavigation(site: { name?: string; address?: string; lat?: number; l
   }
 }
 
-// 🏢 호기 정렬용 숫자 추출 (동/공용 동일 규칙)
 const getHogiNum = (h?: string) => parseInt((h || '').replace(/[^0-9]/g, '') || '0');
 
 export default function TeamSitesPage() {
@@ -218,10 +214,13 @@ export default function TeamSitesPage() {
   const [cacheGrouped, setCacheGrouped] = useState<{ dong: string; count: number }[]>([]);
   const [selectedCacheKeys, setSelectedCacheKeys] = useState<Set<string>>(new Set());
 
-  // ── 승강기 번호로 빠른 검색 ──
   const [elevatorNoSearch, setElevatorNoSearch] = useState('');
   const [elevatorNoSearching, setElevatorNoSearching] = useState(false);
   const [elevatorNoResults, setElevatorNoResults] = useState<CacheRow[]>([]);
+
+  // 번호 조회로 확보한 "원본" 도로명/번지. 주소 입력칸 글자와 무관하게 DB 원본 값 자체를 저장해두어,
+  // 사용자가 주소를 직접 고치지 않는 한 수동 "건물 전체 조회" 버튼도 자동조회와 100% 동일한 조건으로 검색되게 함
+  const [addressExactMatch, setAddressExactMatch] = useState<{ road: string; number: string } | null>(null);
 
   const isAdmin = userInfo?.role === 'admin';
   const isSuperAdmin = userInfo?.superAdmin === true;
@@ -280,7 +279,7 @@ export default function TeamSitesPage() {
     document.head.appendChild(script);
   }, []);
 
-  // ─── 현장 목록 로드 (관리자·팀원 모두 회사 전체 현장을 불러오고, 화면의 팀별 검색 메뉴로 필터링) ───
+  // ─── 현장 목록 로드 ───
   const reloadSites = async (companyId?: string) => {
     const cid = companyId ?? userInfo?.companyId;
     if (!cid) return;
@@ -408,7 +407,6 @@ export default function TeamSitesPage() {
     }
   }
 
-  // 🏢 선택된 현장의 호기를 동별로 그룹핑 (InspectionPage / FaultPage와 동일 규칙)
   const groupedSiteElevators = useMemo(() => {
     const map: Record<string, ElevatorItem[]> = {};
     siteElevators.forEach(e => {
@@ -423,9 +421,10 @@ export default function TeamSitesPage() {
   }, [siteElevators]);
 
   // ── 주소/건물명 기반 승강기 캐시 조회 (버튼을 눌렀을 때만 실행 — 아파트 등 여러 대 한꺼번에 등록용) ──
-  async function searchElevatorCache(overrideQuery?: string) {
+  // exactRoad가 주어지면 무조건 그 값으로만 정확 매칭(eq)을 시도한다. (파싱하지 않음 — 자동/수동 결과 100% 일치 보장)
+  async function searchElevatorCache(overrideQuery?: string, exactRoad?: { road: string; number: string } | null) {
     const rawQ = (overrideQuery ?? addForm.address ?? '').trim();
-    if (!rawQ) {
+    if (!rawQ && !exactRoad) {
       alert('먼저 주소나 건물명을 입력해주세요.');
       return;
     }
@@ -436,9 +435,6 @@ export default function TeamSitesPage() {
     setSelectedCacheKeys(new Set());
 
     try {
-      const cleaned = cleanAddressInput(rawQ);
-      const normalizedQ = stripSidoPrefix(cleaned);
-
       const runTextSearch = async (q: string) => {
         const { data, error } = await supabase
           .from('elevator_national_cache')
@@ -451,23 +447,39 @@ export default function TeamSitesPage() {
 
       let rows: CacheRow[] = [];
 
-      const roadInfo = extractRoadAndNumber(normalizedQ);
-      if (roadInfo) {
+      // 1) exactRoad(원본 값)가 있으면 이것만 사용 — 텍스트 재파싱 절대 하지 않음
+      if (exactRoad) {
         const { data, error } = await supabase
           .from('elevator_national_cache')
           .select('*')
-          .ilike('road_name', `%${roadInfo.road}%`)
-          .ilike('main_no', `%${roadInfo.number}%`)
+          .eq('road_name', exactRoad.road)
+          .eq('main_no', exactRoad.number)
           .limit(500);
-        if (!error && data) rows = data;
-      }
+        if (error) throw error;
+        rows = data || [];
+      } else {
+        // 2) exactRoad가 없을 때만 텍스트 기반 추정 검색 (건물명 직접 입력 등)
+        const cleaned = cleanAddressInput(rawQ);
+        const normalizedQ = stripSidoPrefix(cleaned);
 
-      if (rows.length === 0) {
-        rows = await runTextSearch(normalizedQ);
-      }
+        const roadInfo = extractRoadAndNumber(normalizedQ);
+        if (roadInfo) {
+          const { data, error } = await supabase
+            .from('elevator_national_cache')
+            .select('*')
+            .ilike('road_name', `%${roadInfo.road}%`)
+            .ilike('main_no', `%${roadInfo.number}%`)
+            .limit(500);
+          if (!error && data) rows = data;
+        }
 
-      if (rows.length === 0 && normalizedQ !== rawQ) {
-        rows = await runTextSearch(rawQ);
+        if (rows.length === 0) {
+          rows = await runTextSearch(normalizedQ);
+        }
+
+        if (rows.length === 0 && normalizedQ !== rawQ) {
+          rows = await runTextSearch(rawQ);
+        }
       }
 
       setCacheResults(rows);
@@ -502,7 +514,7 @@ export default function TeamSitesPage() {
     }
   }
 
-  // ── 승강기 번호(7자리)로 검색 → 현장명/주소 입력칸에만 각각 채워줌 (자동조회는 실행하지 않음) ──
+  // ── 승강기 번호(7자리)로 검색 ──
   async function searchByElevatorNo() {
     const norm = normalizeElevatorNo(elevatorNoSearch);
     if (!norm) {
@@ -528,7 +540,7 @@ export default function TeamSitesPage() {
       }
 
       if (data.length === 1) {
-        selectElevatorNoResult(data[0]);
+        await selectElevatorNoResult(data[0]);
       } else {
         setElevatorNoResults(data);
       }
@@ -540,9 +552,9 @@ export default function TeamSitesPage() {
     }
   }
 
-  // ── 번호 조회 결과 중 하나를 선택 → 현장명은 현장명 칸에만, 주소는 주소 칸에만 각각 채움 ──
-  // (건물명을 주소의 대체값으로 쓰지 않으며, 건물 전체 조회 버튼은 사용자가 직접 눌러야만 동작합니다)
-  function selectElevatorNoResult(row: CacheRow) {
+  // ── 번호 조회 결과 선택 → 현장명·주소를 채우고, 원본 road_name/main_no를 저장해둔 뒤
+  //     그 원본 값 그대로 건물 전체 조회를 자동 실행 (수동 버튼도 이 원본 값을 그대로 재사용함) ──
+  async function selectElevatorNoResult(row: CacheRow) {
     const buildingName = row.building || '';
     const addressText = row.road_name
       ? `${row.road_name}${row.main_no ? ` ${row.main_no}` : ''}`
@@ -555,6 +567,16 @@ export default function TeamSitesPage() {
     }));
     setElevatorNoResults([]);
     setElevatorNoSearch('');
+
+    const exact = (row.road_name && row.main_no) ? { road: row.road_name, number: row.main_no } : null;
+    setAddressExactMatch(exact);
+
+    if (exact) {
+      await searchElevatorCache(addressText, exact);
+    } else {
+       const queryText = addressText || buildingName; 
+      if (queryText) await searchElevatorCache(queryText, null);
+    }
   }
 
   function toggleCacheRow(key: string) {
@@ -581,7 +603,6 @@ export default function TeamSitesPage() {
     new Set(sites.map(s => s.contractType).filter((v): v is string => !!v))
   ).sort();
 
-  // ─── 목록 필터 (팀원도 전체 팀 현장을 볼 수 있고, 팀별 검색 메뉴로 원하는 팀만 골라볼 수 있음) ───
   const filteredSites = sites
     .filter(s => {
       if (selectedTeam !== '전체' && s.teamName !== selectedTeam) return false;
@@ -656,7 +677,7 @@ export default function TeamSitesPage() {
         .from('sites')
         .insert({
           name: addForm.name,
-          site_name: addForm.name,   // ← 추가
+          site_name: addForm.name,
           address: addForm.address || '',
           lat: coords?.lat ?? null,
           lng: coords?.lng ?? null,
@@ -732,6 +753,7 @@ export default function TeamSitesPage() {
       setSelectedCacheKeys(new Set());
       setElevatorNoSearch('');
       setElevatorNoResults([]);
+      setAddressExactMatch(null);
       await reloadSites();
     } catch (e) {
       console.error(e);
@@ -760,7 +782,7 @@ export default function TeamSitesPage() {
         .from('sites')
         .update({
           name: editForm.name,
-          site_name: editForm.name,   // ← 추가: name과 항상 동일하게 동기화
+          site_name: editForm.name,
           address: editForm.address || '',
           ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
           phones: cleanedPhones,
@@ -825,7 +847,7 @@ export default function TeamSitesPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.ink, paddingBottom: 130 }}>
-      {/* 상단 헤더 (메인화면 스타일) */}
+      {/* 상단 헤더 */}
       <div style={{ padding: '24px 20px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
@@ -837,7 +859,6 @@ export default function TeamSitesPage() {
             }}
           >
             {Icon.building(18)}
-
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>팀별 현장</div>
@@ -855,6 +876,7 @@ export default function TeamSitesPage() {
               setSelectedCacheKeys(new Set());
               setElevatorNoSearch('');
               setElevatorNoResults([]);
+              setAddressExactMatch(null);
               setShowAddModal(true);
             }}
             style={{
@@ -882,7 +904,6 @@ export default function TeamSitesPage() {
             }}
           />
 
-          {/* 팀별 검색 메뉴 - 관리자와 팀원 모두 사용 가능 */}
           <select
             value={selectedTeam}
             onChange={e => setSelectedTeam(e.target.value)}
@@ -1004,7 +1025,6 @@ export default function TeamSitesPage() {
             </table>
           </div>
 
-          {/* 하단 합계 */}
           {filteredSites.length > 0 && (
             <div style={{ background: C.bg, borderTop: `1px solid ${C.line}`, padding: '10px 12px', display: 'flex', gap: 16, fontSize: 12, color: C.inkDim }}>
               <span>총 <strong style={{ color: C.ink }}>{filteredSites.length}</strong>개 현장</span>
@@ -1045,7 +1065,7 @@ export default function TeamSitesPage() {
                   </button>
                 </div>
                 <p className="text-xs text-indigo-400 mt-1">
-                  현장명·주소만 자동으로 채워져요. 승강기가 여러 대인 아파트 등은 아래 주소칸의 "🏢 건물 전체 조회" 버튼을 눌러 한꺼번에 등록할 수 있어요.
+                  현장명·주소가 자동으로 채워지고, 이어서 같은 건물의 승강기 대수까지 함께 조회돼요. 아래 결과에서 우리 회사가 관리하는 호기만 체크해 저장하세요.
                 </p>
 
                 {elevatorNoResults.length > 1 && (
@@ -1078,20 +1098,24 @@ export default function TeamSitesPage() {
                 />
               </div>
 
-              {/* 주소 + 이 건물 승강기 전체 조회 (버튼을 눌러야만 검색됨, 아파트 등 여러 대 등록용) */}
+              {/* 주소 + 건물 전체 조회 */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">주소</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={addForm.address || ''}
-                    onChange={e => setAddForm(prev => ({ ...prev, address: e.target.value }))}
+                    onChange={e => {
+                      setAddForm(prev => ({ ...prev, address: e.target.value }));
+                      // 사용자가 주소를 직접 고치면 원본 일치 보장이 깨지므로 기억해둔 값 초기화
+                      setAddressExactMatch(null);
+                    }}
                     className="flex-1 border rounded-xl px-3 py-2 text-sm"
                     placeholder="도로명주소 또는 건물(아파트)명"
                   />
                   <button
                     type="button"
-                    onClick={() => searchElevatorCache()}
+                    onClick={() => searchElevatorCache(addForm.address, addressExactMatch)}
                     disabled={cacheSearching}
                     className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl text-sm font-medium whitespace-nowrap disabled:opacity-50"
                   >
@@ -1099,7 +1123,7 @@ export default function TeamSitesPage() {
                   </button>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
-                  아파트처럼 승강기가 여러 대인 현장은 이 버튼을 눌러 같은 건물의 승강기를 한꺼번에 불러올 수 있어요. 누르지 않으면 승강기 번호 조회로 채운 현장명·주소만 저장돼요.
+                  아파트처럼 승강기가 여러 대인 현장은 이 버튼을 눌러 같은 건물의 승강기를 한꺼번에 불러올 수 있어요. 승강기 번호로 조회한 경우엔 자동으로 이미 실행되며, 주소를 고치지 않는 한 이 버튼을 다시 눌러도 항상 같은 결과가 나와요.
                 </p>
 
                 {cacheResults.length > 0 && (
@@ -1185,7 +1209,7 @@ export default function TeamSitesPage() {
                 </div>
               ))}
 
-              {/* 전화번호 (여러 개) */}
+              {/* 전화번호 */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">전화번호</label>
                 <PhoneListEditor
@@ -1194,7 +1218,7 @@ export default function TeamSitesPage() {
                 />
               </div>
 
-              {/* 비통번호 (여러 개) */}
+              {/* 비통번호 */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">비통번호</label>
                 <PhoneListEditor
@@ -1215,7 +1239,6 @@ export default function TeamSitesPage() {
                 </select>
               </div>
 
-              {/* 계약 기간 */}
               <div>
                 <label className="text-sm text-gray-600 mb-0.5 block">계약 기간</label>
                 <div className="flex items-center gap-2">
@@ -1266,6 +1289,7 @@ export default function TeamSitesPage() {
                   setSelectedCacheKeys(new Set());
                   setElevatorNoSearch('');
                   setElevatorNoResults([]);
+                  setAddressExactMatch(null);
                 }}
                 className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
               >
@@ -1315,7 +1339,6 @@ export default function TeamSitesPage() {
                     </div>
                   ))}
 
-                  {/* 주소: 클릭 시 바로 길찾기 */}
                   {selectedSite.address && (
                     <div
                       onClick={() => openNavigation(selectedSite)}
@@ -1328,7 +1351,6 @@ export default function TeamSitesPage() {
                     </div>
                   )}
 
-                  {/* 전화번호: 순서대로 줄바꿈, 파란색 아이콘 */}
                   {selectedSite.phones && selectedSite.phones.length > 0 && (
                     <div className="py-1.5 border-b last:border-0">
                       <span className="text-gray-500 block mb-1">전화번호</span>
@@ -1347,7 +1369,6 @@ export default function TeamSitesPage() {
                     </div>
                   )}
 
-                  {/* 비통번호: 순서대로 줄바꿈, 빨간색 아이콘 */}
                   {selectedSite.emergencyPhones && selectedSite.emergencyPhones.length > 0 && (
                     <div className="py-1.5 border-b last:border-0">
                       <span className="text-gray-500 block mb-1">비통번호</span>
@@ -1389,7 +1410,6 @@ export default function TeamSitesPage() {
                   )}
                 </div>
 
-                {/* 호기 목록 (동별 그룹핑) */}
                 <div className="mt-4">
                   <h3 className="font-semibold text-sm text-gray-700 mb-2">
                     🔧 호기 목록 ({siteElevators.length}대)
@@ -1500,7 +1520,6 @@ export default function TeamSitesPage() {
                     </div>
                   ))}
 
-                  {/* 전화번호 (여러 개) */}
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">전화번호</label>
                     <PhoneListEditor
@@ -1509,7 +1528,6 @@ export default function TeamSitesPage() {
                     />
                   </div>
 
-                  {/* 비통번호 (여러 개) */}
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">비통번호</label>
                     <PhoneListEditor
@@ -1530,7 +1548,6 @@ export default function TeamSitesPage() {
                     </select>
                   </div>
 
-                  {/* 계약 기간 */}
                   <div>
                     <label className="text-sm text-gray-600 mb-0.5 block">계약 기간</label>
                     <div className="flex items-center gap-2">
@@ -1587,7 +1604,7 @@ export default function TeamSitesPage() {
   );
 }
 
-// ─── 색상 지정 가능한 전화 아이콘 (전화번호=파랑, 비통번호=빨강) ───
+// ─── 색상 지정 가능한 전화 아이콘 ───
 function PhoneIcon({ color }: { color: string }) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill={color} xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
@@ -1596,7 +1613,7 @@ function PhoneIcon({ color }: { color: string }) {
   );
 }
 
-// ─── 전화번호 여러 개 입력 컴포넌트 (전화번호/비통번호 공용) ───
+// ─── 전화번호 여러 개 입력 컴포넌트 ───
 function PhoneListEditor({
   phones, onChange,
 }: {
@@ -1646,7 +1663,7 @@ function PhoneListEditor({
   );
 }
 
-// ─── 현장 행 컴포넌트 (일반 목록 / 그룹 목록 공통 사용) ───
+// ─── 현장 행 컴포넌트 ───
 function SiteRow({
   site, idx, canEdit, onClick, onDelete,
 }: {
