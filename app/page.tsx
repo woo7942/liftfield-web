@@ -162,9 +162,10 @@ export default function HomePage() {
       <header className="sticky top-0 z-50 bg-white/85 backdrop-blur border-b border-[color:var(--color-line)]">
         <div className="max-w-6xl mx-auto px-5 sm:px-6 h-16 flex items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <div className="w-8 h-8 rounded-lg bg-[color:var(--color-brand)] text-white grid place-items-center font-black text-sm">L</div>
-            <span className="font-black tracking-tightest text-lg">LiftField</span>
-          </Link>
+  <Image src="/icon-192.png" alt="LiftField 로고" width={32} height={32} className="rounded-lg" />
+  <span className="font-black tracking-tightest text-lg">LiftField</span>
+</Link>
+
 
           <nav className="hidden md:flex items-center gap-7 text-[13.5px] font-medium text-[color:var(--color-ink-soft)]">
             <a href="#screens" className="navlink hover:text-[color:var(--color-brand)]">화면 미리보기</a>
@@ -1040,9 +1041,10 @@ function Footer({ router }: { router: ReturnType<typeof useRouter> }) {
         <div className="grid md:grid-cols-4 gap-10 mb-12">
           <div className="md:col-span-1">
             <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-[color:var(--color-brand)] text-white grid place-items-center font-black text-sm">L</div>
-              <span className="font-black text-white text-lg tracking-tightest">LiftField</span>
-            </div>
+  <Image src="/icon-192.png" alt="LiftField 로고" width={32} height={32} className="rounded-lg" />
+  <span className="font-black text-white text-lg tracking-tightest">LiftField</span>
+</div>
+
             <p className="text-sm leading-relaxed">승강기 현장 관리 솔루션.<br />종이 뭉치 대신 하나의 화면.</p>
           </div>
           <div>
