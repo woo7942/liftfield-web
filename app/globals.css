@@ -454,7 +454,8 @@ body {
    인쇄 전용 스타일
    ============================================ */
 @media print {
-  body * {
+  /* 1) 견적서 페이지에서만: 화면 전체를 숨긴다 */
+  body:has(.quote-doc) * {
     visibility: hidden;
   }
 
@@ -498,11 +499,13 @@ body {
     display: none !important;
   }
 
+  /* 6) 배경색이 인쇄되도록 강제 */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 }
+
 
 /* ============================================
    ↓↓↓ LIFTFIELD HOME v2 CUSTOM ↓↓↓
