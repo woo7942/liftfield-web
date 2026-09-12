@@ -10,6 +10,18 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* ===== LiftField Home v2 tokens ===== */
+  --color-brand: #2563eb;
+  --color-brand-deep: #1e40af;
+  --color-brand-soft: #dbeafe;
+  --color-brand-ink: #0b1e42;
+  --color-ink: #0f172a;
+  --color-ink-soft: #334155;
+  --color-ink-dim: #64748b;
+  --color-ink-faint: #94a3b8;
+  --color-line: #e2e8f0;
+  --color-panel: #f8fafc;
 }
 
 body {
@@ -437,22 +449,20 @@ body {
 
 .theme-e .doc-footer { text-align: center; margin-top: 40px; font-family: var(--serif); font-style: italic; font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
 .theme-e .doc-footer .divider { margin: 0 10px; color: var(--champagne); }
+
 /* ============================================
    인쇄 전용 스타일
    ============================================ */
 @media print {
-  /* 1) 화면 전체를 일단 숨긴다 */
   body * {
     visibility: hidden;
   }
 
-  /* 2) 견적서 문서 영역만 다시 보이게 한다 */
   .quote-doc,
   .quote-doc * {
     visibility: visible;
   }
 
-  /* 3) 모달 컨테이너들의 fixed/overflow 제약을 풀어준다 */
   .modal-overlay {
     position: static !important;
     background: none !important;
@@ -469,7 +479,6 @@ body {
     max-width: none !important;
   }
 
-  /* 4) 문서 자체를 페이지 좌상단에 절대 배치 */
   .quote-doc {
     position: absolute;
     left: 0;
@@ -480,7 +489,6 @@ body {
     background: #fff !important;
   }
 
-  /* 5) 인쇄에 불필요한 버튼/닫기 아이콘 등은 숨김 */
   .modal-close,
   .action-panel,
   .tab-bar,
@@ -490,10 +498,107 @@ body {
     display: none !important;
   }
 
-  /* 6) 배경색이 인쇄되도록 강제 (일부 브라우저는 기본적으로 배경 인쇄를 생략함) */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 }
 
+/* ============================================
+   ↓↓↓ LIFTFIELD HOME v2 CUSTOM ↓↓↓
+   ============================================ */
+
+.reveal, .reveal-r, .reveal-l, .reveal-scale {
+  opacity: 0;
+  transition: opacity .7s cubic-bezier(.16,.84,.44,1), transform .7s cubic-bezier(.16,.84,.44,1);
+  will-change: opacity, transform;
+}
+.reveal { transform: translateY(24px); }
+.reveal-r { transform: translateX(28px); }
+.reveal-l { transform: translateX(-28px); }
+.reveal-scale { transform: scale(.94); }
+
+.reveal.in, .reveal-r.in, .reveal-l.in, .reveal-scale.in {
+  opacity: 1;
+  transform: none;
+}
+
+.stagger > * {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity .6s cubic-bezier(.16,.84,.44,1), transform .6s cubic-bezier(.16,.84,.44,1);
+}
+.stagger.in > * { opacity: 1; transform: none; }
+.stagger > *:nth-child(1) { transition-delay:  60ms; }
+.stagger > *:nth-child(2) { transition-delay: 120ms; }
+.stagger > *:nth-child(3) { transition-delay: 180ms; }
+.stagger > *:nth-child(4) { transition-delay: 240ms; }
+.stagger > *:nth-child(5) { transition-delay: 300ms; }
+.stagger > *:nth-child(6) { transition-delay: 360ms; }
+.stagger > *:nth-child(7) { transition-delay: 420ms; }
+.stagger > *:nth-child(8) { transition-delay: 480ms; }
+.stagger > *:nth-child(9) { transition-delay: 540ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-r, .reveal-l, .reveal-scale, .stagger > * {
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+@keyframes softpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+.softpulse { animation: softpulse 2s ease-in-out infinite; }
+
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.floaty { animation: floaty 5s ease-in-out infinite; }
+
+.hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(15,23,42,.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15,23,42,.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 40%, transparent 100%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 40%, transparent 100%);
+}
+
+.navlink {
+  position: relative;
+  padding-bottom: 4px;
+}
+.navlink::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 100%; bottom: 0;
+  height: 2px;
+  background: var(--color-brand, #2563eb);
+  transition: right .25s ease;
+}
+.navlink:hover::after,
+.navlink.active::after {
+  right: 0;
+}
+
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+.chev { transition: transform .2s ease; }
+details[open] .chev { transform: rotate(180deg); }
+
+.font-display {
+  font-family: 'Playfair Display', 'Noto Serif KR', serif;
+}
+
+.balance { text-wrap: balance; }
+.pretty  { text-wrap: pretty; }
+
+.tracking-tightest { letter-spacing: -.03em; }
+
+/* ============================================
+   ↑↑↑ LIFTFIELD HOME v2 CUSTOM ↑↑↑
+   ============================================ */
