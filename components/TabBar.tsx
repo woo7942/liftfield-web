@@ -11,8 +11,10 @@ const TABS = [
   { key: "inspection", path: "/inspection", icon: Icon.tool },
   { key: "inspect", path: "/inspect", icon: Icon.clipboard },
   { key: "material", path: "/material", icon: Icon.box },
+  { key: "manual", path: "/manual", icon: Icon.zap },
   { key: "quote", path: "/quote", icon: Icon.fileText },
 ];
+
 
 export default function TabBar({ active }: { active: string }) {
   const router = useRouter();
