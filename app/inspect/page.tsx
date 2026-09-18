@@ -25,8 +25,10 @@ export default function InspectPage() {
   const [elevators, setElevators] = useState<any[]>([]);
   const [elevsLoading, setElevsLoading] = useState(false);
 
-  const [selectedElev, setSelectedElev] = useState<any>(null);
+    const [selectedElev, setSelectedElev] = useState<any>(null);
+  const [elevPickerOpen, setElevPickerOpen] = useState(false);
   const [apiLoading, setApiLoading] = useState(false);
+
   const [history, setHistory] = useState<any[]>([]);
   const [failList, setFailList] = useState<any[]>([]);
   const [apiError, setApiError] = useState('');
@@ -863,94 +865,111 @@ export default function InspectPage() {
 
           {selectedSite && (
             <div className="flex gap-4 print:block">
-              <div className="w-56 shrink-0 print:hidden">
-                <div style={{ background: C.surface, border: `1px solid ${C.line}` }} className="rounded-xl overflow-hidden">
-                  <div
-                    style={{ borderColor: C.line, background: C.bg }}
-                    className="px-3 py-2.5 border-b flex items-center justify-between"
-                  >
-                    <span style={{ color: C.inkSoft }} className="text-sm font-bold flex items-center gap-1">
-                      {Icon.building(14)} {selectedSite.siteName || selectedSite.name}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setSelectedSite(null);
-                        setSelectedElev(null);
-                        setElevators([]);
-                      }}
-                      style={{ color: C.inkFaint }}
-                      className="text-xs"
-                    >
-                      변경
-                    </button>
+              <div className="print:hidden space-y-2">
+  <div style={{ background: C.surface, border: `1px solid ${C.line}` }} className="rounded-xl overflow-hidden">
+    <div
+      style={{ borderColor: C.line, background: C.bg }}
+      className="px-3 py-2.5 border-b flex items-center justify-between"
+    >
+      <span style={{ color: C.inkSoft }} className="text-sm font-bold flex items-center gap-1">
+        {Icon.building(14)} {selectedSite.siteName || selectedSite.name}
+      </span>
+      <button
+        onClick={() => {
+          setSelectedSite(null);
+          setSelectedElev(null);
+          setElevators([]);
+          setElevPickerOpen(false);
+        }}
+        style={{ color: C.inkFaint }}
+        className="text-xs"
+      >
+        변경
+      </button>
+    </div>
+
+    {elevators.length > 0 && (
+      <div className="px-3 py-2">
+        <button
+          onClick={loadSiteReportAndPrint}
+          disabled={siteReportLoading}
+          style={{ background: C.inkSoft, color: '#fff' }}
+          className="w-full text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center justify-center gap-1"
+        >
+          {Icon.fileText(13)} {siteReportLoading ? reportProgress || '준비 중...' : '전체 보고서 PDF (동별)'}
+        </button>
+      </div>
+    )}
+  </div>
+
+  {elevsLoading ? (
+    <div style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }} className="rounded-xl py-8 text-center text-sm">
+      로딩 중...
+    </div>
+  ) : elevators.length === 0 ? (
+    <div style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkFaint }} className="rounded-xl py-8 text-center text-sm">
+      호기 없음
+    </div>
+  ) : (
+    <div className="relative">
+      <button
+        onClick={() => setElevPickerOpen((v) => !v)}
+        style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.ink }}
+        className="w-full text-left px-3 py-2.5 rounded-xl text-sm flex items-center justify-between"
+      >
+        <span className="font-medium truncate">
+          {(() => {
+            const e = selectedElev || sortedElevators[0];
+            return e.installationPlace || `${e.dong ? e.dong + ' ' : ''}${String(e.hogiNo || '').replace(/[^0-9]/g, '')}호기`;
+          })()}
+        </span>
+        <span style={{ transform: elevPickerOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>
+          ▾
+        </span>
+      </button>
+
+      {elevPickerOpen && (
+        <div
+          style={{ background: C.surface, border: `1px solid ${C.line}` }}
+          className="absolute left-0 right-0 top-full mt-1 rounded-xl shadow-lg z-20 max-h-[60vh] overflow-y-auto"
+        >
+          {sortedElevators.map((elev: any) => {
+            const dday = getDdayInfo(elev);
+            const isActive = selectedElev?.id === elev.id;
+            return (
+              <button
+                key={elev.id}
+                onClick={() => {
+                  handleElevClick(elev);
+                  setElevPickerOpen(false);
+                }}
+                style={{
+                  borderColor: C.line,
+                  background: isActive ? C.primaryLight : 'transparent',
+                  color: isActive ? C.primaryDeep : C.inkSoft,
+                }}
+                className={`w-full text-left px-3 py-2.5 border-b last:border-0 text-sm transition-colors ${
+                  isActive ? 'font-semibold' : 'hover:bg-black/[0.02]'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">
+                    {elev.installationPlace || `${elev.dong ? elev.dong + ' ' : ''}${String(elev.hogiNo || '').replace(/[^0-9]/g, '')}호기`}
                   </div>
-
-                  {elevators.length > 0 && (
-                    <div style={{ borderColor: C.line }} className="px-3 py-2 border-b">
-                      <button
-                        onClick={loadSiteReportAndPrint}
-                        disabled={siteReportLoading}
-                        style={{ background: C.inkSoft, color: '#fff' }}
-                        className="w-full text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center justify-center gap-1"
-                      >
-                        {Icon.fileText(13)} {siteReportLoading ? reportProgress || '준비 중...' : '전체 보고서 PDF (동별)'}
-                      </button>
-                    </div>
-                  )}
-
-                  {elevsLoading ? (
-                    <div style={{ color: C.inkFaint }} className="py-8 text-center text-sm">
-                      로딩 중...
-                    </div>
-                  ) : elevators.length === 0 ? (
-                    <div style={{ color: C.inkFaint }} className="py-8 text-center text-sm">
-                      호기 없음
-                    </div>
-                  ) : (
-                    sortedElevators.map((elev: any) => {
-                      const dday = getDdayInfo(elev);
-                      const isActive = selectedElev?.id === elev.id;
-                      return (
-                        <button
-                          key={elev.id}
-                          onClick={() => handleElevClick(elev)}
-                          style={{
-                            borderColor: C.line,
-                            background: isActive ? C.primaryLight : 'transparent',
-                            color: isActive ? C.primaryDeep : C.inkSoft,
-                          }}
-                          className={`w-full text-left px-3 py-2.5 border-b last:border-0 text-sm transition-colors ${
-                            isActive ? 'font-semibold' : 'hover:bg-black/[0.02]'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="font-medium">
-                              {elev.dong ? `${elev.dong} ` : ''}
-                              {String(elev.hogiNo || '').replace(/[^0-9]/g, '')}호기
-                            </div>
-                            {dday && dday.urgent && (
-                              <span
-                                style={{ ...dday.style }}
-                                className="text-[10px] px-1.5 py-0.5 rounded font-bold"
-                              >
-                                {dday.label}
-                              </span>
-                            )}
-                          </div>
-                          {elev.installationPlace && (
-                            <div style={{ color: C.inkFaint }} className="text-xs">
-                              {elev.installationPlace}
-                            </div>
-                          )}
-                          <div style={{ color: C.inkFaint }} className="text-xs">
-                            {elev.elevatorNo || '번호없음'}
-                          </div>
-                        </button>
-                      );
-                    })
+                  {dday && dday.urgent && (
+                    <span style={{ ...dday.style }} className="text-[10px] px-1.5 py-0.5 rounded font-bold">
+                      {dday.label}
+                    </span>
                   )}
                 </div>
-              </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  )}
+</div>
 
               <div className="flex-1">
                 {!selectedElev && siteReportRows.length === 0 && (

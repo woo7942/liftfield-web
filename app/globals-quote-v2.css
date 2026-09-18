@@ -176,7 +176,32 @@
   pointer-events: none;
   z-index: 5;
 }
-.qv2-stamp img, .qv2-stamp svg { display: block; width: 100%; height: 100%; }
+.qv2-stamp svg { display: block; width: 100%; height: 100%; }
+.qv2-stamp {
+  position: absolute;
+  top: -2mm;
+  right: 6mm;
+  width: 18mm; height: 18mm;
+  transform: rotate(-6deg);
+  opacity: 0.9;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--qv2-paper);
+}
+.qv2-stamp svg { display: block; width: 100%; height: 100%; }
+.qv2-stamp img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  mix-blend-mode: multiply;
+  filter: contrast(1.1) saturate(1.05);
+}
+
+
+
 
 /* ── Project line ── */
 .qv2-project-line {

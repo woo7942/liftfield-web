@@ -86,6 +86,10 @@ export default function InspectionPage() {
   const [panelDate, setPanelDate] = useState('');
   const [panelSaving, setPanelSaving] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportPreviewOpen, setReportPreviewOpen] = useState(false);
+  const [reportPreviewImg, setReportPreviewImg] = useState('');
+  const [reportPreviewCanvasSize, setReportPreviewCanvasSize] = useState({ width: 0, height: 0 });
+  const [reportPreviewMonthLabel, setReportPreviewMonthLabel] = useState({ year: 0, month: 0 });
 
   // 🔍 현장 검색
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
@@ -444,7 +448,7 @@ export default function InspectionPage() {
   };
 
   // ── 이번 달 특이사항이 있는 현장만 모아 PDF 리포트 생성 ──
-  const generateReport = async () => {
+    const generateReport = async () => {
     const targets = filteredSites.filter(s => (noteMap[s.id]?.note || '').trim() !== '');
     if (targets.length === 0) {
       alert(`${year}년 ${month}월에는 특이사항이 등록된 현장이 없어요.`);
@@ -454,7 +458,6 @@ export default function InspectionPage() {
     setReportGenerating(true);
     try {
       const { default: html2canvas } = await import('html2canvas');
-      const { jsPDF } = await import('jspdf');
 
       const wrapper = document.createElement('div');
       wrapper.style.position = 'fixed';
@@ -496,29 +499,46 @@ export default function InspectionPage() {
       const canvas = await html2canvas(wrapper, { scale: 2, backgroundColor: '#ffffff' });
       document.body.removeChild(wrapper);
 
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pageWidth = 210;
-      const pageHeight = 297;
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      const imgData = canvas.toDataURL('image/png');
-
-      let heightLeft = imgHeight;
-      let position = 0;
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save(`${year}년_${month}월_특이사항_리포트.pdf`);
+      // ✅ 바로 저장하지 않고, 미리보기만 준비해서 모달로 띄운다
+      setReportPreviewImg(canvas.toDataURL('image/png'));
+      setReportPreviewCanvasSize({ width: canvas.width, height: canvas.height });
+      setReportPreviewMonthLabel({ year, month });
+      setReportPreviewOpen(true);
     } catch (e: any) {
       alert('리포트 생성 실패: ' + e.message);
     } finally {
       setReportGenerating(false);
+    }
+  };
+
+  // ── 미리보기에서 "저장" 눌렀을 때 실제 PDF 다운로드 ──
+  const confirmSaveReport = async () => {
+    if (!reportPreviewImg || reportPreviewCanvasSize.width === 0) return;
+    try {
+      const { jsPDF } = await import('jspdf');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const imgWidth = pageWidth;
+      const imgHeight = (reportPreviewCanvasSize.height * imgWidth) / reportPreviewCanvasSize.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(reportPreviewImg, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(reportPreviewImg, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      // ✅ 파일명은 리포트를 생성했을 당시의 연/월(=화면에 보이던 달)로 자동 지정
+      pdf.save(`${reportPreviewMonthLabel.year}년_${reportPreviewMonthLabel.month}월_특이사항_리포트.pdf`);
+
+      setReportPreviewOpen(false);
+    } catch (e: any) {
+      alert('저장 실패: ' + e.message);
     }
   };
 
@@ -843,6 +863,38 @@ export default function InspectionPage() {
           </div>
         </div>
       )}
+            {reportPreviewOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <h3 className="font-black text-gray-800">
+                {reportPreviewMonthLabel.year}년 {reportPreviewMonthLabel.month}월 특이사항 리포트 미리보기
+              </h3>
+              <button onClick={() => setReportPreviewOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto bg-gray-50 p-4">
+              {reportPreviewImg && (
+                <img src={reportPreviewImg} alt="리포트 미리보기" className="w-full rounded-lg shadow border border-gray-200" />
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-100 flex gap-3 shrink-0">
+              <button
+                onClick={() => setReportPreviewOpen(false)}
+                className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmSaveReport}
+                className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+              >
+                PDF로 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       <TabBar active="inspection" />
 

@@ -1,6 +1,9 @@
 'use client';
 
+import '../globals-quote-v2.css';
 import { RefObject } from 'react';
+
+
 
 /**
  * QuoteDocV2 — 견적서 인쇄용 문서 컴포넌트 (Corporate Cobalt)
