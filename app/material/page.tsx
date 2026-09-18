@@ -79,6 +79,13 @@ export default function MaterialPage() {
   const [statusFilter, setStatusFilter] = useState('전체');
   const [teamFilter, setTeamFilter] = useState('전체');
   const [page, setPage] = useState(1);
+
+  // ✅ 이번 달 기준으로 자재신청 목록을 보여주기 위한 월 상태
+  const [monthCursor, setMonthCursor] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  });
+
   const PAGE_SIZE = 20;
 
   const [detailItem, setDetailItem] = useState<MaterialRequest | null>(null);
@@ -289,9 +296,6 @@ export default function MaterialPage() {
   }, [availableSites, regSiteQuery]);
 
   // ✅✅ 선택한 현장에 속한 호기 목록
-  // - 점검 페이지와 동일한 우선순위 적용:
-  //   1) installation_place(설치위치)가 있으면 그 값을 그대로 사용 (이미 완성된 정답 라벨)
-  //   2) 없으면 dong + hogi_no 조합으로 대체 표시
   const getHogiNum = (h: string) =>
     parseInt((h || '').replace(/[^0-9]/g, '') || '0');
 
@@ -322,9 +326,19 @@ export default function MaterialPage() {
     return hogiOptions.filter(o => o.label.toLowerCase().includes(q));
   }, [hogiOptions, regHogi]);
 
-  // 필터링
+  // ✅ 선택된 달(monthCursor) 기준으로 자재신청만 먼저 걸러냄
+  const monthlyRequests = useMemo(() => {
+    return requests.filter(r => {
+      const dateStr = r.request_at || r.created_at;
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return d.getFullYear() === monthCursor.year && d.getMonth() + 1 === monthCursor.month;
+    });
+  }, [requests, monthCursor]);
+
+  // 필터링 (이번 달 목록 기준으로 상태/팀/검색 적용)
   const filtered = useMemo(() => {
-    let list = requests;
+    let list = monthlyRequests;
     if (statusFilter !== '전체') list = list.filter(r => r.status === statusFilter);
     if (teamFilter !== '전체') list = list.filter(r => r.team === teamFilter);
     if (search.trim()) {
@@ -337,12 +351,15 @@ export default function MaterialPage() {
       );
     }
     return list;
-  }, [requests, statusFilter, teamFilter, search]);
+  }, [monthlyRequests, statusFilter, teamFilter, search]);
 
   const teams = useMemo(() => {
-    const t = new Set(requests.map(r => r.team).filter(Boolean));
+    const t = new Set(monthlyRequests.map(r => r.team).filter(Boolean));
     return ['전체', ...Array.from(t)] as string[];
-  }, [requests]);
+  }, [monthlyRequests]);
+
+  // ✅ 월이 바뀌면 페이지 1로 초기화
+  useEffect(() => { setPage(1); }, [monthCursor]);
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -355,6 +372,24 @@ export default function MaterialPage() {
   const formatHogi = (v?: string) => {
     if (!v) return '';
     return v.includes('호기') ? v : `${v}호기`;
+  };
+
+  // ✅ 이전/다음 달 이동
+  const goPrevMonth = () => {
+    setMonthCursor(({ year, month }) => {
+      const m = month - 1;
+      return m < 1 ? { year: year - 1, month: 12 } : { year, month: m };
+    });
+  };
+  const goNextMonth = () => {
+    setMonthCursor(({ year, month }) => {
+      const m = month + 1;
+      return m > 12 ? { year: year + 1, month: 1 } : { year, month: m };
+    });
+  };
+  const goThisMonth = () => {
+    const now = new Date();
+    setMonthCursor({ year: now.getFullYear(), month: now.getMonth() + 1 });
   };
 
   // PDF 출력
@@ -385,13 +420,35 @@ export default function MaterialPage() {
 
     const html = `
       <html><head><meta charset="utf-8">
-      <style>
+            <style>
+        @page { size: A4 landscape; margin: 10mm; }
         body { font-family: sans-serif; padding: 20px; }
         h1 { text-align: center; font-size: 20px; }
         table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 16px; }
-        th, td { border: 1px solid #ccc; padding: 5px 6px; text-align: center; }
-        th { background: #f3f4f6; font-weight: bold; }
+        th, td { border: 1px solid #ccc; padding: 5px 6px; text-align: center; word-break: keep-all; overflow-wrap: break-word; }
+        th { background: #f3f4f6; font-weight: bold; white-space: nowrap; }
         tr:nth-child(even) { background: #f9fafb; }
+
+        /* 짧은 값(번호, 신청일, 호기, 파트넘버, 수량, 상태, 신청자, 분출일, 수령일, 교체일)은 무조건 한 줄 고정 */
+        th:nth-child(1), td:nth-child(1),
+        th:nth-child(2), td:nth-child(2),
+        th:nth-child(5), td:nth-child(5),
+        th:nth-child(7), td:nth-child(7),
+        th:nth-child(8), td:nth-child(8),
+        th:nth-child(10), td:nth-child(10),
+        th:nth-child(11), td:nth-child(11),
+        th:nth-child(12), td:nth-child(12),
+        th:nth-child(13), td:nth-child(13),
+        th:nth-child(14), td:nth-child(14) {
+          white-space: nowrap;
+        }
+
+        /* 긴 텍스트가 들어가는 열(현장, 자재명, 사유)만 어절 단위 줄바꿈 허용 */
+        th:nth-child(3), td:nth-child(3),
+        th:nth-child(6), td:nth-child(6),
+        th:nth-child(9), td:nth-child(9) {
+          white-space: normal;
+        }
       </style></head>
       <body>
         <h1>자재신청 내역</h1>
@@ -405,6 +462,7 @@ export default function MaterialPage() {
           <tbody>${rows}</tbody>
         </table>
       </body></html>`;
+
 
     printHtml(html);
     setPdfModal(false);
@@ -491,27 +549,48 @@ export default function MaterialPage() {
       </header>
 
       <div className="p-4 max-w-7xl mx-auto">
-        <div className="grid grid-cols-5 gap-1.5 mb-6">
-  {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
-    const cnt = requests.filter(r => r.status === s).length;
-    const style = STATUS_STYLE[s];
-    const active = statusFilter === s;
-    return (
-      <button
-        key={s}
-        onClick={() => { setStatusFilter(s === statusFilter ? '전체' : s); setPage(1); }}
-        className={`px-1 py-2.5 rounded-xl border-2 text-center transition-all ${
-          active ? `${style.bg} ${style.border} ${style.text}` : ''
-        }`}
-        style={!active ? { background: C.surface, borderColor: C.line, color: C.inkDim } : undefined}
-      >
-        <div className="text-xl font-bold">{cnt}</div>
-        <div className="text-[10px] mt-1 whitespace-nowrap">{style.label}</div>
-      </button>
-    );
-  })}
-</div>
+        {/* ✅ 월 이동 네비게이션 */}
+        <div className="flex items-center justify-center gap-3 mb-4">
+          <button
+            onClick={goPrevMonth}
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkDim }}
+          >‹</button>
+          <div className="text-base font-bold" style={{ color: C.ink }}>
+            {monthCursor.year}년 {monthCursor.month}월
+          </div>
+          <button
+            onClick={goNextMonth}
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: C.surface, border: `1px solid ${C.line}`, color: C.inkDim }}
+          >›</button>
+          <button
+            onClick={goThisMonth}
+            className="ml-2 px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.inkDim }}
+          >이번달</button>
+        </div>
 
+        <div className="grid grid-cols-5 gap-1.5 mb-6">
+          {['신청중', '접수', '수령', '교체완료', '반려'].map(s => {
+            const cnt = monthlyRequests.filter(r => r.status === s).length;
+            const style = STATUS_STYLE[s];
+            const active = statusFilter === s;
+            return (
+              <button
+                key={s}
+                onClick={() => { setStatusFilter(s === statusFilter ? '전체' : s); setPage(1); }}
+                className={`px-1 py-2.5 rounded-xl border-2 text-center transition-all ${
+                  active ? `${style.bg} ${style.border} ${style.text}` : ''
+                }`}
+                style={!active ? { background: C.surface, borderColor: C.line, color: C.inkDim } : undefined}
+              >
+                <div className="text-xl font-bold">{cnt}</div>
+                <div className="text-[10px] mt-1 whitespace-nowrap">{style.label}</div>
+              </button>
+            );
+          })}
+        </div>
 
         {/* 필터 */}
         <div className="flex flex-wrap gap-3 mb-4">
