@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { C, Icon } from '@/lib/theme';
 import TabBar from '@/components/TabBar';
+import QuoteDocV2 from './quote-doc-v2';
 
 
 interface MaterialItem {
@@ -213,52 +214,118 @@ export default function QuotePage() {
     setShowCreate(true);
   };
 
-  // ── 인쇄: html2canvas로 화면을 캡처해서 jsPDF로 A4 한 장 PDF 생성 ──
-  // 브라우저 네이티브 인쇄(window.print())는 배경색 인쇄 여부와 페이지 분할이
-  // 브라우저 설정/렌더링 타이밍에 따라 불안정하게 달라지는 문제가 있어,
-  // 화면을 그대로 이미지로 캡처해 PDF에 삽입하는 방식으로 완전히 대체한다.
-  const handlePrint = async () => {
+  // ── 인쇄: 전용 iframe에 견적서만 담아 window.print()로 정확한 벡터 인쇄
+const handlePrint = async () => {
   if (!printDocRef.current) return;
   setPdfLoading(true);
   try {
-    const html2canvas = (await import('html2canvas')).default;
-    const { jsPDF } = await import('jspdf');
-
     const el = printDocRef.current;
-    const canvas = await html2canvas(el, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#FAF7F0',
+
+    // 1) 현재 페이지의 모든 <style>, <link rel="stylesheet"> 를 수집
+    const styleNodes: string[] = [];
+    document.querySelectorAll('style, link[rel="stylesheet"]').forEach((n) => {
+      styleNodes.push(n.outerHTML);
     });
 
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
+    // 2) 견적서 HTML만 추출
+    const docHTML = el.outerHTML;
 
-    const pageWidth = 210;   // A4 가로 (mm) - 절대 줄이지 않음
-    const pageHeight = 297;  // A4 세로 (mm)
+    // 3) 오늘 회사명 (인쇄 창 title)
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const title = `견적서_${selectedQuote?.doc_no || selectedQuote?.id || dateStr}`;
 
-    // 항상 가로는 페이지 전체 폭으로 고정
-    const imgWidth = pageWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width; // 원본 비율 그대로일 때의 세로 길이
+    // 4) 인쇄 전용 iframe 생성
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
 
-    if (imgHeight <= pageHeight) {
-      // 한 페이지 안에 자연스럽게 들어가는 경우: 위쪽 정렬, 가로는 항상 풀폭
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-    } else {
-      // 내용이 길어서 넘치는 경우: 가로는 절대 줄이지 않고,
-      // 세로만 페이지 높이(297mm)에 맞춰 강제로 눌러서 채움 (좌우 여백 발생 원인 제거)
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, pageHeight);
+    // 5) iframe 안에 견적서 문서만 (화면의 다른 스타일 · 스크립트 · Ctrl+P 방해 요소 전부 배제)
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) throw new Error('iframe document 없음');
+
+    iframeDoc.open();
+    iframeDoc.write(`<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+${styleNodes.join('\n')}
+<style>
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  /* iframe 안에서는 인쇄용 규칙만 남기고, 화면 미리보기는 무시 */
+  @page { size: A4 portrait; margin: 0; }
+  body { display: flex; justify-content: center; align-items: flex-start; }
+  .qv2-doc {
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+  @media print {
+    body { display: block; }
+    .qv2-doc {
+      margin: 0 !important;
+      box-shadow: none !important;
+      width: 210mm !important;
+      height: 297mm !important;
+      page-break-after: always;
     }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  }
+</style>
+</head>
+<body>
+${docHTML}
+</body>
+</html>`);
+    iframeDoc.close();
 
-    window.open(pdf.output('bloburl'), '_blank');
+    // 6) 폰트·이미지 로드 완료 대기 후 인쇄
+    const win = iframe.contentWindow;
+    if (!win) throw new Error('iframe window 없음');
+
+    // 이미지 로드 대기
+    const imgs = Array.from(iframeDoc.images);
+    await Promise.all(
+      imgs.map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise<void>((res) => {
+              img.onload = () => res();
+              img.onerror = () => res();
+            }),
+      ),
+    );
+    // 폰트 로드 대기
+    if ((iframeDoc as any).fonts && (iframeDoc as any).fonts.ready) {
+      await (iframeDoc as any).fonts.ready;
+    }
+    // 안정화 대기
+    await new Promise((r) => setTimeout(r, 250));
+
+    // 7) 인쇄 다이얼로그 열기 (사용자가 "PDF로 저장" 선택)
+    win.focus();
+    win.print();
+
+    // 8) 인쇄 다이얼로그 닫힌 후 iframe 정리
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+    }, 1000);
   } catch (e) {
     console.error(e);
-    alert('PDF 생성 중 오류가 발생했습니다.');
+    alert('인쇄 준비 중 오류가 발생했습니다.');
   } finally {
     setPdfLoading(false);
   }
 };
-
 
   const handleSaveQuote = async () => {
     const effectiveTeam = isAdmin ? createTeam : userInfo.team;
@@ -826,152 +893,18 @@ export default function QuotePage() {
               </div>
             )}
 
-            {/* ══ 견적서 문서 (E안) ══ */}
-            <div
-              className="quote-doc"
-              style={{ margin: '24px auto', boxShadow: 'none', border: 'none' }}
-              id="quote-document"
-              ref={printDocRef}
-            >
-              <div className="doc-hero">
-                <div className="doc-monogram">— H · E —</div>
-                <div className="doc-title">견 적 서</div>
-                <div className="doc-title-en">Estimate · Quotation</div>
-              </div>
+            {/* ══ 견적서 문서 (V2 Corporate Cobalt) ══ */}
+<QuoteDocV2
+  quote={selectedQuote}
+  company={company}
+  rates={rates}
+  includeIndirectLabor={inclIndirect}
+  includeOverhead={inclOverhead}
+  includeProfit={inclProfit}
+  printDocRef={printDocRef}
+/>
+{/* ══ 문서 끝 ══ */}
 
-              <div className="doc-header-grid">
-                <div className="doc-client-block">
-                  <div className="lbl">To · 수신처</div>
-                  <div className="val">{(selectedQuote.items?.client_name) || `${selectedQuote.items?.site_name || ''} 귀중`}</div>
-                  <div className="sub">
-                    {selectedQuote.items?.site_address}<br />
-                    {selectedQuote.items?.site_manager && `담당: ${selectedQuote.items.site_manager}`}
-                  </div>
-                </div>
-                <div className="doc-supplier">
-                  <div className="lbl">From · 발행처</div>
-                  <div className="sup-name">
-                    {company?.logo_image_url && <img src={company.logo_image_url} alt="" style={{ height: 30, objectFit: 'contain' }} />}
-                    {company?.company_name}
-                  </div>
-                  <div className="sup-lines">
-                    발행일 : <span className="val">{fmtDate(selectedQuote.created_at)}</span><br />
-                    사업자등록번호 : <span className="val">{company?.biz_no}</span><br />
-                    보수업등록번호 : <span className="val">{company?.license_no}</span><br />
-                    {company?.address}<br />
-                    ☎ {company?.phone}{company?.fax ? `  Fax ${company.fax}` : ''}
-                  </div>
-                  <div className="sup-ceo">
-                    대 표 : {company?.ceo_name}
-                    {company?.stamp_image_url && (
-                      <img className="stamp" src={company.stamp_image_url} alt="직인" style={{ width: 46, height: 46, objectFit: 'contain' }} />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="doc-amount-box">
-                <div className="doc-amount-label">Total Amount</div>
-                <div className="doc-amount-value"><span className="accent">₩</span>{won(selectedQuote.amount)}<span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--champagne)', fontSize: 15, marginLeft: 6 }}>원</span></div>
-              </div>
-              <div className="doc-note">※ 상기 금액은 부가세 포함 합계금액임</div>
-
-              <div className="doc-project-title">
-                <span className="lbl">Project · 공사명</span>
-                {selectedQuote.items?.title || selectedQuote.title}
-              </div>
-
-              <table className="doc-table">
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left' }}>품명</th><th style={{ width: 50 }}>단위</th><th style={{ width: 55 }}>수량</th>
-                    <th style={{ width: 80 }}>단가</th><th style={{ width: 90 }}>금액</th><th style={{ width: 100, textAlign: 'left' }}>비고</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="section-row"><td colSpan={6}><span className="num">i.</span>자재비</td></tr>
-                  {(selectedQuote.items?.materials || []).map((m: any, i: number) => (
-                    <tr key={i}>
-                      <td>{m.name}</td>
-                      <td className="center">{m.unit}</td>
-                      <td className="right">{m.qty}</td>
-                      <td className="right">{won(m.unit_price)}</td>
-                      <td className="right">{won(m.qty * m.unit_price)}</td>
-                      <td>{m.note}</td>
-                    </tr>
-                  ))}
-                  <tr className="subtotal-row">
-                    <td colSpan={4} className="right" style={{ fontFamily: 'var(--serif)' }}>소 계</td>
-                    <td className="right">{won(selectedQuote.items?.breakdown?.materialsSubtotal)}</td>
-                    <td></td>
-                  </tr>
-
-                  <tr className="section-row"><td colSpan={6}><span className="num">ii.</span>인건비</td></tr>
-                  <tr>
-                    <td>직접인건비</td>
-                    <td className="center">{selectedQuote.items?.labor?.type}</td>
-                    <td className="right">{selectedQuote.items?.labor?.qty}</td>
-                    <td className="right">{won(selectedQuote.items?.labor?.unit_price)}</td>
-                    <td className="right">{won(selectedQuote.items?.breakdown?.laborDirect)}</td>
-                    <td></td>
-                  </tr>
-                  {inclIndirect && (
-                    <tr>
-                      <td colSpan={4}>간접인건비 (직접인건비 × {(((selectedQuote.items?.rates?.labor_indirect) ?? rates.labor_indirect) * 100).toFixed(0)}%)</td>
-                      <td className="right">{won(selectedQuote.items?.breakdown?.laborIndirect)}</td>
-                      <td></td>
-                    </tr>
-                  )}
-                  <tr className="subtotal-row">
-                    <td colSpan={4} className="right" style={{ fontFamily: 'var(--serif)' }}>소 계</td>
-                    <td className="right">{won(selectedQuote.items?.breakdown?.laborSubtotal)}</td>
-                    <td></td>
-                  </tr>
-
-                  {inclOverhead && (
-                    <tr>
-                      <td colSpan={4}>iii. 경비 및 일반관리비 ((1+2항) × {(((selectedQuote.items?.rates?.overhead) ?? rates.overhead) * 100).toFixed(0)}%)</td>
-                      <td className="right" style={{ fontFamily: 'var(--serif)', fontWeight: 500 }}>{won(selectedQuote.items?.breakdown?.overhead)}</td>
-                      <td></td>
-                    </tr>
-                  )}
-                  {inclProfit && (
-                    <tr>
-                      <td colSpan={4}>iv. 기업이윤 ((1+3항) × {(((selectedQuote.items?.rates?.profit) ?? rates.profit) * 100).toFixed(0)}%)</td>
-                      <td className="right" style={{ fontFamily: 'var(--serif)', fontWeight: 500 }}>{won(selectedQuote.items?.breakdown?.profit)}</td>
-                      <td></td>
-                    </tr>
-                  )}
-                  <tr className="subtotal-row">
-                    <td colSpan={4} className="right" style={{ fontFamily: 'var(--serif)' }}>금 액</td>
-                    <td className="right">{won(selectedQuote.items?.breakdown?.supplyAmount)}</td>
-                    <td></td>
-                  </tr>
-                  <tr className="subtotal-row">
-                    <td colSpan={4} className="right" style={{ fontFamily: 'var(--serif)' }}>부 가 세 ({(((selectedQuote.items?.rates?.vat) ?? rates.vat) * 100).toFixed(0)}%)</td>
-                    <td className="right">{won(selectedQuote.items?.breakdown?.vat)}</td>
-                    <td></td>
-                  </tr>
-                  <tr className="total-row">
-                    <td colSpan={4} className="right">합 계 금 액</td>
-                    <td className="right">{won(selectedQuote.amount)}</td>
-                    <td style={{ fontFamily: 'var(--sans)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 }}>백단위절사</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {selectedQuote.items?.remarks && (
-                <div className="doc-remarks">
-                  <div className="rmk-title">Remarks · 특기사항</div>
-                  <div>{selectedQuote.items.remarks}</div>
-                </div>
-              )}
-
-              <div className="doc-footer">
-                {company?.company_name}<span className="divider">❦</span>THANK YOU FOR YOUR BUSINESS
-              </div>
-            </div>
-            {/* ══ 문서 끝 ══ */}
 
             {isAdmin && selectedQuote.status === '승인대기' && !showRejectInput && (
               <div className="action-panel">

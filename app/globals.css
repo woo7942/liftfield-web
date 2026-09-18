@@ -605,3 +605,338 @@ details[open] .chev { transform: rotate(180deg); }
 /* ============================================
    ↑↑↑ LIFTFIELD HOME v2 CUSTOM ↑↑↑
    ============================================ */
+   /* ============================================================
+   ↓↓↓ QUOTE V2 · CORPORATE COBALT ↓↓↓
+   기존 app/globals.css 하단에 이 블록을 그대로 추가하세요.
+   모든 클래스는 .qv2- 프리픽스를 사용하므로 기존 스타일과 충돌하지 않습니다.
+   ============================================================ */
+
+.qv2-doc {
+  /* V2 Corporate Cobalt tokens */
+  --qv2-ink: #0a0a0a;
+  --qv2-ink-soft: #2a2a2a;
+  --qv2-ink-dim: #666666;
+  --qv2-ink-faint: #999999;
+  --qv2-line: #d8d8d8;
+  --qv2-line-strong: #003D82;
+  --qv2-paper: #ffffff;
+  --qv2-paper-dim: #f5f7fa;
+  --qv2-primary: #003D82;
+  --qv2-accent: #003D82;
+  --qv2-stamp: #b91c1c;
+
+  --qv2-font: 'Noto Sans KR', -apple-system, system-ui, sans-serif;
+  --qv2-font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* A4 layout */
+  width: 210mm;
+  height: 297mm;
+  margin: 24px auto;
+  padding: 12mm 12mm 10mm;
+  background: var(--qv2-paper);
+  color: var(--qv2-ink);
+  font-family: var(--qv2-font);
+  font-size: 9.5pt;
+  line-height: 1.35;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* 하단 안내 (스크린) */
+.qv2-doc * { box-sizing: border-box; }
+
+/* ── Serial number ── */
+.qv2-serial {
+  text-align: right;
+  font-size: 8.5pt;
+  color: var(--qv2-ink-dim);
+  font-family: var(--qv2-font-mono);
+  letter-spacing: .04em;
+  margin-bottom: 3mm;
+}
+
+/* ── Title ── */
+.qv2-title-wrap {
+  display: flex; justify-content: center;
+  margin-bottom: 2mm;
+}
+.qv2-title {
+  margin: 0;
+  padding: 0 12mm 1mm;
+  border-bottom: 1.5px solid var(--qv2-ink);
+  font-size: 20pt;
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: var(--qv2-ink);
+  text-align: center;
+  display: inline-block;
+}
+
+/* ── Head grid (좌: 수신·금액, 우: 회사·직인) ── */
+.qv2-head-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8mm;
+  align-items: end;
+  margin-bottom: 3mm;
+}
+.qv2-head-left { padding-top: 4mm; }
+.qv2-hl-row {
+  border-bottom: 1px solid var(--qv2-ink);
+  padding: 1.5mm 2mm;
+  margin-bottom: 3mm;
+  min-height: 6mm;
+  font-size: 9.5pt;
+  color: var(--qv2-ink);
+}
+.qv2-hl-client { font-size: 11pt; font-weight: 800; }
+.qv2-hl-amount {
+  display: flex; align-items: baseline; gap: 4mm;
+  padding: 2mm;
+}
+.qv2-hl-amount-lbl { font-size: 9.5pt; font-weight: 700; color: var(--qv2-ink); }
+.qv2-hl-amount-val {
+  font-size: 14pt;
+  font-weight: 900;
+  color: var(--qv2-primary);
+  font-family: var(--qv2-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  flex: 1;
+}
+.qv2-hl-amount-unit { font-size: 10pt; font-weight: 700; color: var(--qv2-ink); }
+.qv2-hl-note { font-size: 8pt; color: var(--qv2-ink-dim); padding-left: 2mm; }
+
+.qv2-head-right { padding-top: 2mm; position: relative; }
+.qv2-hr-inner { position: relative; }
+.qv2-hr-brand {
+  display: flex; align-items: center; gap: 3mm;
+  margin-bottom: 3mm;
+  padding-bottom: 2mm;
+  border-bottom: 1.5px solid var(--qv2-ink);
+}
+.qv2-hr-logo {
+  width: 12mm; height: 12mm;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.qv2-hr-logo img, .qv2-hr-logo svg { display: block; }
+.qv2-hr-name {
+  font-size: 16pt;
+  font-weight: 900;
+  color: var(--qv2-ink);
+  letter-spacing: 2px;
+  line-height: 1;
+}
+
+.qv2-hr-info { padding-left: 1mm; }
+.qv2-hr-info-row {
+  display: flex; align-items: baseline; gap: 2mm;
+  font-size: 9pt;
+  color: var(--qv2-ink);
+  padding: 0.8mm 0;
+  line-height: 1.35;
+}
+.qv2-hr-info-lbl {
+  width: 26mm;
+  font-weight: 600;
+  color: var(--qv2-ink);
+  flex-shrink: 0;
+}
+.qv2-hr-info-sep { color: var(--qv2-ink-dim); }
+.qv2-hr-info-val {
+  color: var(--qv2-ink);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.qv2-hr-info-addr {
+  padding-top: 1.5mm;
+  border-top: 1px dashed var(--qv2-line);
+  margin-top: 1mm;
+}
+.qv2-hr-info-addr .qv2-hr-info-val {
+  font-size: 8.5pt;
+  color: var(--qv2-ink-soft);
+}
+.qv2-hr-info-tel {
+  display: flex; gap: 6mm;
+  padding-top: 1mm;
+}
+.qv2-hr-tel, .qv2-hr-fax {
+  font-size: 9pt;
+  color: var(--qv2-ink);
+  font-variant-numeric: tabular-nums;
+}
+.qv2-hr-fax { color: var(--qv2-ink-soft); }
+
+/* Stamp overlay (실제 이미지 또는 SVG 폴백) */
+.qv2-stamp {
+  position: absolute;
+  top: -2mm;
+  right: 6mm;
+  width: 18mm; height: 18mm;
+  transform: rotate(-6deg);
+  opacity: 0.9;
+  pointer-events: none;
+  z-index: 5;
+}
+.qv2-stamp img, .qv2-stamp svg { display: block; width: 100%; height: 100%; }
+
+/* ── Project line ── */
+.qv2-project-line {
+  border-top: 1px solid var(--qv2-ink);
+  border-bottom: 1px solid var(--qv2-ink);
+  padding: 2mm;
+  display: flex; align-items: center; gap: 3mm;
+  font-size: 10.5pt;
+  margin-bottom: 3mm;
+}
+.qv2-pl-mark { color: var(--qv2-ink); font-size: 8pt; }
+.qv2-pl-lbl { font-weight: 800; color: var(--qv2-ink); }
+.qv2-pl-val { font-weight: 700; color: var(--qv2-ink); }
+
+/* ── Items table ── */
+.qv2-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1.5px solid var(--qv2-line-strong);
+  border-bottom: 1.5px solid var(--qv2-line-strong);
+  margin-bottom: 2.5mm;
+  font-size: 8pt;
+  table-layout: fixed;
+}
+/* ── 표 (html2canvas에서 vertical 정렬 확실히) ── */
+.qv2-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1.5px solid var(--qv2-line-strong);
+  border-bottom: 1.5px solid var(--qv2-line-strong);
+  margin-bottom: 2.5mm;
+  font-size: 8pt;
+  table-layout: fixed;
+}
+
+.qv2-table th {
+  height: 7mm;
+  padding: 0 1.5mm;                          /* 상하 padding 제거 */
+  border-bottom: 1px solid var(--qv2-line-strong);
+  border-right: 1px solid var(--qv2-line);
+  background: var(--qv2-paper-dim);
+  font-size: 8pt;
+  font-weight: 800;
+  color: var(--qv2-ink);
+  text-align: center;
+  letter-spacing: .04em;
+  vertical-align: middle;                     /* height 있을 때만 확실히 작동 */
+  line-height: 1.2;
+}
+.qv2-table th:last-child { border-right: 0; }
+
+.qv2-table td {
+  height: 7mm;                                /* ★ 고정 높이 */
+  padding: 0 1.5mm;                           /* ★ 상하 padding 0 */
+  border-bottom: 1px solid var(--qv2-line);
+  border-right: 1px solid var(--qv2-line);
+  vertical-align: middle;                     /* ★ height 있어야 실제로 middle 됨 */
+  line-height: 1.2;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.qv2-table td:last-child { border-right: 0; }
+
+.qv2-table td.qv2-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--qv2-font-mono);
+  font-size: 8.5pt;
+  white-space: nowrap;
+}
+.qv2-table td.qv2-center { text-align: center; }
+.qv2-table td.qv2-note {
+  font-size: 8pt;
+  color: var(--qv2-ink-soft);
+}
+
+.qv2-table .qv2-section-row td {
+  height: 7mm;                                /* ★ */
+  padding: 0 2.5mm;
+  background: var(--qv2-primary);
+  color: var(--qv2-paper);
+  font-weight: 800;
+  letter-spacing: 2px;
+  font-size: 8.5pt;
+  text-align: left;
+  vertical-align: middle;
+  line-height: 1.2;
+}
+
+.qv2-table .qv2-subtotal-row td {
+  height: 6.5mm;                              /* ★ */
+  padding: 0 1.5mm;
+  background: var(--qv2-paper-dim);
+  font-weight: 800;
+  vertical-align: middle;
+  line-height: 1.2;
+}
+
+.qv2-table .qv2-total-row td {
+  height: 8mm;                                /* ★ 조금 더 크게 */
+  padding: 0 2.5mm;
+  background: var(--qv2-primary);
+  color: var(--qv2-paper);
+  font-weight: 900;
+  font-size: 9.5pt;
+  letter-spacing: .04em;
+  vertical-align: middle;
+  line-height: 1.2;
+}
+
+.qv2-table .qv2-caption {
+  font-size: 7.5pt;
+  color: rgba(255,255,255,.65);
+  font-weight: 400;
+  margin-left: 3mm;
+}
+
+
+/* ── Remarks ── */
+.qv2-remarks {
+  border-left: 2.5px solid var(--qv2-primary);
+  background: var(--qv2-paper-dim);
+  padding: 2mm 3.5mm;
+  margin-bottom: 3mm;
+  white-space: pre-line;
+  font-size: 8pt;
+  color: var(--qv2-ink-soft);
+  line-height: 1.5;
+}
+
+/* ── Footer ── */
+.qv2-footer {
+  text-align: center;
+  font-size: 8.5pt;
+  color: var(--qv2-ink);
+  padding-top: 3mm;
+  border-top: 1px solid var(--qv2-line);
+  margin-top: auto;
+}
+.qv2-footer .qv2-date {
+  font-size: 8.5pt;
+  color: var(--qv2-ink-dim);
+  margin-bottom: 1mm;
+}
+.qv2-footer .qv2-line1 { margin-bottom: 2mm; letter-spacing: 1.5px; }
+.qv2-footer .qv2-company {
+  font-size: 10.5pt;
+  font-weight: 900;
+  color: var(--qv2-ink);
+  letter-spacing: 2px;
+}
+
+/* ============================================================
+   ↑↑↑ QUOTE V2 · CORPORATE COBALT ↑↑↑
+   ============================================================ */
+
