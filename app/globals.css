@@ -935,6 +935,18 @@ details[open] .chev { transform: rotate(180deg); }
   color: var(--qv2-ink);
   letter-spacing: 2px;
 }
+.tabbar-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.tabbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+@keyframes tabbarArrowPulse {
+  0%, 100% { opacity: 0.35; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(-2px); }
+}
+
 
 /* ============================================================
    ↑↑↑ QUOTE V2 · CORPORATE COBALT ↑↑↑

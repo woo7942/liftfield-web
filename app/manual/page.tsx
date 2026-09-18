@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MANUALS_DATA } from '@/lib/manualsData';
+import TabBar from '@/components/TabBar';
+
 
 export default function ManualPage() {
   const router = useRouter();
@@ -28,7 +30,7 @@ export default function ManualPage() {
 
   // 1단계: 제조사 선택 화면
   if (!selectedManufacturer) {
-    return (
+    return (  
       <div className="p-4 max-w-5xl mx-auto">
         <div className="flex items-center gap-2 mb-4">
           <button
@@ -59,6 +61,7 @@ export default function ManualPage() {
             </button>
           ))}
         </div>
+         <TabBar active="manual" />
       </div>
     );
   }
@@ -146,6 +149,7 @@ export default function ManualPage() {
               ›
             </button>
           </div>
+          <TabBar active="manual" />
         </div>
       )}
     </div>
