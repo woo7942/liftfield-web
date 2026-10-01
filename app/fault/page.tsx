@@ -144,9 +144,11 @@ export default function FaultPage() {
   const [siteSearch, setSiteSearch] = useState('');
   const [elevSearch, setElevSearch] = useState('');
   const [manualHogi, setManualHogi] = useState(false);
-    const [form, setForm] = useState({
+  const [pickMembers, setPickMembers] = useState(false);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [form, setForm] = useState({
     siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '',
-    content: '', reporterPhone: '', extra: '', errorCodes: [] as string[],
+    content: '', reporterPhone: '', extra: '',
   });
 
 
@@ -212,7 +214,6 @@ export default function FaultPage() {
 
   useEffect(() => {
     if (!userInfo?.company_id) return;
-    const isOfficeAdmin = userInfo.super_admin || userInfo.role === 'admin';
 
     const channel = supabase
       .channel('fault-reports-realtime')
@@ -222,7 +223,6 @@ export default function FaultPage() {
         (payload) => {
           const newFault = payload.new as FaultReport;
           if (newFault.company_id !== userInfo.company_id) return;
-          if (!isOfficeAdmin && newFault.team !== userInfo.team) return;
 
           setFaults(prev => [newFault, ...prev]);
           setUnseenCount(prev => prev + 1);
@@ -264,17 +264,11 @@ export default function FaultPage() {
     const cid = info.company_id || '';
     if (!cid) { setLoading(false); return; }
     try {
-      const isOfficeAdmin = info.super_admin || info.role === 'admin';
-
-      let faultQuery = supabase
+      const faultQuery = supabase
         .from('fault_reports')
         .select('*')
         .eq('company_id', cid)
         .order('created_at', { ascending: false });
-
-      if (!isOfficeAdmin) {
-        faultQuery = faultQuery.eq('team', info.team || '__none__');
-      }
 
       const { data: faultData } = await faultQuery;
       const faultList = (faultData || []) as FaultReport[];
@@ -310,11 +304,34 @@ export default function FaultPage() {
     }
   };
 
+  // ── 고장 접수 시 알림 발송 (체크 안 하면 현장 담당팀 전체, 체크하면 선택한 팀원만) ──
+  const sendFaultPush = async (recipients: any[], siteName: string, hogiNo: string, content: string) => {
+    const userIds = recipients.map((u) => u.id).filter(Boolean);
+    if (userIds.length === 0) return;
+    try {
+      await fetch('/api/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userIds,
+          title: '🚨 새 고장 접수',
+          body: `${siteName} ${hogiNo} - ${content}`,
+          url: '/fault',
+        }),
+      });
+    } catch (err) {
+      console.error('푸시 발송 요청 실패:', err);
+    }
+  };
+
   const submitReport = async () => {
     if (isSubmitting) return;
     if (!form.siteId) return alert('현장을 선택하세요');
     if (!form.hogiNo.trim()) return alert('승강기(설비)를 선택하거나 호기를 입력하세요');
     if (!form.content.trim()) return alert('고장 내용을 입력하세요');
+    if (pickMembers && selectedMemberIds.length === 0) {
+      return alert('문자를 받을 팀원을 한 명 이상 선택하세요');
+    }
 
     setIsSubmitting(true);
     try {
@@ -324,7 +341,7 @@ export default function FaultPage() {
         site_id: form.siteId, site_name: form.siteName,
         hogi_no: form.hogiNo, elevator_no: form.elevatorNo || '', equip_type: form.equipType || '',
         content: form.content, reporter_phone: form.reporterPhone, extra: form.extra,
-        error_codes: (form.errorCodes || []).map(c => c.trim()).filter(Boolean),
+        error_codes: [],
 
         assigned_to: '', assigned_name: '',
         team: siteTeam, company_id: userInfo?.company_id || '',
@@ -333,10 +350,22 @@ export default function FaultPage() {
         fault_cause: '', fault_action: '', fault_note: '',
       });
       if (error) throw error;
+
+      // ── 알림 수신 대상 결정 ──
+      const recipients = pickMembers
+        ? users.filter(u => selectedMemberIds.includes(u.id))
+        : users.filter(u => u.team === siteTeam);
+
+      await sendFaultPush(recipients, form.siteName, form.hogiNo, form.content);
+
       await loadData(userInfo);
       setReportModal(false);
       resetForm();
-      alert('고장신고가 접수되었습니다! 해당 팀 전체에게 표시됩니다.');
+      alert(
+        pickMembers
+          ? `고장신고가 접수되었습니다! 선택하신 팀원 ${recipients.length}명에게 알림이 전송됩니다.`
+          : '고장신고가 접수되었습니다! 해당 팀 전체에게 알림이 전송됩니다.'
+      );
     } catch (e: any) {
       alert('오류: ' + e.message);
     } finally {
@@ -471,9 +500,10 @@ export default function FaultPage() {
     setDetailModal(true);
   };
 
-    const resetForm = () => {
-    setForm({ siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '', content: '', reporterPhone: '', extra: '', errorCodes: [] });
+  const resetForm = () => {
+    setForm({ siteId: '', siteName: '', hogiNo: '', elevatorNo: '', equipType: '', content: '', reporterPhone: '', extra: '' });
     setSiteSearch(''); setElevSearch(''); setManualHogi(false);
+    setPickMembers(false); setSelectedMemberIds([]);
   };
 
     const resetDetailFields = () => {
@@ -1089,14 +1119,6 @@ const composedHogi = hogiDisplay.trim();
                 />
               </div>
 
-              <div>
-                <label className="text-sm font-semibold text-gray-700 mb-1 block">에러코드 (선택)</label>
-                <ErrorCodeList
-                  codes={form.errorCodes}
-                  onChange={(codes) => setForm({ ...form, errorCodes: codes })}
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-sm font-semibold text-gray-700 mb-1 block">신고자 연락처</label>
@@ -1116,6 +1138,58 @@ const composedHogi = hogiDisplay.trim();
                     className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400"
                   />
                 </div>
+              </div>
+
+              <div className="border-t pt-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pickMembers}
+                    onChange={(e) => {
+                      setPickMembers(e.target.checked);
+                      setSelectedMemberIds([]);
+                    }}
+                  />
+                  팀원 고르기
+                </label>
+                <p className="text-xs text-gray-400 mt-1">
+                  {pickMembers
+                    ? '체크한 팀원에게만 알림이 전송됩니다 (중복 선택 가능).'
+                    : '체크하지 않으면 해당 현장을 담당하는 팀 전체에게 자동으로 알림이 전송됩니다.'}
+                </p>
+
+                {pickMembers && (
+                  <div className="max-h-40 overflow-y-auto border rounded-lg divide-y mt-2">
+                    {users.length === 0 && (
+                      <div className="text-center text-gray-400 text-sm py-4">등록된 팀원이 없습니다</div>
+                    )}
+                    {users.map((u) => {
+                      const checked = selectedMemberIds.includes(u.id);
+                      return (
+                        <label
+                          key={u.id}
+                          className="flex items-center justify-between px-3 py-2 text-sm cursor-pointer hover:bg-gray-50"
+                        >
+                          <span>
+                            {u.name}
+                            <span className="text-xs text-gray-400 ml-1">
+                              {u.team ? `· ${u.team}팀` : ''}
+                            </span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setSelectedMemberIds((prev) =>
+                                e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
+                              );
+                            }}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
