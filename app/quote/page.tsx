@@ -70,6 +70,12 @@ export default function QuotePage() {
   const [includeOverhead, setIncludeOverhead] = useState(true);
   const [includeProfit, setIncludeProfit] = useState(true);
 
+  // ── 공급가액 / 합계금액 직접입력 ──
+  const [supplyManual, setSupplyManual] = useState(false);
+  const [supplyManualValue, setSupplyManualValue] = useState<number>(0);
+  const [totalManual, setTotalManual] = useState(false);
+  const [totalManualValue, setTotalManualValue] = useState<number>(0);
+
   const [remarks, setRemarks] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -173,17 +179,37 @@ export default function QuotePage() {
     const laborSubtotal = laborDirect + laborIndirect;
     const overhead = includeOverhead ? (materialsSubtotal + laborSubtotal) * rates.overhead : 0;
     const profit = includeProfit ? (materialsSubtotal + overhead) * rates.profit : 0;
-    const supplyAmount = materialsSubtotal + laborSubtotal + overhead + profit;
+
+    // 자동 계산된 공급가액
+    const autoSupplyAmount = materialsSubtotal + laborSubtotal + overhead + profit;
+    // 직접입력 체크 시 수동 입력값 사용, 아니면 자동 계산값 사용
+    const supplyAmount = supplyManual ? (Number(supplyManualValue) || 0) : autoSupplyAmount;
+
     const vat = supplyAmount * rates.vat;
-    const total = truncateThousand(supplyAmount + vat);
-    return { materialsSubtotal, laborDirect, laborIndirect, laborSubtotal, overhead, profit, supplyAmount, vat, total };
-  }, [materials, laborQty, laborUnitPrice, rates, includeIndirectLabor, includeOverhead, includeProfit]);
+
+    // 자동 계산된 합계금액 (백단위 절사)
+    const autoTotal = truncateThousand(supplyAmount + vat);
+    // 직접입력 체크 시 수동 입력값 사용, 아니면 자동 계산값 사용
+    const total = totalManual ? (Number(totalManualValue) || 0) : autoTotal;
+
+    return {
+      materialsSubtotal, laborDirect, laborIndirect, laborSubtotal,
+      overhead, profit, supplyAmount, vat, total,
+      autoSupplyAmount, autoTotal,
+    };
+  }, [
+    materials, laborQty, laborUnitPrice, rates,
+    includeIndirectLabor, includeOverhead, includeProfit,
+    supplyManual, supplyManualValue, totalManual, totalManualValue,
+  ]);
 
   const resetCreateForm = () => {
     setSiteSearch(''); setSiteResults([]); setSelectedSite(null);
     setTitle(''); setMaterials([{ name: '', unit: '', qty: 1, unit_price: 0, note: '' }]);
     setLaborType('공'); setLaborQty(1); setLaborUnitPrice(0);
     setIncludeIndirectLabor(true); setIncludeOverhead(true); setIncludeProfit(true);
+    setSupplyManual(false); setSupplyManualValue(0);
+    setTotalManual(false); setTotalManualValue(0);
     setRemarks('');
     setEditingQuoteId(null);
     setCreateTeam(isAdmin ? '' : (userInfo?.team || ''));
@@ -209,6 +235,10 @@ export default function QuotePage() {
     setIncludeIndirectLabor(items.includeIndirectLabor !== false);
     setIncludeOverhead(items.includeOverhead !== false);
     setIncludeProfit(items.includeProfit !== false);
+    setSupplyManual(items.supplyManual === true);
+    setSupplyManualValue(items.supplyManualValue ?? 0);
+    setTotalManual(items.totalManual === true);
+    setTotalManualValue(items.totalManualValue ?? 0);
     setRemarks(items.remarks || '');
     setSelectedQuote(null);
     setShowCreate(true);
@@ -344,6 +374,10 @@ ${docHTML}
         includeIndirectLabor,
         includeOverhead,
         includeProfit,
+        supplyManual,
+        supplyManualValue,
+        totalManual,
+        totalManualValue,
         client_name: `${siteName} 귀중`,
         site_name: siteName,
         site_address: selectedSite.address || '',
@@ -839,12 +873,73 @@ ${docHTML}
                         기업이윤 ({(rates.profit * 100).toFixed(0)}%)</label>
                       <span className="val">{won(calc.profit)}</span>
                     </div>
-                    <div className="calc-row subtotal"><span>공급가액</span><span className="val">{won(calc.supplyAmount)}</span></div>
+
+                    {/* ── 공급가액 (직접입력 가능) ── */}
+                    <div className="calc-row subtotal">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={supplyManual}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setSupplyManual(checked);
+                            // 체크 켜는 순간 현재 자동계산값을 기본값으로 채워줌 (0부터 다시 입력하는 불편 방지)
+                            if (checked && !supplyManualValue) {
+                              setSupplyManualValue(Math.round(calc.autoSupplyAmount));
+                            }
+                          }}
+                        />
+                        공급가액{supplyManual ? ' (직접입력)' : ''}
+                      </label>
+                      {supplyManual ? (
+                        <input
+                          type="number"
+                          className="form-input"
+                          style={{ width: 140, textAlign: 'right' }}
+                          value={supplyManualValue === 0 ? '' : supplyManualValue}
+                          onFocus={e => e.target.select()}
+                          onChange={e => setSupplyManualValue(e.target.value === '' ? 0 : Number(e.target.value))}
+                        />
+                      ) : (
+                        <span className="val">{won(calc.supplyAmount)}</span>
+                      )}
+                    </div>
+
                     <div className="calc-row subtotal"><span>부가세 ({(rates.vat * 100).toFixed(0)}%)</span><span className="val">{won(calc.vat)}</span></div>
-                    <div className="calc-row total"><span>합계금액</span><span className="val">{won(calc.total)}</span></div>
+
+                    {/* ── 합계금액 (직접입력 가능) ── */}
+                    <div className="calc-row total">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={totalManual}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setTotalManual(checked);
+                            if (checked && !totalManualValue) {
+                              setTotalManualValue(Math.round(calc.autoTotal));
+                            }
+                          }}
+                        />
+                        합계금액{totalManual ? ' (직접입력)' : ''}
+                      </label>
+                      {totalManual ? (
+                        <input
+                          type="number"
+                          className="form-input"
+                          style={{ width: 140, textAlign: 'right' }}
+                          value={totalManualValue === 0 ? '' : totalManualValue}
+                          onFocus={e => e.target.select()}
+                          onChange={e => setTotalManualValue(e.target.value === '' ? 0 : Number(e.target.value))}
+                        />
+                      ) : (
+                        <span className="val">{won(calc.total)}</span>
+                      )}
+                    </div>
                   </div>
                   <p style={{ fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--text-dim)', marginTop: 10 }}>
-                    ※ 체크 해제 시 해당 항목이 견적서에서 완전히 제외되고 합계금액에서도 차감됩니다.
+                    ※ 체크 해제 시 해당 항목이 견적서에서 완전히 제외되고 합계금액에서도 차감됩니다.<br />
+                    ※ 공급가액·합계금액의 "직접입력" 체크 시 자동 계산 대신 입력한 금액이 그대로 저장·표시됩니다.
                   </p>
 
                   <button className="btn-primary" style={{ width: '100%', marginTop: 24, padding: '16px' }}
@@ -948,4 +1043,3 @@ ${docHTML}
     </>
   );
 }
-
