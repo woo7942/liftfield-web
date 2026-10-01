@@ -66,6 +66,9 @@ export default function InspectionPage() {
   const [elevators, setElevators] = useState<ElevatorRow[]>([]);
   const [filterTeam, setFilterTeam] = useState('전체');
 
+  // ✅ "완료" KPI 박스를 눌렀을 때 전체완료 현장을 지도에서 숨기기 위한 플래그
+  const [showOnlyIncomplete, setShowOnlyIncomplete] = useState(false);
+
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -79,6 +82,7 @@ export default function InspectionPage() {
   const mapObjRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
   const boundsFitSiteIdsRef = useRef<string>(''); // ✅ 지도 확대 유지용: 이전에 범위를 맞춘 현장 목록 저장
+  const renderMarkersRef = useRef<() => void>(() => {});
 
   const [selectedSite, setSelectedSite] = useState<SiteRow | null>(null);
   const [panelUnits, setPanelUnits] = useState<UnitInspection[]>([]);
@@ -90,6 +94,9 @@ export default function InspectionPage() {
   const [reportPreviewImg, setReportPreviewImg] = useState('');
   const [reportPreviewCanvasSize, setReportPreviewCanvasSize] = useState({ width: 0, height: 0 });
   const [reportPreviewMonthLabel, setReportPreviewMonthLabel] = useState({ year: 0, month: 0 });
+
+  // ✅ 같은 위치(좌표/근접 픽셀)에 여러 현장이 묶여 있을 때 선택 목록으로 띄울 state
+  const [siteGroupChoices, setSiteGroupChoices] = useState<SiteRow[] | null>(null);
 
   // 🔍 현장 검색
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
@@ -139,13 +146,14 @@ export default function InspectionPage() {
     const loadSites = async () => {
       let q = supabase.from('sites')
         .select('id, site_name, name, address, team, lat, lng, elevator_count, manager_name, phone')
-        .eq('company_id', userInfo.companyId);
+        .eq('company_id', userInfo.companyId)
+        .order('name');
       if (!isAdmin) q = q.eq('team', userInfo.team);
       const { data, error } = await q;
       if (error) { console.error(error); return; }
       setSites((data || []).map((s: any) => ({
         id: s.id,
-         name: s.name || s.site_name || '',   // ← name을 우선 사용
+        name: s.name || s.site_name || '',   // ← name을 우선 사용
         address: s.address || '',
         team: s.team || '',
         lat: s.lat,
@@ -261,6 +269,17 @@ export default function InspectionPage() {
     return map;
   }, [sites, siteUnitsBase, rawUnits]);
 
+  // ✅ "완료" 박스를 눌렀을 때는 이미 전체완료된 현장을 지도에서 숨김
+  const mapSites = useMemo(() => {
+    if (!showOnlyIncomplete) return filteredSites;
+    return filteredSites.filter(site => {
+      const units = inspectionUnitsMap[site.id] || [];
+      const total = units.length;
+      const done = units.filter(u => u.completed).length;
+      return !(total > 0 && done === total); // 전체완료가 아닌 현장만 남김
+    });
+  }, [filteredSites, inspectionUnitsMap, showOnlyIncomplete]);
+
   // ── 현장 검색 결과 (이름/주소 매칭, 최대 8개) ──
   const searchResults = useMemo(() => {
     const q = siteSearchQuery.trim().toLowerCase();
@@ -302,73 +321,133 @@ export default function InspectionPage() {
     });
   }, [mapReady, loading]);
 
-  // ── 현장/점검현황이 바뀔 때마다 마커 갱신 (완료/일부완료/미완료 3색) ──
+  // ── 현장/점검현황·줌/이동이 바뀔 때마다 마커 갱신 (화면 픽셀거리 기준 클러스터링) ──
   useEffect(() => {
     if (!mapReady || !mapObjRef.current) return;
     const w = window as any;
-    overlaysRef.current.forEach(o => o.setMap(null));
-    overlaysRef.current = [];
 
-    const valid = filteredSites.filter(s => s.lat != null && s.lng != null);
-    if (valid.length === 0) return;
+    // 라벨(말풍선)이 겹치지 않도록 할 기준 픽셀 거리. 값이 클수록 더 많이 뭉쳐짐.
+    const CLUSTER_PIXEL_THRESHOLD = 55;
 
-    const bounds = new w.kakao.maps.LatLngBounds();
+    const renderMarkers = () => {
+      overlaysRef.current.forEach(o => o.setMap(null));
+      overlaysRef.current = [];
 
-    valid.forEach(site => {
-      const position = new w.kakao.maps.LatLng(site.lat, site.lng);
-      bounds.extend(position);
+      const valid = mapSites.filter(s => s.lat != null && s.lng != null);
+      if (valid.length === 0) return;
 
-      const units = inspectionUnitsMap[site.id] || [];
-      const total = units.length;
-      const doneCount = units.filter(u => u.completed).length;
+      const projection = mapObjRef.current.getProjection();
+      const bounds = new w.kakao.maps.LatLngBounds();
 
-      let color = '#94a3b8';
-      let badge = '';
-      if (total > 0 && doneCount === total) {
-        color = '#22c55e';
-        badge = '✅ ';
-      } else if (doneCount > 0) {
-        color = '#f59e0b';
-        badge = `${doneCount}/${total} `;
+      // 각 현장의 위경도를 "현재 화면 기준 픽셀 좌표"로 변환
+      const points = valid.map(site => {
+        const latlng = new w.kakao.maps.LatLng(site.lat, site.lng);
+        const point = projection.containerPointFromCoords(latlng);
+        return { site, point, latlng };
+      });
+
+      // 픽셀 거리가 가까운 것들을 그룹으로 묶는 단순 클러스터링
+      const clusters: { site: SiteRow; point: any; latlng: any }[][] = [];
+      points.forEach(p => {
+        let placed = false;
+        for (const cluster of clusters) {
+          const anchor = cluster[0];
+          const dx = anchor.point.x - p.point.x;
+          const dy = anchor.point.y - p.point.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < CLUSTER_PIXEL_THRESHOLD) {
+            cluster.push(p);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) clusters.push([p]);
+      });
+
+      clusters.forEach(cluster => {
+        const group = cluster.map(c => c.site);
+        const first = group[0];
+        const position = cluster[0].latlng;
+        bounds.extend(position);
+
+        let total = 0, doneCount = 0;
+        group.forEach(site => {
+          const units = inspectionUnitsMap[site.id] || [];
+          total += units.length;
+          doneCount += units.filter(u => u.completed).length;
+        });
+
+        let color = '#94a3b8';
+        let badge = '';
+        if (total > 0 && doneCount === total) {
+          color = '#22c55e';
+          badge = '✅ ';
+        } else if (doneCount > 0) {
+          color = '#f59e0b';
+          badge = `${doneCount}/${total} `;
+        }
+
+        const label = group.length > 1
+          ? `${first.name} 외 ${group.length - 1}곳`
+          : first.name;
+
+        const el = document.createElement('div');
+        el.style.cursor = 'pointer';
+        el.style.display = 'flex';
+        el.style.flexDirection = 'column';
+        el.style.alignItems = 'center';
+        el.innerHTML = `
+          <div style="background:${color};color:#fff;font-size:11px;font-weight:700;padding:4px 9px;border-radius:9999px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;gap:4px;">
+            ${badge}${label}
+            ${group.length > 1 ? `<span style="background:rgba(255,255,255,.35);border-radius:9999px;padding:0 6px;font-size:10px;">${group.length}</span>` : ''}
+          </div>
+          <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color};margin-top:-1px;"></div>
+        `;
+        el.addEventListener('click', () => {
+          if (group.length > 1) {
+            setSiteGroupChoices(group);
+          } else {
+            const site = first;
+            setSelectedSite(site);
+            setPanelUnits((inspectionUnitsMap[site.id] || []).map(u => ({ ...u })));
+            setPanelNote(noteMap[site.id]?.note || '');
+            setPanelDate(new Date().toISOString().slice(0, 10));
+          }
+        });
+
+        const overlay = new w.kakao.maps.CustomOverlay({
+          position,
+          content: el,
+          yAnchor: 1.3,
+        });
+        overlay.setMap(mapObjRef.current);
+        overlaysRef.current.push(overlay);
+      });
+
+      mapObjRef.current.relayout();
+
+      // ✅ 실제로 "표시되는 현장 목록"이 바뀌었을 때만 지도 범위를 재조정한다.
+      //    점검 완료 상태만 바뀐 경우(체크 후 저장)에는 사용자가 맞춰둔 줌/위치를 그대로 유지.
+      const currentSiteIds = valid.map(s => s.id).sort().join(',');
+      if (currentSiteIds !== boundsFitSiteIdsRef.current) {
+        mapObjRef.current.setBounds(bounds);
+        boundsFitSiteIdsRef.current = currentSiteIds;
       }
+    };
 
-      const el = document.createElement('div');
-      el.style.cursor = 'pointer';
-      el.style.display = 'flex';
-      el.style.flexDirection = 'column';
-      el.style.alignItems = 'center';
-      el.innerHTML = `
-        <div style="background:${color};color:#fff;font-size:11px;font-weight:700;padding:4px 9px;border-radius:9999px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3);">
-          ${badge}${site.name}
-        </div>
-        <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color};margin-top:-1px;"></div>
-      `;
-      el.addEventListener('click', () => {
-        setSelectedSite(site);
-        setPanelUnits((inspectionUnitsMap[site.id] || []).map(u => ({ ...u })));
-        setPanelNote(noteMap[site.id]?.note || '');
-        setPanelDate(new Date().toISOString().slice(0, 10)); // ✅ 패널 열 때 오늘 날짜로 기본 세팅
-      });
+    renderMarkersRef.current = renderMarkers;
+    renderMarkers();
 
-      const overlay = new w.kakao.maps.CustomOverlay({
-        position,
-        content: el,
-        yAnchor: 1.3,
-      });
-      overlay.setMap(mapObjRef.current);
-      overlaysRef.current.push(overlay);
-    });
+    // ✅ 줌 레벨이나 지도 위치가 바뀌면 화면 픽셀거리가 달라지므로 다시 계산
+    const handleViewChange = () => renderMarkersRef.current();
+    w.kakao.maps.event.addListener(mapObjRef.current, 'zoom_changed', handleViewChange);
+    w.kakao.maps.event.addListener(mapObjRef.current, 'dragend', handleViewChange);
 
-    mapObjRef.current.relayout();
-
-    // ✅ 실제로 "표시되는 현장 목록"이 바뀌었을 때만 지도 범위를 재조정한다.
-    //    점검 완료 상태만 바뀐 경우(체크 후 저장)에는 사용자가 맞춰둔 줌/위치를 그대로 유지.
-    const currentSiteIds = valid.map(s => s.id).sort().join(',');
-    if (currentSiteIds !== boundsFitSiteIdsRef.current) {
-      mapObjRef.current.setBounds(bounds);
-      boundsFitSiteIdsRef.current = currentSiteIds;
-    }
-  }, [mapReady, filteredSites, inspectionUnitsMap, noteMap]);
+    return () => {
+      w.kakao.maps.event.removeListener(mapObjRef.current, 'zoom_changed', handleViewChange);
+      w.kakao.maps.event.removeListener(mapObjRef.current, 'dragend', handleViewChange);
+    };
+  }, [mapReady, mapSites, inspectionUnitsMap, noteMap]);
 
   // ── 호기별 완료 + 비고 + 점검일 저장 ──
   const savePanel = async () => {
@@ -448,7 +527,7 @@ export default function InspectionPage() {
   };
 
   // ── 이번 달 특이사항이 있는 현장만 모아 PDF 리포트 생성 ──
-    const generateReport = async () => {
+  const generateReport = async () => {
     const targets = filteredSites.filter(s => (noteMap[s.id]?.note || '').trim() !== '');
     if (targets.length === 0) {
       alert(`${year}년 ${month}월에는 특이사항이 등록된 현장이 없어요.`);
@@ -639,10 +718,36 @@ export default function InspectionPage() {
       <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px' }} className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
-            <div style={{ background: C.surface, borderRadius: 12, border: `1px solid ${C.line}`, padding: '8px 14px', fontSize: 13, color: C.inkDim }}>
-              전체 <strong style={{ color: C.ink }}>{stats.total}</strong>호기
+            <div
+              onClick={() => setShowOnlyIncomplete(false)}
+              style={{
+                background: !showOnlyIncomplete ? `${C.primary}12` : C.surface,
+                borderRadius: 12,
+                border: !showOnlyIncomplete ? `1px solid ${C.primary}50` : `1px solid ${C.line}`,
+                padding: '8px 14px',
+                fontSize: 13,
+                color: !showOnlyIncomplete ? C.primary : C.inkDim,
+                cursor: 'pointer',
+                fontWeight: !showOnlyIncomplete ? 700 : 400,
+                transition: 'all .15s ease',
+              }}
+            >
+              전체 <strong style={{ color: !showOnlyIncomplete ? C.primary : C.ink }}>{stats.total}</strong>호기
             </div>
-            <div style={{ background: `${C.green}12`, borderRadius: 12, border: `1px solid ${C.green}30`, padding: '8px 14px', fontSize: 13, color: C.green }}>
+            <div
+              onClick={() => setShowOnlyIncomplete(true)}
+              style={{
+                background: showOnlyIncomplete ? `${C.green}20` : `${C.green}12`,
+                borderRadius: 12,
+                border: showOnlyIncomplete ? `1px solid ${C.green}` : `1px solid ${C.green}30`,
+                padding: '8px 14px',
+                fontSize: 13,
+                color: C.green,
+                cursor: 'pointer',
+                fontWeight: showOnlyIncomplete ? 800 : 400,
+                transition: 'all .15s ease',
+              }}
+            >
               완료 <strong>{stats.done}</strong>호기 ({rate}%)
             </div>
           </div>
@@ -754,6 +859,49 @@ export default function InspectionPage() {
         </p>
       </div>
 
+      {/* ✅ 같은 주소/근접 좌표에 여러 현장이 묶여 있을 때 선택 목록 모달 */}
+      {siteGroupChoices && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[70vh] overflow-y-auto">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
+              <h3 className="font-black text-gray-800 text-sm">같은 주소에 {siteGroupChoices.length}개 현장이 있어요</h3>
+              <button onClick={() => setSiteGroupChoices(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="p-2">
+              {siteGroupChoices.map(site => {
+                const units = inspectionUnitsMap[site.id] || [];
+                const total = units.length;
+                const done = units.filter(u => u.completed).length;
+                const badgeColor = total > 0 && done === total ? C.green : done > 0 ? C.amber : C.inkFaint;
+                return (
+                  <button
+                    key={site.id}
+                    onClick={() => {
+                      setSelectedSite(site);
+                      setPanelUnits((inspectionUnitsMap[site.id] || []).map(u => ({ ...u })));
+                      setPanelNote(noteMap[site.id]?.note || '');
+                      setPanelDate(new Date().toISOString().slice(0, 10));
+                      setSiteGroupChoices(null);
+                    }}
+                    className="w-full text-left px-4 py-3 rounded-xl hover:bg-gray-50 flex items-center justify-between gap-2"
+                  >
+                    <span style={{ minWidth: 0 }}>
+                      <span className="block text-sm font-bold text-gray-800 truncate">{site.name}</span>
+                      <span className="block text-xs text-gray-400 truncate">{site.address}</span>
+                    </span>
+                    <span
+                      style={{ flexShrink: 0, fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 9999, background: `${badgeColor}15`, color: badgeColor }}
+                    >
+                      {done}/{total}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedSite && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[85vh] overflow-y-auto">
@@ -863,7 +1011,7 @@ export default function InspectionPage() {
           </div>
         </div>
       )}
-            {reportPreviewOpen && (
+      {reportPreviewOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
@@ -894,7 +1042,6 @@ export default function InspectionPage() {
           </div>
         </div>
       )}
-
 
       <TabBar active="inspection" />
 
