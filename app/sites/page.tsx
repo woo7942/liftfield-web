@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
-import { invalidateSitesCache } from '@/app/dashboard/page';
+import { invalidateSitesCache } from '@/lib/sitesCache';
 
 // ─── 타입 정의 ───
 interface UserInfo {
