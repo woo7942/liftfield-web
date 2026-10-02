@@ -143,7 +143,7 @@ export default function TabBar({ active }: { active: string }) {
 
   if (isAdmin === null) return null; // 첫 판별 전 깜빡임 방지
   if (isAdmin && isDesktop) return <AdminSidebar active={active} />;
-  return <BottomTabBar active={active} />;
+  return <BottomTabBar active={active} isAdmin={isAdmin} />;
 }
 
 // ─────────────────────────────────────────────
@@ -331,20 +331,30 @@ function AdminSidebar({ active }: { active: string }) {
 const BAR_LEFT  = ["home", "sites"];
 const BAR_RIGHT = ["inspection"];
 const BAR_CENTER = "fault";
-const MORE_KEYS = ["inspect", "material", "manual", "quote", "myleave"];
+const MORE_KEYS = ["inspect", "material", "manual", "quote", "myleave", "leave"];
 const FAULT_RED = "#ef4444";
 
 // ★ 하단바 스타일 선택: "indicator" (B · 옆으로 밀어서 전체 메뉴) | "center" (C · 가운데 고장접수)
 const BAR_STYLE: "indicator" | "center" = "indicator";
 
-function BottomTabBar({ active }: { active: string }) {
-  return BAR_STYLE === "indicator" ? <BottomTabBarIndicator active={active} /> : <BottomTabBarCenter active={active} />;
+// 관리자가 모바일(하단바)로 볼 때: 휴가신청 → 연차/휴가 관리, 홈 → 관리자 홈
+function tabsFor(isAdmin: boolean): Tab[] {
+  if (!isAdmin) return TABS;
+  return TABS.map((t) =>
+    t.key === "myleave" ? { ...t, key: "leave", path: "/leave", label: "연차/휴가" } :
+    t.key === "home" ? { ...t, path: ADMIN_PATH_OVERRIDE.home || t.path } : t
+  );
+}
+
+function BottomTabBar({ active, isAdmin }: { active: string; isAdmin: boolean }) {
+  const tabs = tabsFor(isAdmin);
+  return BAR_STYLE === "indicator" ? <BottomTabBarIndicator active={active} tabs={tabs} /> : <BottomTabBarCenter active={active} tabs={tabs} />;
 }
 
 // ─────────────────────────────────────────────
 // B · 인디케이터형 — 8개 메뉴 전부, 좌우로 밀어서 이동
 // ─────────────────────────────────────────────
-function BottomTabBarIndicator({ active }: { active: string }) {
+function BottomTabBarIndicator({ active, tabs }: { active: string; tabs: Tab[] }) {
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [edge, setEdge] = useState({ left: false, right: false });
@@ -391,7 +401,7 @@ function BottomTabBarIndicator({ active }: { active: string }) {
             WebkitOverflowScrolling: "touch", scrollbarWidth: "none", padding: "0 6px",
           }}
         >
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const on = t.key === active;
             const isFault = t.key === "fault";
             const color = on ? (isFault ? FAULT_RED : C.primary) : C.inkFaint;
@@ -434,10 +444,10 @@ function BottomTabBarIndicator({ active }: { active: string }) {
 // ─────────────────────────────────────────────
 // C · 가운데 고장접수형 (BAR_STYLE = "center" 일 때)
 // ─────────────────────────────────────────────
-function BottomTabBarCenter({ active }: { active: string }) {
+function BottomTabBarCenter({ active, tabs }: { active: string; tabs: Tab[] }) {
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
-  const byKey = Object.fromEntries(TABS.map((t) => [t.key, t]));
+  const byKey = Object.fromEntries(tabs.map((t) => [t.key, t]));
   const go = (path: string) => { setMoreOpen(false); router.push(path); };
 
   // 더보기 안의 메뉴를 보고 있으면 그 메뉴 아이콘/이름을 더보기 자리에 표시

@@ -109,6 +109,8 @@ export default function LeavePage() {
       const { data: userData, error } = await supabase.from('users').select('*').eq('id', session.user.id).single();
       if (error || !userData) { router.push('/login'); return; }
       if (!userData.company_id) { router.push('/'); return; }
+      // 관리자 전용 화면 — 팀원은 본인 휴가 신청 화면으로
+      if (!(userData.role === 'admin' || userData.super_admin === true)) { router.replace('/my-leave'); return; }
       setUserInfo({ uid: session.user.id, ...userData });
       await loadData(userData.company_id);
     });
