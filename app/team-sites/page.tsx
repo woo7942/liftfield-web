@@ -166,6 +166,61 @@ function cacheRowKey(row: CacheRow, idx: number): string {
   return `${row.elevator_no || 'no'}_${row.hogi_no || ''}_${idx}`;
 }
 
+// ─── 동 이름 / 동별 호기 번호 정리 ───
+// '102동동' → '102동' (끝에 반복된 '동'만 하나로). 그 외 값은 그대로 둠
+function normalizeDong(v?: string | null): string {
+  return String(v ?? '').trim().replace(/(동){2,}$/, '동');
+}
+// 화면 표시용: 동 이름 끝에 '동'이 없을 때만 붙임
+function dongLabel(v?: string | null): string {
+  const d = normalizeDong(v);
+  if (!d) return '';
+  return d.endsWith('동') ? d : `${d}동`;
+}
+const numOf = (v?: string | null) => parseInt(String(v ?? '').replace(/[^0-9]/g, '') || '0', 10);
+// 설치위치 끝의 '-숫자' (예: 'A동-1', '1-6') → 호기 번호
+const placeNo = (v?: string | null) => {
+  const m = String(v ?? '').match(/-\s*([0-9]+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+};
+/**
+ * 등록할 호기들의 호기 번호를 동별로 다시 매김
+ *  1) 설치위치에 '-숫자'가 있으면 그 숫자
+ *  2) 없으면 같은 동 안에서 (기존 호기 다음부터) 1, 2, 3…
+ *  3) 동이 없으면 원래 번호 그대로
+ */
+function assignDongHogi(
+  rows: CacheRow[],
+  existing: { dong?: string | null; hogi_no?: string | null }[] = [],
+): (CacheRow & { dong: string; hogi_no: string })[] {
+  const used: Record<string, Set<number>> = {};
+  existing.forEach((e) => {
+    const d = normalizeDong(e.dong);
+    if (!d) return;
+    (used[d] = used[d] || new Set()).add(numOf(e.hogi_no));
+  });
+  const out = rows.map((r) => ({ ...r, dong: normalizeDong(r.dong), hogi_no: String(r.hogi_no ?? '') }));
+  // 1) 설치위치 번호 우선
+  const pending: typeof out = [];
+  out.forEach((r) => {
+    if (!r.dong) return;
+    const p = placeNo(r.installation_place);
+    const set = (used[r.dong] = used[r.dong] || new Set());
+    if (p > 0 && !set.has(p)) { r.hogi_no = String(p); set.add(p); }
+    else pending.push(r);
+  });
+  // 2) 나머지는 동 안에서 원래 번호 순서대로 빈 번호에
+  pending.sort((a, b) => (a.dong === b.dong ? numOf(a.hogi_no) - numOf(b.hogi_no) : a.dong.localeCompare(b.dong, 'ko', { numeric: true })));
+  pending.forEach((r) => {
+    const set = used[r.dong];
+    let n = 1;
+    while (set.has(n)) n++;
+    r.hogi_no = String(n);
+    set.add(n);
+  });
+  return out;
+}
+
 function openNavigation(site: { name?: string; address?: string; lat?: number; lng?: number }) {
   if (!site.address && !(site.lat && site.lng)) {
     alert('주소 정보가 없습니다.');
@@ -410,7 +465,7 @@ export default function TeamSitesPage() {
   const groupedSiteElevators = useMemo(() => {
     const map: Record<string, ElevatorItem[]> = {};
     siteElevators.forEach(e => {
-      const key = e.dong && e.dong.trim() ? e.dong : '동 미지정';
+      const key = e.dong && e.dong.trim() ? dongLabel(e.dong) : '동 미지정';
       if (!map[key]) map[key] = [];
       map[key].push(e);
     });
@@ -486,7 +541,7 @@ export default function TeamSitesPage() {
 
       const groupMap = new Map<string, number>();
       rows.forEach((r) => {
-        const key = r.dong && String(r.dong).trim() ? `${r.dong}동` : '동 정보 없음';
+        const key = r.dong && String(r.dong).trim() ? dongLabel(r.dong) : '동 정보 없음';
         groupMap.set(key, (groupMap.get(key) || 0) + 1);
       });
       setCacheGrouped(Array.from(groupMap.entries()).map(([dong, count]) => ({ dong, count })));
@@ -707,7 +762,9 @@ export default function TeamSitesPage() {
       }
 
       if (newSite?.id && selectedRows.length > 0) {
-        const elevatorRows = selectedRows.map((r) => ({
+        // 동 이름 정리('102동동'→'102동') + 동별 호기 번호 (새 현장이라 기존 호기 없음)
+        const fixedRows = assignDongHogi(selectedRows);
+        const elevatorRows = fixedRows.map((r) => ({
           site_id: newSite.id,
           company_id: userInfo.companyId,
           elevator_no: r.elevator_no,
@@ -1165,7 +1222,7 @@ export default function TeamSitesPage() {
                               className="shrink-0"
                             />
                             <span className="w-14 shrink-0 font-medium text-gray-700">
-                              {r.dong ? `${r.dong}동` : '동 없음'}
+                              {r.dong ? dongLabel(r.dong) : '동 없음'}
                             </span>
                             <span className="w-14 shrink-0 text-gray-600">{r.hogi_no || '-'}호기</span>
                             <span className="w-20 shrink-0 text-gray-400 font-mono">{r.elevator_no || '-'}</span>
@@ -1735,3 +1792,4 @@ function SiteRow({
     </tr>
   );
 }
+
