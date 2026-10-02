@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import TabBar from '@/components/TabBar';
 
 interface Member {
   id: string;
@@ -14,28 +15,12 @@ interface Member {
   annual_leave?: number;
 }
 
-interface LeaveRequest {
-  id: string;
-  user_id: string;
-  user_name: string;
-  type: string;
-  start_date: string;
-  end_date: string;
-  reason: string;
-  status: 'pending' | 'approved' | 'rejected';
-  created_at?: string;
-}
-
-type TabType = 'members' | 'leave';
-
 export default function MembersPage() {
   const router = useRouter();
   const [userInfo, setUserInfo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<Member[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('members');
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [showMemberModal, setShowMemberModal] = useState(false);
   const [editRole, setEditRole] = useState('');
@@ -98,14 +83,6 @@ export default function MembersPage() {
         setTeams(Array.from(teamSet));
       }
 
-      // 휴가 신청 목록
-      const { data: leaveData } = await supabase
-        .from('leave_requests')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false });
-
-      setLeaveRequests((leaveData || []) as LeaveRequest[]);
 
     } catch (e) {
       console.error(e);
@@ -152,32 +129,6 @@ export default function MembersPage() {
     }
   }
 
-  // ─── 휴가 승인/거절 ───
-  async function handleLeaveStatus(leaveId: string, status: 'approved' | 'rejected') {
-    try {
-      const { error } = await supabase
-        .from('leave_requests')
-        .update({ status })
-        .eq('id', leaveId);
-
-      if (error) throw error;
-      setLeaveRequests(prev => prev.map(l => l.id === leaveId ? { ...l, status } : l));
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  // ─── 휴가 삭제 ───
-  async function handleDeleteLeave(leaveId: string) {
-    if (!confirm('휴가 신청을 삭제할까요?')) return;
-    try {
-      const { error } = await supabase.from('leave_requests').delete().eq('id', leaveId);
-      if (error) throw error;
-      setLeaveRequests(prev => prev.filter(l => l.id !== leaveId));
-    } catch (e) {
-      console.error(e);
-    }
-  }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -185,10 +136,8 @@ export default function MembersPage() {
     </div>
   );
 
-  const pendingLeave = leaveRequests.filter(l => l.status === 'pending').length;
-
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pb-32">
       <header className="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <button onClick={() => router.push('/dashboard')} className="text-gray-500 hover:text-gray-700 text-lg">←</button>
@@ -197,28 +146,16 @@ export default function MembersPage() {
       </header>
 
       <div className="max-w-5xl mx-auto px-4 py-4">
-        {/* 탭 */}
-        <div className="flex gap-2 mb-4">
-          <button onClick={() => setActiveTab('members')}
-            className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-colors ${
-              activeTab === 'members' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}>
-            👥 직원 목록 ({members.length})
-          </button>
-          <button onClick={() => setActiveTab('leave')}
-            className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-colors relative ${
-              activeTab === 'leave' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 border'}`}>
-            📅 연차/휴가 관리
-            {pendingLeave > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center">
-                {pendingLeave}
-              </span>
-            )}
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm text-gray-500">전체 <b className="text-gray-800">{members.length}</b>명</p>
+          <button onClick={() => router.push('/leave')}
+            className="text-sm bg-white border px-3 py-1.5 rounded-xl text-gray-600 hover:bg-gray-50">
+            📅 연차/휴가 관리 →
           </button>
         </div>
 
         {/* ─── 직원 목록 탭 ─── */}
-        {activeTab === 'members' && (
-          <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="bg-white rounded-xl border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
@@ -272,58 +209,7 @@ export default function MembersPage() {
               </tbody>
             </table>
           </div>
-        )}
 
-        {/* ─── 연차/휴가 탭 ─── */}
-        {activeTab === 'leave' && (
-          <div className="space-y-3">
-            {leaveRequests.length === 0 ? (
-              <div className="bg-white rounded-xl border p-16 text-center text-gray-400">
-                <p className="text-3xl mb-2">📅</p><p>휴가 신청이 없어요</p>
-              </div>
-            ) : leaveRequests.map(leave => (
-              <div key={leave.id} className="bg-white rounded-xl border p-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-gray-800">{leave.user_name}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        leave.type === '연차' ? 'bg-blue-100 text-blue-600' :
-                        leave.type === '반차' ? 'bg-purple-100 text-purple-600' :
-                        'bg-orange-100 text-orange-600'
-                      }`}>{leave.type}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        leave.status === 'pending' ? 'bg-yellow-100 text-yellow-600' :
-                        leave.status === 'approved' ? 'bg-green-100 text-green-600' :
-                        'bg-red-100 text-red-600'
-                      }`}>
-                        {leave.status === 'pending' ? '대기' : leave.status === 'approved' ? '승인' : '거절'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-500">📅 {leave.start_date} ~ {leave.end_date}</p>
-                    {leave.reason && <p className="text-sm text-gray-600 mt-1">💬 {leave.reason}</p>}
-                  </div>
-                  {canEdit && (
-                    <div className="flex gap-2">
-                      {leave.status === 'pending' && (
-                        <>
-                          <button onClick={() => handleLeaveStatus(leave.id, 'approved')}
-                            className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600">승인</button>
-                          <button onClick={() => handleLeaveStatus(leave.id, 'rejected')}
-                            className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg hover:bg-red-600">거절</button>
-                        </>
-                      )}
-                      <button onClick={() => handleDeleteLeave(leave.id)}
-                        className="text-xs bg-gray-100 text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50">
-                        🗑 삭제
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ─── 직원 수정 모달 ─── */}
@@ -368,6 +254,8 @@ export default function MembersPage() {
           </div>
         </div>
       )}
+
+      <TabBar active="members" />
     </div>
   );
 }

@@ -52,6 +52,8 @@ export default function QuotePage() {
   });
 
   const [showCreate, setShowCreate] = useState(false);
+  const [qStatus, setQStatus] = useState('전체');
+  const [qSearch, setQSearch] = useState('');
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
   const [createTeam, setCreateTeam] = useState('');
   const [siteSearch, setSiteSearch] = useState('');
@@ -545,119 +547,202 @@ ${docHTML}
 
     return (
     <>
-      <div className="theme-e" style={{ paddingBottom: 110 }}>
-        <div className="page-frame">
+      <div style={{ minHeight: '100vh', background: C.bg, color: C.ink, paddingBottom: 120 }}>
+        <style>{`
+          .qv4-table { display: block; }
+          .qv4-cards { display: none; }
+          .qv4-row td { transition: background .12s; }
+          .qv4-row:hover td { background: #f8f9fb; }
+          .qv4-del { opacity: 0; transition: opacity .12s; }
+          .qv4-row:hover .qv4-del { opacity: 1; }
+          @media (max-width: 760px) {
+            .qv4-table { display: none; }
+            .qv4-cards { display: block; }
+            .qv4-sum { flex-wrap: wrap; row-gap: 14px; }
+            .qv4-sum > div { flex: 1 1 40%; }
+            .qv4-pad { padding-left: 16px !important; padding-right: 16px !important; }
+          }
+        `}</style>
 
-          {/* ===== 브랜드 헤더 ===== */}
-          <div className="brand-header">
-          <ElevatorLogo size={40} />
-          <div>
-            <div className="brand-title">{company?.company_name || '견 적 서 관 리'}</div>
-            <div className="brand-sub">Estimate Management System</div>
-          </div>
-          <div className="brand-meta">
-            <strong>{userInfo?.name}</strong>
-            {isAdmin ? '관리자' : userInfo?.team}
-          </div>
-        </div>
-
-        {/* ===== 탭 바 ===== */}
-        <div className="tab-bar">
-          <button className={`tab-btn ${tab === 'list' ? 'active' : ''}`} onClick={() => setTab('list')}>
-            견적서 목록
-          </button>
-          {isAdmin && (
-            <button className={`tab-btn ${tab === 'company' ? 'active' : ''}`} onClick={() => setTab('company')}>
-              회사정보 설정
-            </button>
-          )}
-          <button className="tab-btn" style={{ marginLeft: 'auto' }} onClick={() => router.push('/work')}>
-            ← 작업화면
-          </button>
-        </div>
-
-        {/* ===== 목록 뷰 ===== */}
-        {tab === 'list' && (
-          <div className="panel">
-            <div className="panel-title">
-              견적서 목록 <span className="num">№ LIST</span>
-              <span className="en">Estimate Archive</span>
+        {tab === 'list' && (() => {
+          const [fy, fm] = (filterMonth || '').split('-').map(Number);
+          const moveMonth = (n: number) => {
+            const base = fy && fm ? new Date(fy, fm - 1 + n, 1) : new Date();
+            setFilterMonth(`${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}`);
+          };
+          const nowYm = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+          const kw = qSearch.trim();
+          const sum = (l: any[]) => l.reduce((a, q) => a + (Number(q.amount) || 0), 0);
+          const pend = quotes.filter((q: any) => q.status === '승인대기');
+          const ok = quotes.filter((q: any) => q.status === '승인');
+          const rej = quotes.filter((q: any) => q.status === '반려');
+          const unpaid = ok.filter((q: any) => !q.payment_confirmed);
+          const FILTERS: [string, number][] = [['전체', quotes.length], ['승인대기', pend.length], ['승인', ok.length], ['반려', rej.length], ['미결제', unpaid.length]];
+          const shown = quotes.filter((q: any) =>
+            (qStatus === '전체' || (qStatus === '미결제' ? q.status === '승인' && !q.payment_confirmed : q.status === qStatus)) &&
+            (!kw || (q.title || '').includes(kw) || (q.team_id || '').includes(kw)));
+          const DOT: Record<string, string> = { '승인': '#16a34a', '반려': '#dc2626', '승인대기': '#d97706' };
+          const status = (st: string) => (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: C.inkSoft, whiteSpace: 'nowrap' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT[st] || C.inkFaint }} />{st}
+            </span>
+          );
+          const subState = (q: any) => q.status !== '승인' ? null : (
+            <span style={{ fontSize: 12, color: C.inkFaint, whiteSpace: 'nowrap' }}>
+              {q.payment_confirmed ? '결제완료' : q.invoice_issued ? '계산서 발행' : '계산서 미발행'}
+            </span>
+          );
+          const splitTitle = (t: string) => { const m = (t || '').match(/^\[(.+?)\]\s*(.*)$/); return m ? { site: m[1], name: m[2] } : { site: '', name: t || '' }; };
+          const navBtn: React.CSSProperties = { width: 32, height: 32, borderRadius: 8, border: 'none', background: 'transparent', color: C.inkDim, fontSize: 18, cursor: 'pointer', lineHeight: 1 };
+          const stat = (label: string, value: string, unit: string, color?: string) => (
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, color: C.inkFaint, marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: color || C.ink, letterSpacing: -0.4, whiteSpace: 'nowrap' }}>
+                {value}<span style={{ fontSize: 13, color: C.inkFaint, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
+              </div>
             </div>
+          );
+          return (
+            <main className="qv4-pad" style={{ padding: '28px 32px 40px', maxWidth: 1080 }}>
+              {/* 제목 줄 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
+                <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.4 }}>견적서</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 8 }}>
+                  <button style={navBtn} onClick={() => moveMonth(-1)}>‹</button>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: C.inkSoft, minWidth: 92, textAlign: 'center' }}>
+                    {filterMonth ? `${fy}년 ${fm}월` : '전체 기간'}
+                  </span>
+                  <button style={{ ...navBtn, opacity: filterMonth >= nowYm ? 0.3 : 1 }} disabled={filterMonth >= nowYm} onClick={() => moveMonth(1)}>›</button>
+                  <button onClick={() => setFilterMonth(filterMonth ? '' : nowYm)} style={{ background: 'none', border: 'none', color: C.inkFaint, fontSize: 12.5, cursor: 'pointer', marginLeft: 4 }}>
+                    {filterMonth ? '전체 보기' : '이번 달'}
+                  </button>
+                </div>
+                <div style={{ flex: 1 }} />
+                {isAdmin && (
+                  <button onClick={() => setTab('company')} style={{ background: 'none', border: 'none', color: C.inkDim, fontSize: 13, cursor: 'pointer' }}>회사정보 설정</button>
+                )}
+                <button onClick={() => { resetCreateForm(); setShowCreate(true); }} style={{
+                  height: 38, padding: '0 16px', borderRadius: 10, border: 'none', background: C.ink, color: '#fff',
+                  fontWeight: 700, fontSize: 13.5, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}>새 견적서</button>
+              </div>
 
-            <div className="filter-bar">
-              {isAdmin && (
-                <select value={filterTeam} onChange={e => setFilterTeam(e.target.value)}>
-                  <option value="all">전체 팀</option>
-                  {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-                </select>
+              {/* 요약 */}
+              <div className="qv4-sum" style={{ display: 'flex', gap: 40, padding: '0 2px 24px', borderBottom: `1px solid ${C.line}`, marginBottom: 20 }}>
+                {stat('견적 합계', won(sum(quotes)), '원')}
+                {stat('승인', won(sum(ok)), '원')}
+                {stat('승인 대기', String(pend.length), '건', pend.length ? '#d97706' : undefined)}
+                {stat('미결제', won(sum(unpaid)), '원', unpaid.length ? '#dc2626' : undefined)}
+              </div>
+
+              {/* 필터 + 검색 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+                {FILTERS.map(([k, n]) => {
+                  const on = qStatus === k;
+                  return (
+                    <button key={k} onClick={() => setQStatus(k)} style={{
+                      height: 32, padding: '0 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
+                      background: on ? C.line : 'transparent', color: on ? C.ink : C.inkDim, fontWeight: on ? 700 : 500,
+                    }}>
+                      {k}<span style={{ marginLeft: 5, color: C.inkFaint, fontWeight: 500 }}>{n}</span>
+                    </button>
+                  );
+                })}
+                <div style={{ flex: 1 }} />
+                {isAdmin && (
+                  <select value={filterTeam} onChange={e => setFilterTeam(e.target.value)} style={{ height: 34, padding: '0 8px', borderRadius: 8, border: `1px solid ${C.line}`, background: '#fff', fontSize: 13, color: C.inkSoft }}>
+                    <option value="all">전체 팀</option>
+                    {teams.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                  </select>
+                )}
+                <input value={qSearch} onChange={e => setQSearch(e.target.value)} placeholder="검색"
+                  style={{ height: 34, width: 180, maxWidth: '100%', padding: '0 12px', borderRadius: 8, border: `1px solid ${C.line}`, background: '#fff', fontSize: 13, outline: 'none' }} />
+              </div>
+
+              {shown.length === 0 && (
+                <div style={{ padding: '72px 16px', textAlign: 'center', color: C.inkFaint, fontSize: 13.5 }}>
+                  {quotes.length === 0 ? '등록된 견적서가 없습니다' : '조건에 맞는 견적서가 없습니다'}
+                </div>
               )}
-              <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} />
-              <button className="btn-primary accent" style={{ marginLeft: 'auto' }}
-                onClick={() => { resetCreateForm(); setShowCreate(true); }}>
-                + 새 견적서
-              </button>
-            </div>
 
-                        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <table className="quote-table" style={{ minWidth: 640 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 70 }}>No.</th>
-                    <th style={{ minWidth: 220, textAlign: 'left' }}>공사명 · 현장</th>
-                    <th className="center" style={{ width: 100 }}>팀</th>
-                    <th className="num" style={{ width: 130 }}>금액</th>
-                    <th className="center" style={{ width: 110 }}>일자</th>
-                    <th className="center" style={{ width: 100 }}>상태</th>
-                    <th style={{ width: 40 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quotes.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: 48, color: 'var(--text-dim)', fontFamily: 'var(--sans)' }}>
-                        등록된 견적서가 없습니다.
-                      </td>
-                    </tr>
-                  ) : quotes.map((q, idx) => (
-                    <tr key={q.id} onClick={() => setSelectedQuote(q)}>
-                      <td><span className="qt-num">№ {String(quotes.length - idx).padStart(3, '0')}</span></td>
-                      <td>
-                        <div className="qt-title">
-                          {q.title}
-                          {q.invoice_issued && <span className="mini-tag">계산서</span>}
-                          {q.payment_confirmed && <span className="mini-tag">결제완료</span>}
+              {/* PC: 표 */}
+              {shown.length > 0 && (
+                <div className="qv4-table" style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr>
+                        {[['공사명', 'left'], ['팀', 'left'], ['일자', 'left'], ['상태', 'left'], ['금액', 'right'], ['', 'right']].map(([h, al], i) => (
+                          <th key={i} style={{ padding: '11px 18px', textAlign: al as any, fontSize: 12, fontWeight: 600, color: C.inkFaint, borderBottom: `1px solid ${C.line}`, whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shown.map((q: any, i: number) => {
+                        const t = splitTitle(q.title);
+                        const bd = i === shown.length - 1 ? 'none' : `1px solid ${C.bg}`;
+                        return (
+                          <tr key={q.id} className="qv4-row" onClick={() => setSelectedQuote(q)} style={{ cursor: 'pointer' }}>
+                            <td style={{ padding: '14px 18px', borderBottom: bd }}>
+                              <div style={{ fontWeight: 600, color: C.ink }}>{t.name}</div>
+                              {t.site && <div style={{ fontSize: 12.5, color: C.inkFaint, marginTop: 2 }}>{t.site}</div>}
+                            </td>
+                            <td style={{ padding: '14px 18px', borderBottom: bd, color: C.inkDim, whiteSpace: 'nowrap' }}>{q.team_id || '-'}</td>
+                            <td style={{ padding: '14px 18px', borderBottom: bd, color: C.inkDim, whiteSpace: 'nowrap' }}>{fmtDate(q.created_at)}</td>
+                            <td style={{ padding: '14px 18px', borderBottom: bd }}>
+                              {status(q.status)}
+                              <div style={{ marginTop: 2, paddingLeft: 13 }}>{subState(q)}</div>
+                            </td>
+                            <td style={{ padding: '14px 18px', borderBottom: bd, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{won(q.amount)}원</td>
+                            <td style={{ padding: '14px 12px', borderBottom: bd, textAlign: 'right', width: 48 }}>
+                              {canEdit(q) && (
+                                <button className="qv4-del" onClick={(e) => handleDeleteQuote(q, e)} style={{ background: 'none', border: 'none', color: C.inkFaint, fontSize: 12, cursor: 'pointer' }}>삭제</button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 모바일: 리스트 */}
+              {shown.length > 0 && (
+                <div className="qv4-cards" style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, overflow: 'hidden' }}>
+                  {shown.map((q: any, i: number) => {
+                    const t = splitTitle(q.title);
+                    return (
+                      <div key={q.id} onClick={() => setSelectedQuote(q)} style={{ padding: '14px 16px', borderTop: i ? `1px solid ${C.bg}` : 'none', cursor: 'pointer' }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</div>
+                          <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{won(q.amount)}원</div>
                         </div>
-                      </td>
-                      <td className="qt-team" style={{ textAlign: 'center' }}>{q.team_id}</td>
-                      <td className="qt-amount">{won(q.amount)}</td>
-                      <td className="qt-date">{fmtDate(q.created_at)}</td>
-                      <td style={{ textAlign: 'center' }}>
-                        <span className={`status-badge ${q.status === '승인' ? 'status-ok' : q.status === '반려' ? 'status-rej' : 'status-pend'}`}>
-                          {q.status}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        {canEdit(q) && (
-                          <button
-                            onClick={(e) => handleDeleteQuote(q, e)}
-                            style={{ color: 'var(--text-dim)', fontSize: 16, cursor: 'pointer' }}
-                            title="삭제"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12.5, color: C.inkFaint }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            {[t.site, q.team_id, fmtDate(q.created_at)].filter(Boolean).join(' · ')}
+                          </span>
+                          <span style={{ marginLeft: 'auto' }}>{status(q.status)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </main>
+          );
+        })()}
+
+        {/* 회사정보 설정: 목록으로 돌아가기 */}
+        {tab === 'company' && isAdmin && (
+          <div style={{ padding: '20px 32px 0' }}>
+            <button onClick={() => setTab('list')} style={{ background: 'none', border: 'none', color: C.inkDim, fontSize: 13.5, cursor: 'pointer', padding: 0 }}>‹ 견적서 목록</button>
           </div>
         )}
 
-
-        {/* ===== 회사정보 뷰 ===== */}
+        {/* 기존 회사정보 설정 화면은 그대로 (기존 스타일 유지) */}
         {tab === 'company' && isAdmin && (
+          <div className="theme-e" style={{ paddingBottom: 0 }}>
+            <div className="page-frame">
           <div className="panel" style={{ maxWidth: 780 }}>
             <div className="panel-title">
               회사 정보 설정 <span className="en">Company Profile</span>
@@ -728,8 +813,13 @@ ${docHTML}
               </button>
             </div>
           </div>
+            </div>
+          </div>
         )}
       </div>
+
+      {/* 작성/상세 모달은 기존 theme-e 스타일 그대로 (display:contents 라 레이아웃 영향 없음) */}
+      <div className="theme-e" style={{ display: 'contents' }}>
 
       {/* ===== 새 견적서 작성 모달 ===== */}
       {showCreate && (
@@ -1043,3 +1133,4 @@ ${docHTML}
     </>
   );
 }
+

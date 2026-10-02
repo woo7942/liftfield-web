@@ -122,6 +122,9 @@ export default function FaultPage() {
   const [search, setSearch] = useState('');
   const [teamFilter, setTeamFilter] = useState(ALL_TEAMS);
   const [statusFilter, setStatusFilter] = useState('전체');
+  // ── 월별 보기 ──
+  const [ym, setYm] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [reportModal, setReportModal] = useState(false);
@@ -669,7 +672,53 @@ export default function FaultPage() {
 </body></html>`);
   };
 
-  const filteredFaults = faults.filter(f => {
+  // ── 월별 범위 ──
+  const nowD = new Date();
+  const isThisMonth = ym.y === nowD.getFullYear() && ym.m === nowD.getMonth() + 1;
+  const monthStart = new Date(ym.y, ym.m - 1, 1);
+  const inMonthOf = (v: string | null, y: number, m: number) => {
+    if (!v) return false; const d = new Date(v);
+    return !isNaN(d.getTime()) && d.getFullYear() === y && d.getMonth() + 1 === m;
+  };
+  const teamFaults = faults.filter(f => teamFilter === ALL_TEAMS || f.team === teamFilter);
+  // 이번 달을 볼 때는 지난 달에 접수됐지만 아직 미처리인 건(이월)도 함께 표시
+  const isCarry = (f: FaultReport) => isThisMonth && f.status !== '완료' && !!f.created_at && new Date(f.created_at) < monthStart;
+  const monthFaults = teamFaults.filter(f => inMonthOf(f.created_at, ym.y, ym.m) || isCarry(f));
+  const monthOnly = teamFaults.filter(f => inMonthOf(f.created_at, ym.y, ym.m));
+  const carryCount = monthFaults.filter(isCarry).length;
+  const moveMonth = (n: number) => setYm(c => { const d = new Date(c.y, c.m - 1 + n, 1); return { y: d.getFullYear(), m: d.getMonth() + 1 }; });
+
+  // 월 요약
+  const mDone = monthOnly.filter(f => f.status === '완료');
+  const mRate = monthOnly.length ? Math.round((mDone.length / monthOnly.length) * 100) : 0;
+  const durs = mDone.map(f => {
+    const a = new Date(f.received_at || f.created_at || ''), b = new Date(f.completed_at || '');
+    return isNaN(a.getTime()) || isNaN(b.getTime()) ? null : (b.getTime() - a.getTime()) / 60000;
+  }).filter((x): x is number => x !== null && x >= 0);
+  const avgMin = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null;
+  const fmtDur = (m: number | null) => m === null ? '-' : m < 60 ? `${Math.round(m)}분` : m < 1440 ? `${(m / 60).toFixed(1)}시간` : `${(m / 1440).toFixed(1)}일`;
+  const prevD = new Date(ym.y, ym.m - 2, 1);
+  const prevCount = teamFaults.filter(f => inMonthOf(f.created_at, prevD.getFullYear(), prevD.getMonth() + 1)).length;
+  const diff = monthOnly.length - prevCount;
+
+  // 최근 6개월 추이 (선택한 달 기준)
+  const trend = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(ym.y, ym.m - 6 + i, 1); const y = d.getFullYear(), m = d.getMonth() + 1;
+    const list = teamFaults.filter(f => inMonthOf(f.created_at, y, m));
+    return { y, m, total: list.length, done: list.filter(f => f.status === '완료').length };
+  });
+  const trendMax = Math.max(1, ...trend.map(t => t.total));
+
+  // 많이 난 현장/호기, 고장 원인
+  const topBy = (key: (f: FaultReport) => string) => {
+    const m: Record<string, number> = {};
+    monthOnly.forEach(f => { const k = key(f); if (k) m[k] = (m[k] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  };
+  const topUnits = topBy(f => [f.site_name, f.hogi_no].filter(Boolean).join(' '));
+  const topCauses = topBy(f => (f.fault_cause || '').split(/[,\n]/)[0].trim());
+
+  const filteredFaults = monthFaults.filter(f => {
     const matchTeam = teamFilter === ALL_TEAMS || f.team === teamFilter;
     const matchStatus = statusFilter === '전체' || f.status === statusFilter;
     const matchSearch =
@@ -721,11 +770,11 @@ const groupedElevators = useMemo(() => {
   const totalCompleted = faults.filter(f => f.status === '완료').length;
 
   const stats = [
-    { label: '전체', count: faults.length, color: C.inkDim },
-    { label: '접수대기', count: faults.filter(f => f.status === '접수대기').length, color: C.amber },
-    { label: '접수', count: faults.filter(f => f.status === '접수').length, color: C.amber },
-    { label: '처리중', count: faults.filter(f => f.status === '처리중').length, color: C.primary },
-    { label: '완료', count: faults.filter(f => f.status === '완료').length, color: C.green },
+    { label: '전체', count: monthFaults.length, color: C.inkDim },
+    { label: '접수대기', count: monthFaults.filter(f => f.status === '접수대기').length, color: C.amber },
+    { label: '접수', count: monthFaults.filter(f => f.status === '접수').length, color: C.amber },
+    { label: '처리중', count: monthFaults.filter(f => f.status === '처리중').length, color: C.primary },
+    { label: '완료', count: monthFaults.filter(f => f.status === '완료').length, color: C.green },
   ];
 
   if (loading) {
@@ -785,6 +834,92 @@ const groupedElevators = useMemo(() => {
       </div>
 
       <div style={{ maxWidth: 480, margin: '0 auto' }}>
+        {/* ── 월 선택 ── */}
+        <div style={{ padding: '0 16px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={() => moveMonth(-1)} style={{ width: 34, height: 34, borderRadius: 10, border: `1px solid ${C.line}`, background: C.surface, color: C.inkDim, fontWeight: 800, cursor: 'pointer' }}>‹</button>
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.ink, minWidth: 108, textAlign: 'center' }}>{ym.y}년 {ym.m}월</div>
+          <button onClick={() => moveMonth(1)} disabled={isThisMonth} style={{ width: 34, height: 34, borderRadius: 10, border: `1px solid ${C.line}`, background: C.surface, color: C.inkDim, fontWeight: 800, cursor: isThisMonth ? 'default' : 'pointer', opacity: isThisMonth ? 0.35 : 1 }}>›</button>
+          {!isThisMonth && (
+            <button onClick={() => { const d = new Date(); setYm({ y: d.getFullYear(), m: d.getMonth() + 1 }); }} style={{ background: 'none', border: 'none', color: C.primary, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>이번 달</button>
+          )}
+          <button onClick={() => setShowAnalysis(v => !v)} style={{ marginLeft: 'auto', padding: '7px 12px', borderRadius: 10, border: `1px solid ${C.line}`, background: showAnalysis ? C.ink : C.surface, color: showAnalysis ? '#fff' : C.inkSoft, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            월별 분석 {showAnalysis ? '▴' : '▾'}
+          </button>
+        </div>
+
+        {/* ── 월 요약 ── */}
+        <div style={{ margin: '0 16px 10px', background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: '14px 16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 6 }}>
+            {[
+              ['접수', `${monthOnly.length}`, '건', prevCount || monthOnly.length ? (diff === 0 ? '전월과 동일' : `전월 대비 ${diff > 0 ? '+' : ''}${diff}`) : '', diff > 0 ? C.red : C.inkFaint],
+              ['처리 완료', `${mDone.length}`, '건', `미처리 ${monthOnly.length - mDone.length}건`, C.inkFaint],
+              ['처리율', `${mRate}`, '%', '', C.inkFaint],
+              ['평균 처리', fmtDur(avgMin), '', '접수→완료', C.inkFaint],
+            ].map(([k, v, u, foot, fc]) => (
+              <div key={k as string} style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: C.inkDim, fontWeight: 700, whiteSpace: 'nowrap' }}>{k}</div>
+                <div style={{ fontSize: 19, fontWeight: 800, color: C.ink, fontFamily: C.mono, whiteSpace: 'nowrap', marginTop: 2 }}>
+                  {v}<span style={{ fontSize: 11.5, color: C.inkFaint, fontWeight: 600, marginLeft: 1 }}>{u}</span>
+                </div>
+                {foot && <div style={{ fontSize: 10.5, color: fc as string, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{foot}</div>}
+              </div>
+            ))}
+          </div>
+          <div style={{ height: 6, borderRadius: 3, background: C.bg, overflow: 'hidden', marginTop: 12 }}>
+            <div style={{ width: `${mRate}%`, height: '100%', background: C.green, borderRadius: 3 }} />
+          </div>
+          {carryCount > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: C.red, fontWeight: 700 }}>
+              지난 달에서 넘어온 미처리 {carryCount}건이 목록에 함께 표시돼요
+            </div>
+          )}
+        </div>
+
+        {/* ── 월별 분석 (펼침) ── */}
+        {showAnalysis && (
+          <div style={{ margin: '0 16px 12px', display: 'grid', gap: 10 }}>
+            <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: '14px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                <b style={{ fontSize: 13.5, color: C.ink }}>최근 6개월</b>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: C.inkFaint, display: 'flex', gap: 10 }}>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: C.line, marginRight: 4 }} />접수</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: C.green, marginRight: 4 }} />완료</span>
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 120 }}>
+                {trend.map(t => {
+                  const sel = t.y === ym.y && t.m === ym.m;
+                  return (
+                    <button key={`${t.y}-${t.m}`} onClick={() => setYm({ y: t.y, m: t.m })} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 4, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: sel ? C.ink : C.inkFaint, fontFamily: C.mono }}>{t.total}</span>
+                      <div style={{ width: '100%', maxWidth: 30, height: Math.max(3, (t.total / trendMax) * 80), background: sel ? `${C.primary}33` : C.line, borderRadius: '5px 5px 2px 2px', position: 'relative', overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: t.total ? `${(t.done / t.total) * 100}%` : 0, background: C.green }} />
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: sel ? 800 : 600, color: sel ? C.primary : C.inkDim }}>{t.m}월</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {[['고장 많은 호기', topUnits], ['고장 원인', topCauses]].map(([title, rows]) => (
+                <div key={title as string} style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: '12px 14px', minWidth: 0 }}>
+                  <b style={{ fontSize: 13, color: C.ink }}>{title as string}</b>
+                  {(rows as [string, number][]).length === 0 && <div style={{ fontSize: 12, color: C.inkFaint, padding: '10px 0' }}>데이터 없음</div>}
+                  {(rows as [string, number][]).map(([k, n], i) => (
+                    <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 12 }}>
+                      <span style={{ width: 16, color: i === 0 ? C.red : C.inkFaint, fontWeight: 800 }}>{i + 1}</span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.inkSoft, fontWeight: 600 }}>{k}</span>
+                      <b style={{ color: C.ink, fontFamily: C.mono }}>{n}</b>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 통계 칩 */}
         <div style={{ padding: '0 16px 12px', display: 'flex', gap: 8, overflowX: 'auto' }}>
           {stats.map((s) => {
@@ -844,7 +979,7 @@ const groupedElevators = useMemo(() => {
         <div style={{ padding: '0 16px' }}>
           {filteredFaults.length === 0 && (
             <p style={{ textAlign: 'center', color: C.inkFaint, padding: '60px 0', fontSize: 13 }}>
-              고장신고 내역이 없습니다
+              {ym.y}년 {ym.m}월 고장신고 내역이 없습니다
             </p>
           )}
 
@@ -877,6 +1012,7 @@ const groupedElevators = useMemo(() => {
                       <span style={{ padding: '2px 8px', borderRadius: 6, background: `${chipColor}15`, color: chipColor, fontSize: 10.5, fontWeight: 800 }}>
                         {urgent ? '긴급' : STATUS_LABEL[f.status] || f.status}
                       </span>
+                      {isCarry(f) && <span style={{ padding: '2px 6px', borderRadius: 6, background: `${C.red}12`, color: C.red, fontSize: 10.5, fontWeight: 800 }}>이월</span>}
                       {f.team && <span style={{ fontSize: 10.5, color: C.inkFaint, fontWeight: 700 }}>{f.team}팀</span>}
                       {f.equip_type && <span style={{ fontSize: 10.5, color: C.inkFaint }}>· {f.equip_type}</span>}
                     </div>
@@ -1503,3 +1639,4 @@ const composedHogi = hogiDisplay.trim();
     </div>
   );
 }
+
