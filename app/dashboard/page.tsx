@@ -87,14 +87,27 @@ export default function OpsHomePage() {
       const from = new Date(Y, M - 6, 1);
       const fromY = from.getFullYear();
 
+      // ※ Supabase는 한 번에 최대 1,000행만 돌려줌 → 1,000행 단위로 끝까지 나눠 받기
+      const fetchAll = async (build: () => any) => {
+        const PAGE = 1000;
+        let all: any[] = [];
+        for (let fromRow = 0; ; fromRow += PAGE) {
+          const { data, error } = await build().range(fromRow, fromRow + PAGE - 1);
+          if (error) { console.error('[dashboard] 조회 실패', error); break; }
+          all = all.concat(data || []);
+          if (!data || data.length < PAGE) break;
+        }
+        return { data: all };
+      };
+
       const [tRes, sRes, eRes, uRes, mRes] = await Promise.all([
         supabase.from('teams').select('name').eq('company_id', cid).order('name'),
-        supabase.from('sites').select('id, site_name, name, address, team, contract_type').eq('company_id', cid),
-        supabase.from('elevators').select('id, site_id').eq('company_id', cid),
-        supabase.from('site_inspection_units')
+        fetchAll(() => supabase.from('sites').select('id, site_name, name, address, team, contract_type').eq('company_id', cid).order('id')),
+        fetchAll(() => supabase.from('elevators').select('id, site_id').eq('company_id', cid).order('id')),
+        fetchAll(() => supabase.from('site_inspection_units')
           .select('elevator_id, year, month, completed, completed_by')
-          .eq('company_id', cid).gte('year', fromY).eq('completed', true),
-        supabase.from('users').select('name, team, role').eq('company_id', cid),
+          .eq('company_id', cid).gte('year', fromY).eq('completed', true).order('elevator_id')),
+        fetchAll(() => supabase.from('users').select('name, team, role').eq('company_id', cid).order('id')),
       ]);
 
       setTeams((tRes.data || []).map((t: any) => t.name).filter(Boolean));
