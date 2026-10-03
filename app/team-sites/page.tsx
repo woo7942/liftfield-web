@@ -258,6 +258,12 @@ export default function TeamSitesPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState<Partial<SiteItem>>({});
   const [addLoading, setAddLoading] = useState(false);
+  // 수정도 추가 모달로: 수정 중인 현장 id + 이미 등록된 호기
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
+  const [editOrigAddress, setEditOrigAddress] = useState('');
+  const [existingElevs, setExistingElevs] = useState<{ elevator_no?: string; dong?: string; hogi_no?: string }[]>([]);
+  const existingNos = useMemo(() => new Set(existingElevs.map((e) => String(e.elevator_no || '').replace(/[^0-9]/g, '')).filter(Boolean)), [existingElevs]);
+  const isRegistered = (r: CacheRow) => !!r.elevator_no && existingNos.has(String(r.elevator_no).replace(/[^0-9]/g, ''));
   const [selectedSite, setSelectedSite] = useState<SiteItem | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Partial<SiteItem>>({});
@@ -627,10 +633,11 @@ export default function TeamSitesPage() {
       ? `${row.road_name}${row.main_no ? ` ${row.main_no}` : ''}`
       : (row.address1 || row.address2 || '');
 
+    // 수정 중에는 이미 입력된 현장명·주소를 덮어쓰지 않음 (비어 있을 때만 채움)
     setAddForm(prev => ({
       ...prev,
-      name: buildingName || prev.name,
-      address: addressText || prev.address,
+      name: editingSiteId ? (prev.name || buildingName) : (buildingName || prev.name),
+      address: editingSiteId ? (prev.address || addressText) : (addressText || prev.address),
     }));
     setElevatorNoResults([]);
     setElevatorNoSearch('');
@@ -722,8 +729,45 @@ export default function TeamSitesPage() {
     return <span style={{ color: C.primary }} className="ml-1">{sortAsc ? '↑' : '↓'}</span>;
   }
 
+  // ─── 캐시 행 → elevators insert 행 (추가·수정 공용) ───
+  function buildElevatorRows(rows: (CacheRow & { dong: string; hogi_no: string })[], siteId: string) {
+    if (!userInfo) return [];
+    return rows.map((r) => ({
+          site_id: siteId,
+          company_id: userInfo.companyId,
+          elevator_no: r.elevator_no,
+          dong: r.dong,
+          hogi_no: r.hogi_no,
+          unit_number: r.hogi_no,
+          building: r.building,
+          installation_place: r.installation_place,
+          type: r.type,
+          model: r.elvtr_model,
+          elvtr_model: r.elvtr_model,
+          manufacturer: r.manufacturer_name,
+          manufacturer_name: r.manufacturer_name,
+          mnt_company: r.mnt_cpny_nm,
+          mnt_cpny_nm: r.mnt_cpny_nm,
+          sub_company: r.subcntr_cpny,
+          subcntr_cpny: r.subcntr_cpny,
+          live_load: r.live_load,
+          rated_speed: r.rated_speed,
+          shuttle_section: r.shuttle_section,
+          status: r.status,
+          last_result: r.last_result_nm,
+          last_result_nm: r.last_result_nm,
+          inspection_date: r.exam_date,
+          exam_date: r.exam_date,
+          install_date: r.install_date,
+          main_no: r.main_no,
+          road_name: r.road_name,
+          created_at: new Date().toISOString(),
+        }));
+  }
+
   // ─── 현장 추가 ───
   async function handleAddSite() {
+    if (editingSiteId) return handleEditViaModal();
     if (!addForm.name?.trim() || !userInfo?.companyId) return;
     if (!canEdit && !userInfo?.team) {
       alert('배정된 팀이 없어 현장을 추가할 수 없어요. 관리자에게 팀 배정을 요청해주세요.');
@@ -776,37 +820,7 @@ export default function TeamSitesPage() {
       if (newSite?.id && selectedRows.length > 0) {
         // 동 이름 정리('102동동'→'102동') + 동별 호기 번호 (새 현장이라 기존 호기 없음)
         const fixedRows = assignDongHogi(selectedRows);
-        const elevatorRows = fixedRows.map((r) => ({
-          site_id: newSite.id,
-          company_id: userInfo.companyId,
-          elevator_no: r.elevator_no,
-          dong: r.dong,
-          hogi_no: r.hogi_no,
-          unit_number: r.hogi_no,
-          building: r.building,
-          installation_place: r.installation_place,
-          type: r.type,
-          model: r.elvtr_model,
-          elvtr_model: r.elvtr_model,
-          manufacturer: r.manufacturer_name,
-          manufacturer_name: r.manufacturer_name,
-          mnt_company: r.mnt_cpny_nm,
-          mnt_cpny_nm: r.mnt_cpny_nm,
-          sub_company: r.subcntr_cpny,
-          subcntr_cpny: r.subcntr_cpny,
-          live_load: r.live_load,
-          rated_speed: r.rated_speed,
-          shuttle_section: r.shuttle_section,
-          status: r.status,
-          last_result: r.last_result_nm,
-          last_result_nm: r.last_result_nm,
-          inspection_date: r.exam_date,
-          exam_date: r.exam_date,
-          install_date: r.install_date,
-          main_no: r.main_no,
-          road_name: r.road_name,
-          created_at: new Date().toISOString(),
-        }));
+        const elevatorRows = buildElevatorRows(fixedRows, newSite.id);
 
         const { error: elevError } = await supabase.from('elevators').insert(elevatorRows);
         if (elevError) {
@@ -831,7 +845,91 @@ export default function TeamSitesPage() {
     }
   }
 
-  // ─── 현장 수정 ───
+  // ─── 수정: 추가 모달을 수정 모드로 열기 ───
+  async function openEditInAddModal(site: SiteItem) {
+    setAddForm({ ...site });
+    setEditingSiteId(site.id);
+    setEditOrigAddress(site.address || '');
+    setCacheResults([]);
+    setCacheGrouped([]);
+    setSelectedCacheKeys(new Set());
+    setElevatorNoSearch('');
+    setElevatorNoResults([]);
+    setAddressExactMatch(null);
+    setSelectedSite(null);
+    setExpandedElevatorId(null);
+    setShowAddModal(true);
+    const { data } = await supabase.from('elevators').select('elevator_no, dong, hogi_no').eq('site_id', site.id);
+    setExistingElevs(data || []);
+  }
+
+  function closeAddModal() {
+    setShowAddModal(false);
+    setAddForm({});
+    setCacheResults([]);
+    setCacheGrouped([]);
+    setSelectedCacheKeys(new Set());
+    setElevatorNoSearch('');
+    setElevatorNoResults([]);
+    setAddressExactMatch(null);
+    setEditingSiteId(null);
+    setExistingElevs([]);
+  }
+
+  // ─── 수정 저장 (현장 정보 + 새로 체크한 호기만 추가) ───
+  async function handleEditViaModal() {
+    if (!editingSiteId || !userInfo?.companyId || !addForm.name?.trim()) return;
+    setAddLoading(true);
+    try {
+      const addressChanged = (addForm.address || '') !== editOrigAddress;
+      const coords = addressChanged && addForm.address ? await geocodeAddress(addForm.address) : null;
+      const cleanedPhones = (addForm.phones || []).map(p => p.trim()).filter(p => p !== '');
+      const cleanedEmergencyPhones = (addForm.emergencyPhones || []).map(p => p.trim()).filter(p => p !== '');
+
+      const newRows = cacheResults.filter((r, idx) => selectedCacheKeys.has(cacheRowKey(r, idx)) && !isRegistered(r));
+      const totalElev = existingElevs.length + newRows.length;
+
+      const { error } = await supabase.from('sites').update({
+        name: addForm.name,
+        site_name: addForm.name,
+        address: addForm.address || '',
+        ...(addressChanged ? { lat: coords?.lat ?? null, lng: coords?.lng ?? null } : {}),
+        phones: cleanedPhones,
+        emergency_phones: cleanedEmergencyPhones,
+        contract_type: addForm.contractType || '',
+        contract_start: addForm.contractStart || null,
+        contract_end: addForm.contractEnd || null,
+        elevator_count: totalElev || addForm.elevatorCount || 0,
+        ...(canEdit ? { team: addForm.teamName || '' } : {}),
+        manager_name: addForm.managerName || '',
+        memo: addForm.memo || '',
+        access_code: addForm.password || '',
+        maintenance_fee: addForm.maintenanceFee || 0,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editingSiteId);
+      if (error) throw error;
+
+      if (newRows.length > 0) {
+        // 기존 호기 번호를 피해서 동별 번호 부여
+        const fixed = assignDongHogi(newRows, existingElevs);
+        const { error: elevError } = await supabase.from('elevators').insert(buildElevatorRows(fixed, editingSiteId));
+        if (elevError) {
+          console.error('호기 추가 오류:', elevError);
+          alert('현장 정보는 저장됐지만 호기 추가 중 오류가 있었어요.');
+        }
+      }
+
+      closeAddModal();
+      await reloadSites();
+    } catch (e: any) {
+      console.error(e);
+      alert('저장 실패: ' + (e?.message || e));
+    } finally {
+      setAddLoading(false);
+    }
+  }
+
+  // ─── 현장 수정 (기존 상세 모달 안 수정 — 현재는 사용하지 않음) ───
   async function handleEditSave() {
     if (!selectedSite || !userInfo?.companyId) return;
     try {
@@ -946,6 +1044,8 @@ export default function TeamSitesPage() {
               setElevatorNoSearch('');
               setElevatorNoResults([]);
               setAddressExactMatch(null);
+              setEditingSiteId(null);
+              setExistingElevs([]);
               setShowAddModal(true);
             }}
             style={{
@@ -1108,7 +1208,12 @@ export default function TeamSitesPage() {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5">
-            <h2 className="font-bold text-lg mb-4">+ 팀별 현장 추가</h2>
+            <h2 className="font-bold text-lg mb-1">{editingSiteId ? '현장 수정' : '+ 팀별 현장 추가'}</h2>
+            {editingSiteId ? (
+              <p className="text-xs text-gray-500 mb-4">
+                등록된 호기 {existingElevs.length}대 · 승강기 번호나 주소로 조회해서 빠진 호기를 체크하면 추가돼요
+              </p>
+            ) : <div className="mb-3" />}
             <div className="space-y-3">
 
               {/* 승강기 번호로 빠른 검색 */}
@@ -1220,17 +1325,19 @@ export default function TeamSitesPage() {
                     <div className="max-h-60 overflow-y-auto space-y-1 bg-white rounded-lg border border-blue-100 p-1.5">
                       {cacheResults.map((r, idx) => {
                         const key = cacheRowKey(r, idx);
-                        const checked = selectedCacheKeys.has(key);
+                        const registered = isRegistered(r);
+                        const checked = registered || selectedCacheKeys.has(key);
                         return (
                           <label key={key}
                             className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-xs ${
-                              checked ? 'bg-green-50' : 'hover:bg-gray-50'
+                              registered ? 'bg-gray-50 opacity-60 cursor-default' : checked ? 'bg-green-50' : 'hover:bg-gray-50'
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
-                              onChange={() => toggleCacheRow(key)}
+                              onChange={() => { if (!registered) toggleCacheRow(key); }}
+                              disabled={registered}
                               className="shrink-0"
                             />
                             <span className="w-14 shrink-0 font-medium text-gray-700">
@@ -1239,6 +1346,7 @@ export default function TeamSitesPage() {
                             <span className="w-14 shrink-0 text-gray-600">{r.hogi_no || '-'}호기</span>
                             <span className="w-20 shrink-0 text-gray-400 font-mono">{r.elevator_no || '-'}</span>
                             <span className="flex-1 truncate text-gray-500">{r.mnt_cpny_nm || '관리업체 정보 없음'}</span>
+                            {registered && <span className="shrink-0 text-[10px] font-bold text-gray-500 bg-white border px-1.5 py-0.5 rounded">등록됨</span>}
                           </label>
                         );
                       })}
@@ -1350,23 +1458,14 @@ export default function TeamSitesPage() {
             </div>
             <div className="flex gap-2 mt-4">
               <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setAddForm({});
-                  setCacheResults([]);
-                  setCacheGrouped([]);
-                  setSelectedCacheKeys(new Set());
-                  setElevatorNoSearch('');
-                  setElevatorNoResults([]);
-                  setAddressExactMatch(null);
-                }}
+                onClick={closeAddModal}
                 className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
               >
                 취소
               </button>
               <button onClick={handleAddSite} disabled={addLoading}
                 className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
-                {addLoading ? '저장 중...' : '저장'}
+                {addLoading ? '저장 중...' : editingSiteId ? '수정 저장' : '저장'}
               </button>
             </div>
           </div>
@@ -1558,7 +1657,7 @@ export default function TeamSitesPage() {
                       <button onClick={() => handleDeleteSite(selectedSite.id)}
                         className="flex-1 py-2 border border-red-300 text-red-500 rounded-xl text-sm">삭제</button>
                     )}
-                    <button onClick={() => setEditMode(true)}
+                    <button onClick={() => openEditInAddModal(selectedSite)}
                       className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium">수정</button>
                   </div>
                 )}
