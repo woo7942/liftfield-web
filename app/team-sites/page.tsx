@@ -779,6 +779,13 @@ export default function TeamSitesPage() {
 
       const selectedRows = cacheResults.filter((r, idx) => selectedCacheKeys.has(cacheRowKey(r, idx)));
 
+      // 승강기를 조회해서 1대 이상 체크해야 등록 가능 (호기 없는 현장 방지)
+      if (selectedRows.length === 0) {
+        alert('승강기를 조회해서 우리 회사가 관리하는 호기를 1대 이상 체크해야 등록할 수 있어요.\n\n승강기 번호 또는 주소로 먼저 조회해 주세요.');
+        setAddLoading(false);
+        return;
+      }
+
       const teamToSave = canEdit ? (addForm.teamName || '') : (userInfo.team || '');
 
       const cleanedPhones = (addForm.phones || []).map(p => p.trim()).filter(p => p !== '');
@@ -797,7 +804,7 @@ export default function TeamSitesPage() {
           contract_type: addForm.contractType || '',
           contract_start: addForm.contractStart || null,
           contract_end: addForm.contractEnd || null,
-          elevator_count: selectedRows.length || addForm.elevatorCount || 0,
+          elevator_count: selectedRows.length,
           team: teamToSave,
           manager_name: addForm.managerName || '',
           memo: addForm.memo || '',
@@ -1367,7 +1374,6 @@ export default function TeamSitesPage() {
 
               {[
                 { label: '담당자', field: 'managerName', type: 'text' },
-                { label: '승강기 대수', field: 'elevatorCount', type: 'number' },
                 { label: '비밀번호', field: 'password', type: 'text' },
                 { label: '보수료(원)', field: 'maintenanceFee', type: 'number' },
                 { label: '메모', field: 'memo', type: 'text' },
@@ -1456,14 +1462,25 @@ export default function TeamSitesPage() {
                 )}
               </div>
             </div>
-            <div className="flex gap-2 mt-4">
+            <div className={`mt-4 rounded-xl px-3 py-2 text-xs font-medium ${
+              editingSiteId ? 'bg-gray-50 text-gray-500'
+              : selectedCacheKeys.size > 0 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+            }`}>
+              {editingSiteId
+                ? `등록된 호기 ${existingElevs.length}대${selectedCacheKeys.size ? ` + 추가 ${cacheResults.filter((r, i) => selectedCacheKeys.has(cacheRowKey(r, i)) && !isRegistered(r)).length}대` : ''}`
+                : selectedCacheKeys.size > 0
+                  ? `승강기 ${selectedCacheKeys.size}대가 함께 등록돼요`
+                  : '승강기를 조회해서 1대 이상 체크해야 저장할 수 있어요'}
+            </div>
+            <div className="flex gap-2 mt-2">
               <button
                 onClick={closeAddModal}
                 className="flex-1 py-2 border rounded-xl text-sm text-gray-600"
               >
                 취소
               </button>
-              <button onClick={handleAddSite} disabled={addLoading}
+              <button onClick={handleAddSite} disabled={addLoading || (!editingSiteId && selectedCacheKeys.size === 0)}
+                title={!editingSiteId && selectedCacheKeys.size === 0 ? '승강기를 조회해서 1대 이상 체크해 주세요' : undefined}
                 className="flex-1 py-2 bg-blue-500 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                 {addLoading ? '저장 중...' : editingSiteId ? '수정 저장' : '저장'}
               </button>
