@@ -357,13 +357,25 @@ export default function TeamSitesPage() {
 
     if (error) { console.error(error); return; }
 
+    // 실제 등록된 승강기 수 (elevators 테이블) — 1,000행 제한 때문에 나눠서 끝까지 조회
+    const realCount: Record<string, number> = {};
+    for (let fromRow = 0; ; fromRow += 1000) {
+      const { data: ev, error: evErr } = await supabase
+        .from('elevators').select('site_id').eq('company_id', cid)
+        .order('id').range(fromRow, fromRow + 999);
+      if (evErr) { console.error(evErr); break; }
+      (ev || []).forEach((e: any) => { if (e.site_id) realCount[e.site_id] = (realCount[e.site_id] || 0) + 1; });
+      if (!ev || ev.length < 1000) break;
+    }
+
     const list: SiteItem[] = (sitesData || []).map(d => ({
       id: d.id,
       name: d.name || '',
       address: d.address || '',
       lat: d.lat ?? undefined,
       lng: d.lng ?? undefined,
-      elevatorCount: d.elevator_count || 0,
+      // 등록된 호기가 있으면 실제 대수, 없으면 직접 입력한 대수(elevator_count)
+      elevatorCount: realCount[d.id] ?? (d.elevator_count || 0),
       phones: Array.isArray(d.phones) ? d.phones : [],
       emergencyPhones: Array.isArray(d.emergency_phones) ? d.emergency_phones : [],
       contractType: d.contract_type || '',
