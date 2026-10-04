@@ -14,6 +14,7 @@ import {
 } from '@/lib/fault-taxonomy';
 import ChipAccordion from '@/components/fault/ChipAccordion';
 import ErrorCodeList from '@/components/fault/ErrorCodeList';
+import { speakKo, FAULT_SPEECH } from '@/components/FaultAlerts';
 import FaultResultForm, { emptyResult, composeResult, isWaitingParts, type FaultResultValue } from '@/components/fault/FaultResultForm';
 
 
@@ -234,10 +235,13 @@ export default function FaultPage() {
           setUnseenCount(prev => prev + 1);
 
           console.log('새 고장 접수 감지, soundOn:', soundOn);
-          if (soundOn) {
+          // 내 팀 고장이거나 관리자일 때만 소리 + 음성 안내
+          const isAdminUser = userInfo.role === 'admin' || userInfo.super_admin === true;
+          const myTeamFault = isAdminUser || !newFault.team || newFault.team === userInfo.team;
+          if (soundOn && myTeamFault) {
             audioRef.current?.play()
-              .then(() => console.log('알림음 재생 성공'))
-              .catch((err) => console.error('알림음 재생 실패:', err.name, err.message));
+              .then(() => setTimeout(() => speakKo(FAULT_SPEECH), 900))
+              .catch((err) => { console.error('알림음 재생 실패:', err.name, err.message); speakKo(FAULT_SPEECH); });
           }
         }
       )
