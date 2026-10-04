@@ -14,6 +14,7 @@ import {
 } from '@/lib/fault-taxonomy';
 import ChipAccordion from '@/components/fault/ChipAccordion';
 import ErrorCodeList from '@/components/fault/ErrorCodeList';
+import FaultResultForm, { emptyResult, composeResult, type FaultResultValue } from '@/components/fault/FaultResultForm';
 
 
 
@@ -158,6 +159,8 @@ export default function FaultPage() {
   const [faultCause, setFaultCause] = useState('');
   const [faultAction, setFaultAction] = useState('');
   const [faultNote, setFaultNote] = useState('');
+  const [resultForm, setResultForm] = useState<FaultResultValue>(emptyResult());
+  const [receiveTarget, setReceiveTarget] = useState<FaultReport | null>(null); // 접수 확인 카드
   const [arrivedAtInput, setArrivedAtInput] = useState('');
   const [completedAtInput, setCompletedAtInput] = useState('');
   const [errorCodesInput, setErrorCodesInput] = useState<string[]>([]);
@@ -419,8 +422,10 @@ export default function FaultPage() {
     }
   }
 
-  const handleReceive = async (fault: FaultReport) => {
-    if (!confirm(`${fault.site_name} ${fault.hogi_no} 고장을 내가 접수하시겠어요?\n\n담당자: ${userInfo?.name || ''}`)) return;
+  // 접수하기 → 고장 내용 요약 카드를 먼저 보여주고 [확인]을 누르면 접수
+  const handleReceive = (fault: FaultReport) => setReceiveTarget(fault);
+
+  const confirmReceive = async (fault: FaultReport) => {
     try {
       const { data, error } = await supabase
         .from('fault_reports')
@@ -435,12 +440,13 @@ export default function FaultPage() {
         .select();
       if (error) throw error;
       if (!data || data.length === 0) {
+        setReceiveTarget(null);
         alert('이미 다른 팀원이 접수를 완료했습니다.');
         await loadData(userInfo);
         return;
       }
+      setReceiveTarget(null);
       await loadData(userInfo);
-      openDetail(data[0] as FaultReport);
     } catch (e: any) {
       alert('오류: ' + e.message);
     }
@@ -448,9 +454,11 @@ export default function FaultPage() {
 
   const handleSetInProgress = async (fault: FaultReport) => {
     try {
-      const { error } = await supabase.from('fault_reports').update({ status: '처리중' }).eq('id', fault.id);
+      const now = new Date().toISOString();
+      const { error } = await supabase.from('fault_reports').update({ status: '처리중', arrived_at: now }).eq('id', fault.id);
       if (error) throw error;
-      setSelectedFault(prev => prev ? { ...prev, status: '처리중' } : prev);
+      setSelectedFault(prev => prev ? { ...prev, status: '처리중', arrived_at: now } : prev);
+      setArrivedAtInput(toDatetimeLocal(now));
       await loadData(userInfo);
     } catch (e: any) {
       alert('오류: ' + e.message);
@@ -459,15 +467,18 @@ export default function FaultPage() {
 
   const submitComplete = async () => {
     if (!selectedFault) return;
-    if (!faultAction.trim()) return alert('처리 내용을 입력하세요');
-    const arrivedDate = parseDatetimeInput(arrivedAtInput) ?? new Date().toISOString();
+    const composed = composeResult(resultForm);
+    if (!resultForm.device && !resultForm.causeMemo.trim()) return alert('고장 부위를 선택하거나 원인 상세를 입력하세요');
+    if (resultForm.actions.length === 0 && !resultForm.actionMemo.trim()) return alert('조치를 선택하거나 작업 상세를 입력하세요');
+    const arrivedDate = parseDatetimeInput(arrivedAtInput) ?? selectedFault.arrived_at ?? new Date().toISOString();
     const completedDate = parseDatetimeInput(completedAtInput) ?? new Date().toISOString();
     try {
       const { error } = await supabase.from('fault_reports').update({
-        fault_cause: faultCause, fault_action: faultAction, fault_note: faultNote,
+        fault_cause: composed.fault_cause, fault_action: composed.fault_action, fault_note: composed.fault_note,
         error_codes: (errorCodesInput || []).map(c => c.trim()).filter(Boolean),
 
-        arrived_at: arrivedDate, completed_at: completedDate, status: '완료',
+        arrived_at: arrivedDate, completed_at: completedDate,
+        status: resultForm.result === '운행 중지(부품 대기)' ? '처리중' : '완료',
       }).eq('id', selectedFault.id);
       if (error) throw error;
       await loadData(userInfo);
@@ -500,6 +511,7 @@ export default function FaultPage() {
     setArrivedAtInput(fault.arrived_at ? toDatetimeLocal(fault.arrived_at) : '');
     setCompletedAtInput(fault.completed_at ? toDatetimeLocal(fault.completed_at) : '');
     setErrorCodesInput(fault.error_codes || []);
+    setResultForm(emptyResult());
     setDetailModal(true);
   };
 
@@ -510,7 +522,7 @@ export default function FaultPage() {
   };
 
     const resetDetailFields = () => {
-    setFaultCause(''); setFaultAction(''); setFaultNote('');
+    setFaultCause(''); setFaultAction(''); setFaultNote(''); setResultForm(emptyResult());
     setArrivedAtInput(''); setCompletedAtInput(''); setErrorCodesInput([]);
   };
 
@@ -1043,15 +1055,15 @@ const groupedElevators = useMemo(() => {
                         onClick={() => handleSetInProgress(f)}
                         style={{ padding: '7px 12px', background: C.primary, color: '#fff', borderRadius: 8, fontSize: 11.5, fontWeight: 800, border: 'none', cursor: 'pointer' }}
                       >
-                        현장 도착·처리 시작
+                        📍 현장 도착
                       </button>
                     )}
-                    {(f.status === '처리중' || f.status === '접수') && (
+                    {f.status === '처리중' && (
                       <button
                         onClick={() => openDetail(f)}
                         style={{ padding: '7px 12px', background: C.bg, color: C.inkSoft, borderRadius: 8, fontSize: 11.5, fontWeight: 700, border: `1px solid ${C.line}`, cursor: 'pointer' }}
                       >
-                        처리 입력
+                        처리 결과 입력
                       </button>
                     )}
                     {f.status === '완료' && (
@@ -1288,11 +1300,23 @@ const composedHogi = hogiDisplay.trim();
                   />
                   팀원 고르기
                 </label>
-                <p className="text-xs text-gray-400 mt-1">
-                  {pickMembers
-                    ? '체크한 팀원에게만 알림이 전송됩니다 (중복 선택 가능).'
-                    : '체크하지 않으면 해당 현장을 담당하는 팀 전체에게 자동으로 알림이 전송됩니다.'}
-                </p>
+                {(() => {
+                  const siteTeam = sites.find(s => s.id === form.siteId)?.team || '';
+                  const teamMembers = users.filter(u => siteTeam && u.team === siteTeam);
+                  return pickMembers ? (
+                    <div className="mt-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-medium px-3 py-2">
+                      📩 체크한 팀원 <b>{selectedMemberIds.length}명</b>에게만 고장 문자(알림)가 발송됩니다.
+                    </div>
+                  ) : (
+                    <div className="mt-2 rounded-lg bg-amber-50 text-amber-800 text-xs font-medium px-3 py-2 leading-relaxed">
+                      📩 팀원을 선택하지 않으면 <b>현장 담당 팀{siteTeam ? `(${siteTeam})` : ''} 전원{teamMembers.length ? ` ${teamMembers.length}명` : ''}</b>에게 고장 문자(알림)가 발송됩니다.
+                      {form.siteId && teamMembers.length > 0 && (
+                        <div className="mt-1 text-amber-700/80 font-normal">{teamMembers.map(u => u.name).join(', ')}</div>
+                      )}
+                      {form.siteId && !siteTeam && <div className="mt-1 text-red-600">⚠ 이 현장은 담당 팀이 없어요. 팀원을 직접 선택해 주세요.</div>}
+                    </div>
+                  );
+                })()}
 
                 {pickMembers && (
                   <div className="max-h-40 overflow-y-auto border rounded-lg divide-y mt-2">
@@ -1343,6 +1367,36 @@ const composedHogi = hogiDisplay.trim();
               >
                 {isSubmitting ? '접수 중...' : '고장 접수하기'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== 접수 확인 카드 ===================== */}
+      {receiveTarget && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={() => setReceiveTarget(null)}>
+          <div className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="px-2 py-0.5 rounded-md text-xs font-bold" style={{ background: `${C.amber}20`, color: C.amber }}>접수대기</span>
+              <span className="text-xs text-gray-400">{toDateStr(receiveTarget.created_at)}</span>
+            </div>
+            <div className="text-lg font-extrabold text-gray-900">{receiveTarget.site_name}</div>
+            <div className="text-sm font-semibold text-gray-600">
+              {receiveTarget.hogi_no}{receiveTarget.equip_type ? ` · ${receiveTarget.equip_type}` : ''}{receiveTarget.team ? ` · ${receiveTarget.team}` : ''}
+            </div>
+            <div className="mt-3 rounded-xl bg-red-50 text-red-700 px-3 py-2.5 text-sm font-semibold whitespace-pre-wrap">{receiveTarget.content}</div>
+            {(receiveTarget.reporter_phone || receiveTarget.extra) && (
+              <div className="mt-2 space-y-1 text-sm text-gray-600">
+                {receiveTarget.reporter_phone && (
+                  <a href={`tel:${receiveTarget.reporter_phone}`} className="flex items-center gap-1.5 text-blue-600 font-semibold">📞 {receiveTarget.reporter_phone}</a>
+                )}
+                {receiveTarget.extra && <div className="whitespace-pre-wrap">📝 {receiveTarget.extra}</div>}
+              </div>
+            )}
+            <div className="mt-3 text-xs text-gray-400">확인을 누르면 <b className="text-gray-600">{userInfo?.name}</b> 님이 담당자로 접수되고, 현장 도착 버튼이 활성화돼요.</div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setReceiveTarget(null)} className="flex-1 py-3 rounded-xl bg-gray-100 font-semibold text-gray-700">취소</button>
+              <button onClick={() => confirmReceive(receiveTarget)} className="flex-[2] py-3 rounded-xl text-white font-bold" style={{ background: C.amber }}>확인 · 접수</button>
             </div>
           </div>
         </div>
@@ -1443,12 +1497,16 @@ const composedHogi = hogiDisplay.trim();
                   {selectedFault.status === '접수' && (
                     <button
                       onClick={() => handleSetInProgress(selectedFault)}
-                      className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-semibold"
+                      className="w-full py-3 bg-blue-500 text-white rounded-xl text-base font-bold"
                     >
-                      현장 도착 · 처리중으로 전환
+                      📍 현장 도착
                     </button>
                   )}
+                  {selectedFault.status === '접수' && (
+                    <p className="text-xs text-gray-400 text-center -mt-2">현장에 도착하면 눌러주세요. 도착 시간이 자동 기록돼요.</p>
+                  )}
 
+                  {selectedFault.status === '처리중' && (<>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-xs font-semibold text-gray-500 mb-1 block">현장 도착 시간</label>
@@ -1479,54 +1537,12 @@ const composedHogi = hogiDisplay.trim();
                     />
                   </div>
 
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 mb-1 block">
-                      고장 원인 {isEscalatorType(selectedFault.equip_type) ? '(에스컬레이터·무빙워크)' : '(승강기)'}
-                    </label>
-                    <ChipAccordion
-                    title="고장 원인"
-                      groups={activeCauseGroups}
-                      value={faultCause}
-                      onChange={setFaultCause}
-                      accent="orange"
-                    />
-                    <textarea
-                      value={faultCause}
-                      onChange={(e) => setFaultCause(e.target.value)}
-                      rows={2}
-                      placeholder="선택된 원인이 자동으로 표시됩니다. 필요시 직접 수정하세요."
-                      className="w-full mt-1.5 px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 mb-1 block">처리 내용 *</label>
-                    <ChipAccordion
-                    title="처리 내용"
-                      groups={ACTION_GROUPS}
-                      value={faultAction}
-                      onChange={setFaultAction}
-                      accent="blue"
-                    />
-                    <textarea
-                      value={faultAction}
-                      onChange={(e) => setFaultAction(e.target.value)}
-                      rows={2}
-                      placeholder="선택된 처리내용이 자동으로 표시됩니다. 필요시 직접 수정하세요."
-                      className="w-full mt-1.5 px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 mb-1 block">비고</label>
-                    <textarea
-                      value={faultNote}
-                      onChange={(e) => setFaultNote(e.target.value)}
-                      rows={2}
-                      placeholder="특이사항이 있으면 입력하세요"
-                      className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:border-blue-400 resize-none"
-                    />
-                  </div>
+                  <FaultResultForm
+                    escalator={isEscalatorType(selectedFault.equip_type)}
+                    value={resultForm}
+                    onChange={setResultForm}
+                  />
+                  </>)}
                 </>
               )}
             </div>
@@ -1555,12 +1571,14 @@ const composedHogi = hogiDisplay.trim();
                   >
                     닫기
                   </button>
+                  {selectedFault.status === '처리중' && (
                   <button
                     onClick={submitComplete}
                     className="flex-1 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold"
                   >
-                    처리 완료 저장
+                    처리 결과 등록
                   </button>
+                  )}
                 </>
               )}
             </div>
