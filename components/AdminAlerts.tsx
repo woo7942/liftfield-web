@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { speakKo, unlockSpeech } from '@/components/FaultAlerts';
 
 // ── 감시할 테이블 (테이블 이름이 다르면 여기만 고치세요) ──
 const WATCH = [
@@ -93,6 +94,7 @@ export default function AdminAlerts() {
     setSoundOn(localStorage.getItem(SOUND_KEY) !== 'off');
     // 첫 터치/클릭 때 오디오 잠금 해제 (모바일 브라우저 정책)
     const unlock = () => {
+      unlockSpeech();
       const ctx = getCtx();
       ctx?.resume().then(() => setNeedTap(false)).catch(() => {});
       window.removeEventListener('pointerdown', unlock);
@@ -111,16 +113,7 @@ export default function AdminAlerts() {
     setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== t.id)), 12000);
 
     if (localStorage.getItem(SOUND_KEY) === 'off') return;
-    const speak = () => {
-      try {
-        if (!('speechSynthesis' in window)) return;
-        const u = new SpeechSynthesisUtterance(w.speak);
-        u.lang = 'ko-KR';
-        u.rate = 1;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(u);
-      } catch {}
-    };
+    const speak = () => speakKo(w.speak);
     playChime().then((ok) => {
       if (!ok) setNeedTap(true);
       setTimeout(speak, ok ? 650 : 0);

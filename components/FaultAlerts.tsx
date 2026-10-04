@@ -16,14 +16,45 @@ import { supabase } from '@/lib/supabase';
 const SOUND_KEY = 'lf_fault_alert_sound';
 export const FAULT_SPEECH = '고장이 접수되었습니다';
 
+// ── 음성 안내 ──
+// 휴대폰(특히 아이폰 Safari)은 "사용자가 화면을 누른 순간"에 한 번 말해 본 적이 있어야
+// 그 뒤 자동 음성이 나옵니다. 그래서 첫 터치 때 빈 문장을 한 번 읽어 잠금을 풉니다.
+let speechUnlocked = false;
+function koVoice(): SpeechSynthesisVoice | undefined {
+  try {
+    const vs = window.speechSynthesis.getVoices();
+    return vs.find((v) => v.lang?.toLowerCase().startsWith('ko')) || undefined;
+  } catch { return undefined; }
+}
+export function unlockSpeech() {
+  if (speechUnlocked || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    u.lang = 'ko-KR';
+    window.speechSynthesis.speak(u);
+    speechUnlocked = true;
+  } catch {}
+}
 export function speakKo(text: string) {
   try {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const synth = window.speechSynthesis;
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'ko-KR';
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+    const v = koVoice();
+    if (v) u.voice = v;
+    u.rate = 1;
+    u.volume = 1;
+    synth.cancel();
+    synth.resume(); // 안드로이드 크롬: 일시정지 상태로 멈춰 있는 경우 대비
+    // cancel 직후 바로 speak 하면 무시되는 기기가 있어 약간 늦춤
+    setTimeout(() => synth.speak(u), 120);
   } catch {}
+}
+// 목소리 목록은 늦게 로드되는 기기가 많아서 미리 한 번 불러둠
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  try { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices(); } catch {}
 }
 
 type Toast = { id: number; title: string; body: string };
@@ -41,14 +72,18 @@ export default function FaultAlerts() {
   useEffect(() => {
     audioRef.current = new Audio('/sounds/alert.mp3');
     const unlock = () => {
+      unlockSpeech();
       const a = audioRef.current;
-      if (!a) return;
-      a.muted = true;
-      a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => {});
+      if (a) {
+        a.muted = true;
+        a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => {});
+      }
       window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('touchend', unlock);
     };
     window.addEventListener('pointerdown', unlock);
-    return () => window.removeEventListener('pointerdown', unlock);
+    window.addEventListener('touchend', unlock);
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('touchend', unlock); };
   }, []);
 
   useEffect(() => {
