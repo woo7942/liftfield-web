@@ -14,7 +14,7 @@ import {
 } from '@/lib/fault-taxonomy';
 import ChipAccordion from '@/components/fault/ChipAccordion';
 import ErrorCodeList from '@/components/fault/ErrorCodeList';
-import FaultResultForm, { emptyResult, composeResult, type FaultResultValue } from '@/components/fault/FaultResultForm';
+import FaultResultForm, { emptyResult, composeResult, isWaitingParts, type FaultResultValue } from '@/components/fault/FaultResultForm';
 
 
 
@@ -468,8 +468,8 @@ export default function FaultPage() {
   const submitComplete = async () => {
     if (!selectedFault) return;
     const composed = composeResult(resultForm);
-    if (!resultForm.device && !resultForm.causeMemo.trim()) return alert('고장 부위를 선택하거나 원인 상세를 입력하세요');
-    if (resultForm.actions.length === 0 && !resultForm.actionMemo.trim()) return alert('조치를 선택하거나 작업 상세를 입력하세요');
+    if (!resultForm.cause.trim()) return alert('고장 원인을 입력하세요');
+    if (!resultForm.action.trim()) return alert('처리 내용을 입력하세요');
     const arrivedDate = parseDatetimeInput(arrivedAtInput) ?? selectedFault.arrived_at ?? new Date().toISOString();
     const completedDate = parseDatetimeInput(completedAtInput) ?? new Date().toISOString();
     try {
@@ -478,7 +478,7 @@ export default function FaultPage() {
         error_codes: (errorCodesInput || []).map(c => c.trim()).filter(Boolean),
 
         arrived_at: arrivedDate, completed_at: completedDate,
-        status: resultForm.result === '운행 중지(부품 대기)' ? '처리중' : '완료',
+        status: isWaitingParts(resultForm) ? '처리중' : '완료',
       }).eq('id', selectedFault.id);
       if (error) throw error;
       await loadData(userInfo);
@@ -511,7 +511,7 @@ export default function FaultPage() {
     setArrivedAtInput(fault.arrived_at ? toDatetimeLocal(fault.arrived_at) : '');
     setCompletedAtInput(fault.completed_at ? toDatetimeLocal(fault.completed_at) : '');
     setErrorCodesInput(fault.error_codes || []);
-    setResultForm(emptyResult());
+    setResultForm({ ...emptyResult(), cause: fault.fault_cause || '', action: (fault.fault_action || '').replace(/\s*\(부품 대기\)$/, ''), note: fault.fault_note || '' });
     setDetailModal(true);
   };
 
