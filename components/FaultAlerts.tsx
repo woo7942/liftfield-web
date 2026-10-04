@@ -52,6 +52,36 @@ export function speakKo(text: string) {
     setTimeout(() => synth.speak(u), 120);
   } catch {}
 }
+// ── 녹음된 음성 파일 재생 (휴대폰에서 확실하게 나오는 방식) ──
+// public/sounds/ 에 파일이 있으면 그 파일을 재생하고, 없으면 기기 음성(speakKo)으로 대신 읽음
+const voiceCache: Record<string, HTMLAudioElement> = {};
+export function unlockVoices(files: string[]) {
+  files.forEach((f) => {
+    try {
+      const a = voiceCache[f] || new Audio(f);
+      voiceCache[f] = a;
+      a.muted = true;
+      a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => {});
+    } catch {}
+  });
+}
+export function playVoice(file: string, fallbackText: string) {
+  try {
+    const a = voiceCache[file] || new Audio(file);
+    voiceCache[file] = a;
+    a.muted = false;
+    a.currentTime = 0;
+    a.play().catch(() => speakKo(fallbackText));
+    a.onerror = () => speakKo(fallbackText); // 파일이 없을 때
+  } catch { speakKo(fallbackText); }
+}
+export const VOICE_FILES = {
+  fault: '/sounds/voice-fault.mp3',
+  material: '/sounds/voice-material.mp3',
+  leave: '/sounds/voice-leave.mp3',
+  quote: '/sounds/voice-quote.mp3',
+};
+
 // 목소리 목록은 늦게 로드되는 기기가 많아서 미리 한 번 불러둠
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   try { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices(); } catch {}
@@ -73,6 +103,7 @@ export default function FaultAlerts() {
     audioRef.current = new Audio('/sounds/alert.mp3');
     const unlock = () => {
       unlockSpeech();
+      unlockVoices(Object.values(VOICE_FILES));
       const a = audioRef.current;
       if (a) {
         a.muted = true;
@@ -122,8 +153,8 @@ export default function FaultAlerts() {
           const a = audioRef.current;
           if (a) {
             a.currentTime = 0;
-            a.play().then(() => setTimeout(() => speakKo(FAULT_SPEECH), 900)).catch(() => speakKo(FAULT_SPEECH));
-          } else speakKo(FAULT_SPEECH);
+            a.play().then(() => setTimeout(() => playVoice(VOICE_FILES.fault, FAULT_SPEECH), 900)).catch(() => playVoice(VOICE_FILES.fault, FAULT_SPEECH));
+          } else playVoice(VOICE_FILES.fault, FAULT_SPEECH);
         })
         .subscribe();
     })();

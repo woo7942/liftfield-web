@@ -14,7 +14,7 @@ import {
 } from '@/lib/fault-taxonomy';
 import ChipAccordion from '@/components/fault/ChipAccordion';
 import ErrorCodeList from '@/components/fault/ErrorCodeList';
-import { speakKo, FAULT_SPEECH } from '@/components/FaultAlerts';
+import { FAULT_SPEECH, playVoice, VOICE_FILES, unlockVoices, unlockSpeech } from '@/components/FaultAlerts';
 import FaultResultForm, { emptyResult, composeResult, isWaitingParts, type FaultResultValue } from '@/components/fault/FaultResultForm';
 
 
@@ -186,6 +186,9 @@ export default function FaultPage() {
   }, []);
   useEffect(() => {
     audioRef.current = new Audio('/sounds/alert.mp3');
+    const unlock = () => { unlockSpeech(); unlockVoices([VOICE_FILES.fault]); window.removeEventListener('pointerdown', unlock); };
+    window.addEventListener('pointerdown', unlock);
+    return () => window.removeEventListener('pointerdown', unlock);
   }, []);
   useEffect(() => {
     if (!userInfo) return;
@@ -240,8 +243,8 @@ export default function FaultPage() {
           const myTeamFault = isAdminUser || !newFault.team || newFault.team === userInfo.team;
           if (soundOn && myTeamFault) {
             audioRef.current?.play()
-              .then(() => setTimeout(() => speakKo(FAULT_SPEECH), 900))
-              .catch((err) => { console.error('알림음 재생 실패:', err.name, err.message); speakKo(FAULT_SPEECH); });
+              .then(() => setTimeout(() => playVoice(VOICE_FILES.fault, FAULT_SPEECH), 900))
+              .catch((err) => { console.error('알림음 재생 실패:', err.name, err.message); playVoice(VOICE_FILES.fault, FAULT_SPEECH); });
           }
         }
       )

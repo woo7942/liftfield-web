@@ -13,13 +13,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { speakKo, unlockSpeech } from '@/components/FaultAlerts';
+import { unlockSpeech, unlockVoices, playVoice, VOICE_FILES } from '@/components/FaultAlerts';
 
 // ── 감시할 테이블 (테이블 이름이 다르면 여기만 고치세요) ──
 const WATCH = [
   {
     table: 'material_requests',
     kind: '자재',
+    voice: VOICE_FILES.material,
     path: '/material',
     speak: '자재 신청이 되었습니다',
     title: (r: any) => `자재 신청 · ${r.site_name || r.siteName || ''}`.trim(),
@@ -28,6 +29,7 @@ const WATCH = [
   {
     table: 'quotes',
     kind: '견적서',
+    voice: VOICE_FILES.quote,
     path: '/quote',
     speak: '견적서가 접수되어 승인을 기다립니다',
     title: (r: any) => `견적서 승인 대기`,
@@ -36,6 +38,7 @@ const WATCH = [
   {
     table: 'leave_requests',
     kind: '연차/휴가',
+    voice: VOICE_FILES.leave,
     path: '/leave',
     speak: '연차 휴가가 등록되었습니다',
     title: (r: any) => `${r.type || '휴가'} 신청 · ${r.user_name || ''}`.trim(),
@@ -95,6 +98,7 @@ export default function AdminAlerts() {
     // 첫 터치/클릭 때 오디오 잠금 해제 (모바일 브라우저 정책)
     const unlock = () => {
       unlockSpeech();
+      unlockVoices([VOICE_FILES.material, VOICE_FILES.quote, VOICE_FILES.leave]);
       const ctx = getCtx();
       ctx?.resume().then(() => setNeedTap(false)).catch(() => {});
       window.removeEventListener('pointerdown', unlock);
@@ -113,7 +117,7 @@ export default function AdminAlerts() {
     setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== t.id)), 12000);
 
     if (localStorage.getItem(SOUND_KEY) === 'off') return;
-    const speak = () => speakKo(w.speak);
+    const speak = () => playVoice(w.voice, w.speak);
     playChime().then((ok) => {
       if (!ok) setNeedTap(true);
       setTimeout(speak, ok ? 650 : 0);
