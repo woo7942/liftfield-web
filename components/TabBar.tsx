@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { C, Icon } from "@/lib/theme";
 import { supabase } from "@/lib/supabase";
+import AdminAlerts from "@/components/AdminAlerts";
 
 // ─────────────────────────────────────────────
 // 메뉴 정의 (팀원 하단바 / 관리자 사이드바 공용)
@@ -142,8 +143,9 @@ export default function TabBar({ active }: { active: string }) {
   const isDesktop = useIsDesktop();
 
   if (isAdmin === null) return null; // 첫 판별 전 깜빡임 방지
-  if (isAdmin && isDesktop) return <AdminSidebar active={active} />;
-  return <BottomTabBar active={active} isAdmin={isAdmin} />;
+  // 관리자는 어느 화면에 있든 자재·견적·휴가 신청 알림을 받음
+  if (isAdmin && isDesktop) return <><AdminSidebar active={active} /><AdminAlerts /></>;
+  return <><BottomTabBar active={active} isAdmin={isAdmin} />{isAdmin && <AdminAlerts />}</>;
 }
 
 // ─────────────────────────────────────────────
