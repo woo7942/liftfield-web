@@ -46,12 +46,43 @@ type Toast = { id: number; kind: string; title: string; body: string; path: stri
 
 const SOUND_KEY = 'lf_admin_alert_sound';
 
+// ※ /sounds/alert.mp3 는 "고장접수" 음성이 녹음된 파일이라 신청 알림에는 쓰지 않음.
+//    대신 짧은 '딩동' 차임음을 직접 만들어 재생합니다.
+let audioCtx: AudioContext | null = null;
+function getCtx() {
+  if (typeof window === 'undefined') return null;
+  const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!AC) return null;
+  if (!audioCtx) audioCtx = new AC();
+  return audioCtx;
+}
+async function playChime(): Promise<boolean> {
+  const ctx = getCtx();
+  if (!ctx) return false;
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { return false; } }
+  if (ctx.state !== 'running') return false;
+  const notes = [880, 660]; // 딩 - 동
+  notes.forEach((freq, i) => {
+    const t0 = ctx.currentTime + i * 0.22;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.35, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + 0.55);
+  });
+  return true;
+}
+
 export default function AdminAlerts() {
   const router = useRouter();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [soundOn, setSoundOn] = useState(true);
   const [needTap, setNeedTap] = useState(false); // 브라우저가 소리 재생을 막았을 때
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const memberIds = useRef<Set<string>>(new Set());
   const companyId = useRef<string>('');
   const myId = useRef<string>('');
@@ -60,13 +91,10 @@ export default function AdminAlerts() {
   // 소리 설정 불러오기 + 오디오 준비
   useEffect(() => {
     setSoundOn(localStorage.getItem(SOUND_KEY) !== 'off');
-    audioRef.current = new Audio('/sounds/alert.mp3');
     // 첫 터치/클릭 때 오디오 잠금 해제 (모바일 브라우저 정책)
     const unlock = () => {
-      const a = audioRef.current;
-      if (!a) return;
-      a.muted = true;
-      a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; setNeedTap(false); }).catch(() => {});
+      const ctx = getCtx();
+      ctx?.resume().then(() => setNeedTap(false)).catch(() => {});
       window.removeEventListener('pointerdown', unlock);
     };
     window.addEventListener('pointerdown', unlock);
@@ -93,11 +121,10 @@ export default function AdminAlerts() {
         window.speechSynthesis.speak(u);
       } catch {}
     };
-    const a = audioRef.current;
-    if (a) {
-      a.currentTime = 0;
-      a.play().then(() => setTimeout(speak, 900)).catch(() => { setNeedTap(true); speak(); });
-    } else speak();
+    playChime().then((ok) => {
+      if (!ok) setNeedTap(true);
+      setTimeout(speak, ok ? 650 : 0);
+    });
 
     // 탭이 백그라운드일 때 OS 알림
     if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
@@ -148,10 +175,7 @@ export default function AdminAlerts() {
     const next = !soundOn;
     setSoundOn(next);
     localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
-    if (next) {
-      const a = audioRef.current;
-      a?.play().then(() => { a.pause(); a.currentTime = 0; setNeedTap(false); }).catch(() => setNeedTap(true));
-    }
+    if (next) playChime().then((ok) => setNeedTap(!ok));
   };
 
   const KIND_COLOR: Record<string, string> = { '자재': '#7c3aed', '견적서': '#2563eb', '연차/휴가': '#059669' };
