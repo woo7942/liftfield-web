@@ -565,8 +565,8 @@ function CodeCard({ code, manual, fallback, a, scope, model, bookLoading, hasBoo
               <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 mt-3.5">
                 <p className="text-xs font-bold text-amber-800 mb-1">재발 호기</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {a.repeatUnits.slice(0, 8).map((u) => (
-                    <span key={u.site + u.hogi + u.last} className={`text-xs border rounded-full px-2 py-0.5 ${u.mine ? 'bg-white border-amber-200 text-amber-800' : 'bg-amber-50 border-dashed border-amber-200 text-amber-700/80'}`}>{u.site} {u.hogi} · {u.count}회</span>
+                  {a.repeatUnits.slice(0, 8).map((u, i) => (
+                    <span key={i} className={`text-xs border rounded-full px-2 py-0.5 ${u.mine ? 'bg-white border-amber-200 text-amber-800' : 'bg-amber-50 border-dashed border-amber-200 text-amber-700/80'}`}>{u.mine ? '우리' : '다른 회사'} 호기 {String.fromCharCode(65 + i)} · {u.count}회</span>
                   ))}
                 </div>
               </div>
@@ -581,14 +581,12 @@ function CodeCard({ code, manual, fallback, a, scope, model, bookLoading, hasBoo
                     className="w-full text-left px-4 py-2.5 border-t border-gray-50 hover:bg-gray-50">
                     <div className="flex items-center gap-2 text-xs text-gray-400">
                       <span>{shortDate(r.created_at)}</span><span>·</span>
-                      {r.mine === false
-                        ? <span className="shrink-0 text-[10.5px] px-1.5 py-0.5 rounded font-semibold bg-gray-100 text-gray-500">다른 회사</span>
-                        : <span className="text-gray-600 font-semibold truncate">{unitLabel(r)}</span>}
-                      <span className="ml-auto shrink-0">{r.model || ''}</span>
+                      <span className={`shrink-0 text-[10.5px] px-1.5 py-0.5 rounded font-semibold ${r.mine === false ? 'bg-gray-100 text-gray-500' : 'bg-blue-50 text-blue-600'}`}>{r.mine === false ? '다른 회사' : '우리 회사'}</span>
+                      <span className="text-gray-500 font-semibold truncate">{[r.maker, r.model].filter(Boolean).join(' ')}</span>
                     </div>
                     <p className={`text-sm text-gray-800 mt-0.5 ${open ? '' : 'truncate'}`}><b className="text-gray-500 font-semibold mr-1">원인</b>{r.fault_cause}</p>
                     <p className={`text-sm text-gray-600 ${open ? '' : 'truncate'}`}><b className="text-gray-500 font-semibold mr-1">처리</b>{cleanAction(r.fault_action)}</p>
-                    {open && <p className="text-xs text-gray-400 mt-1">에러 {(r.error_codes || []).join(', ')}{r.mine !== false && r.assigned_name && ` · 담당 ${r.assigned_name}`}{r.team && ` · ${r.team}`}</p>}
+                    {open && <p className="text-xs text-gray-400 mt-1">에러 {(r.error_codes || []).join(', ')}</p>}
                   </button>
                 );
               })}
