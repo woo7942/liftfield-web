@@ -7,6 +7,7 @@ import { C, Icon } from "@/lib/theme";
 import { supabase } from "@/lib/supabase";
 import AdminAlerts from "@/components/AdminAlerts";
 import FaultAlerts from "@/components/FaultAlerts";
+import AnnouncementBar from "@/components/AnnouncementBar";
 
 // ─────────────────────────────────────────────
 // 메뉴 정의 (팀원 하단바 / 관리자 사이드바 공용)
@@ -146,8 +147,8 @@ export default function TabBar({ active }: { active: string }) {
   if (isAdmin === null) return null; // 첫 판별 전 깜빡임 방지
   // 관리자는 어느 화면에 있든 자재·견적·휴가 신청 알림을 받음
   // 고장 알림(FaultAlerts)은 팀원·관리자 모두, 신청 알림(AdminAlerts)은 관리자만
-  if (isAdmin && isDesktop) return <><AdminSidebar active={active} /><AdminAlerts /><FaultAlerts /></>;
-  return <><BottomTabBar active={active} isAdmin={isAdmin} />{isAdmin && <AdminAlerts />}<FaultAlerts /></>;
+  if (isAdmin && isDesktop) return <><AnnouncementBar /><AdminSidebar active={active} /><AdminAlerts /><FaultAlerts /></>;
+  return <><AnnouncementBar /><BottomTabBar active={active} isAdmin={isAdmin} />{isAdmin && <AdminAlerts />}<FaultAlerts /></>;
 }
 
 // ─────────────────────────────────────────────
@@ -198,7 +199,7 @@ function AdminSidebar({ active }: { active: string }) {
   return (
     <aside
       style={{
-        position: "fixed", top: 0, left: 0, bottom: 0, width,
+        position: "fixed", top: "var(--lf-ann-h, 0px)", left: 0, bottom: 0, width,
         background: "#fff", borderRight: `1px solid ${C.line}`,
         display: "flex", flexDirection: "column", zIndex: 35,
         transition: "width .2s ease",

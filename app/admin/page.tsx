@@ -77,7 +77,7 @@ export default function AdminPage() {
   const [authReady, setAuthReady] = useState(false);
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [qnaList, setQnaList] = useState<QnaDoc[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'subscription' | 'companies' | 'stats' | 'accounts' | 'qna' | 'health' | 'activity'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'subscription' | 'companies' | 'stats' | 'accounts' | 'qna' | 'health' | 'activity' | 'notice'>('users');
   const [searchText, setSearchText] = useState('');
   const [planFilter, setPlanFilter] = useState('전체');
 
@@ -94,6 +94,12 @@ export default function AdminPage() {
   const [healthLoading, setHealthLoading] = useState(false);
   const [activity, setActivity] = useState<{ at: string; kind: string; company: string; text: string }[] | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
+
+  // 공지사항
+  const [notices, setNotices] = useState<any[] | null>(null);
+  const [noticeErr, setNoticeErr] = useState('');
+  const [nForm, setNForm] = useState({ title: '', body: '', level: 'info', target: '', starts_at: '', ends_at: '' });
+  const [nSaving, setNSaving] = useState(false);
 
   // 계정 관리 모달
   const [manageUser, setManageUser] = useState<UserDoc | null>(null);
@@ -342,6 +348,77 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, users.length]);
 
+  // ── 공지사항 ──
+  const loadNotices = async () => {
+    const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(50);
+    if (error) { setNoticeErr(error.message); setNotices([]); return; }
+    setNoticeErr(''); setNotices(data || []);
+  };
+  const saveNotice = async () => {
+    if (!nForm.title.trim()) return alert('제목을 입력하세요');
+    setNSaving(true);
+    try {
+      const { error } = await supabase.from('announcements').insert({
+        title: nForm.title.trim(), body: nForm.body.trim() || null, level: nForm.level,
+        target_company_id: nForm.target || null,
+        starts_at: nForm.starts_at ? new Date(nForm.starts_at).toISOString() : new Date().toISOString(),
+        ends_at: nForm.ends_at ? new Date(nForm.ends_at).toISOString() : null,
+        active: true,
+      });
+      if (error) throw error;
+      setNForm({ title: '', body: '', level: 'info', target: '', starts_at: '', ends_at: '' });
+      await loadNotices();
+    } catch (e: any) { alert('저장 실패: ' + e.message); } finally { setNSaving(false); }
+  };
+  const toggleNotice = async (n: any) => {
+    const { error } = await supabase.from('announcements').update({ active: !n.active }).eq('id', n.id);
+    if (!error) loadNotices();
+  };
+  const deleteNotice = async (n: any) => {
+    if (!confirm(`"${n.title}" 공지를 삭제할까요?`)) return;
+    const { error } = await supabase.from('announcements').delete().eq('id', n.id);
+    if (!error) loadNotices();
+  };
+
+  // ── 회사로 보기: 내 계정의 company_id를 잠시 바꿔서 그 회사 관리자 화면을 열기 ──
+  const viewAsCompany = async (companyId: string, companyName: string) => {
+    if (!confirm(`"${companyName}" 회사 화면으로 들어갈까요?\n\n• 이 회사의 실제 데이터가 보이고, 수정하면 그대로 반영돼요.\n• 화면 위쪽 보라색 띠의 [내 회사로 돌아가기]로 복귀해요.`)) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const { data: me, error: meErr } = await supabase.from('users')
+      .select('company_id, company_display_name, home_company_id').eq('id', session.user.id).single();
+    if (meErr || !me) { alert('내 정보를 불러오지 못했어요: ' + (meErr?.message || '')); return; }
+    const { error } = await supabase.from('users').update({
+      // 처음 들어갈 때만 원래 회사를 기억 (다른 회사로 또 이동해도 원래 회사는 유지)
+      home_company_id: me.home_company_id || me.company_id,
+      ...(me.home_company_id ? {} : { home_company_display_name: me.company_display_name }),
+      company_id: companyId,
+      company_display_name: companyName,
+    }).eq('id', session.user.id);
+    if (error) {
+      alert(error.message.includes('home_company')
+        ? 'Supabase에 home_company_id 컬럼이 아직 없어요. 안내된 SQL을 먼저 실행해 주세요.'
+        : '전환 실패: ' + error.message);
+      return;
+    }
+    sessionStorage.clear();
+    window.location.href = '/dashboard';
+  };
+
+  // 모든 회사 목록 (플랜 상관없이 company_id 기준)
+  const allCompanies = Object.values(users.reduce<Record<string, { id: string; name: string; count: number; admin?: string }>>((acc, u) => {
+    if (!u.company_id) return acc;
+    const c = acc[u.company_id] || (acc[u.company_id] = { id: u.company_id, name: u.company_display_name || u.company_id, count: 0 });
+    c.count++;
+    if (u.role === 'admin' && !c.admin) c.admin = u.name;
+    return acc;
+  }, {})).sort((a, b) => b.count - a.count);
+
+  useEffect(() => {
+    if (activeTab === 'notice' && notices === null) loadNotices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   if (!authReady) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
@@ -360,6 +437,7 @@ export default function AdminPage() {
     { key: 'qna',          icon: '💬', label: 'Q&A 관리'    },
     { key: 'health',       icon: '🩺', label: '시스템 점검' },
     { key: 'activity',     icon: '🕒', label: '최근 활동' },
+    { key: 'notice',       icon: '📢', label: '공지사항' },
   ];
 
   return (
@@ -560,6 +638,24 @@ export default function AdminPage() {
         {/* ── 탭 3: 회사 목록 ── */}
         {activeTab === 'companies' && (
           <div className="space-y-4">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+                <b className="text-sm text-gray-800">👀 회사로 보기</b>
+                <span className="text-xs text-gray-400">그 회사 관리자 화면을 그대로 열어서 문의를 확인해요 · 전체 {allCompanies.length}개 회사</span>
+              </div>
+              {allCompanies.map((c) => (
+                <div key={c.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-50 last:border-0 text-sm">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-gray-800 truncate">{c.name}</div>
+                    <div className="text-xs text-gray-400 truncate">관리자 {c.admin || '-'} · 멤버 {c.count}명</div>
+                  </div>
+                  <button onClick={() => viewAsCompany(c.id, c.name)}
+                    className="text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg shrink-0">
+                    이 회사로 보기 →
+                  </button>
+                </div>
+              ))}
+            </div>
             <p className="text-sm text-gray-500">
               Company 플랜 가입 회사 목록이에요. 총 <span className="font-bold text-gray-800">{companies.length}</span>개 회사
             </p>
@@ -840,6 +936,69 @@ export default function AdminPage() {
                   <span className="text-xs text-gray-400 shrink-0">{formatDateTime(a.at)}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 탭 9: 공지사항 ── */}
+        {activeTab === 'notice' && (
+          <div className="space-y-4">
+            {noticeErr && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-sm">
+                공지 테이블이 아직 없어요. Supabase SQL Editor에서 안내된 <b>announcements</b> 테이블 생성 SQL을 실행해 주세요.
+                <div className="text-xs mt-1 opacity-70">{noticeErr}</div>
+              </div>
+            )}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+              <b className="text-sm text-gray-800">새 공지</b>
+              <input value={nForm.title} onChange={(e) => setNForm({ ...nForm, title: e.target.value })} placeholder="제목 (예: 10월 10일 02:00~04:00 서버 점검)"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              <input value={nForm.body} onChange={(e) => setNForm({ ...nForm, body: e.target.value })} placeholder="내용 (선택) — 한 줄로 표시돼요"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <select value={nForm.level} onChange={(e) => setNForm({ ...nForm, level: e.target.value })} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
+                  <option value="info">📢 일반 (파랑)</option>
+                  <option value="warn">⚠️ 점검·주의 (주황)</option>
+                  <option value="urgent">🚨 긴급 (빨강)</option>
+                </select>
+                <select value={nForm.target} onChange={(e) => setNForm({ ...nForm, target: e.target.value })} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
+                  <option value="">모든 회사</option>
+                  {allCompanies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <label className="text-xs text-gray-500">시작 (비우면 지금)
+                  <input type="datetime-local" value={nForm.starts_at} onChange={(e) => setNForm({ ...nForm, starts_at: e.target.value })} className="w-full border border-gray-200 rounded-xl px-2 py-1.5 text-sm mt-0.5" />
+                </label>
+                <label className="text-xs text-gray-500">종료 (비우면 계속)
+                  <input type="datetime-local" value={nForm.ends_at} onChange={(e) => setNForm({ ...nForm, ends_at: e.target.value })} className="w-full border border-gray-200 rounded-xl px-2 py-1.5 text-sm mt-0.5" />
+                </label>
+              </div>
+              <button onClick={saveNotice} disabled={nSaving} className="bg-gray-900 text-white text-sm font-semibold px-5 py-2 rounded-xl disabled:opacity-50">
+                {nSaving ? '등록 중...' : '공지 등록'}
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              {(notices || []).length === 0 ? (
+                <div className="p-10 text-center text-gray-400 text-sm">등록된 공지가 없어요</div>
+              ) : (notices || []).map((n) => {
+                const ended = n.ends_at && new Date(n.ends_at) < new Date();
+                const target = n.target_company_id ? (allCompanies.find((c) => c.id === n.target_company_id)?.name || n.target_company_id) : '모든 회사';
+                return (
+                  <div key={n.id} className={`flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0 text-sm ${!n.active || ended ? 'opacity-50' : ''}`}>
+                    <span>{n.level === 'urgent' ? '🚨' : n.level === 'warn' ? '⚠️' : '📢'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-gray-800 truncate">{n.title}</div>
+                      <div className="text-xs text-gray-400 truncate">
+                        {target} · {formatDateTime(n.starts_at)} ~ {n.ends_at ? formatDateTime(n.ends_at) : '계속'}{ended ? ' · 종료됨' : ''}
+                      </div>
+                    </div>
+                    <button onClick={() => toggleNotice(n)} className={`text-xs font-bold px-2.5 py-1 rounded-lg ${n.active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {n.active ? '표시 중' : '숨김'}
+                    </button>
+                    <button onClick={() => deleteNotice(n)} className="text-xs text-red-400 hover:text-red-600">삭제</button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
