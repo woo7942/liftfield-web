@@ -1,7 +1,9 @@
 'use client';
 
 /**
- * app/error-search/page.tsx — 에러검색 (에러집 + 우리 처리기록 한 화면)
+ * app/error-search/page.tsx — 에러검색 (에러집 + 현장 처리기록 한 화면)
+ *  - 현장 기록 범위: [전체 회사] 앱을 쓰는 모든 회사 고장기록(다른 회사는 현장명·호기·담당자 가림) / [우리 회사]
+ *    → supabase/fault_records_shared.sql 실행 필요 (없으면 자동으로 우리 회사만)
  *  - 에러코드를 여러 개 한 번에 입력 (스페이스·쉼표·엔터로 구분)
  *  - 코드마다: 매뉴얼(error_code_book) 뜻·원인·처리 + 우리 회사 고장처리 기록(원인 %, 처리, 재발 호기, 사례)
  *  - 판단 요약: 코드별 한 줄 + 여러 코드가 함께 뜬 기록의 주 원인
@@ -16,7 +18,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import TabBar from '@/components/TabBar';
 import { MAKERS, normalizeMaker, normalizeModel } from '@/components/fault/MakerModelPicker';
-import { analyze, fetchCodedFaults, normCode, shortDate, cleanAction, topTexts, type FaultRow } from '@/components/fault/faultAnalysis';
+import { analyze, fetchCodedFaults, normCode, shortDate, cleanAction, topTexts, sourceMix, sourceText, unitLabel, type FaultRow, type FaultScope } from '@/components/fault/faultAnalysis';
 
 interface BookRow {
   id: string; maker: string; model: string | null; code: string; code_norm: string;
@@ -46,7 +48,7 @@ const splitTitle = (t?: string | null): [string, string] => {
 };
 const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0);
 
-function loadLS(): { maker?: string; model?: string; recent?: string[] } {
+function loadLS(): { maker?: string; model?: string; recent?: string[]; scope?: FaultScope } {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch { return {}; }
 }
 function saveLS(p: object) { try { localStorage.setItem(LS_KEY, JSON.stringify({ ...loadLS(), ...p })); } catch {} }
@@ -63,6 +65,8 @@ function ErrorSearchInner() {
   const [companyId, setCompanyId] = useState('');
   const [records, setRecords] = useState<FaultRow[] | null>(null);
   const [cat, setCat] = useState<Catalog | null>(null);
+  const [scope, setScope] = useState<FaultScope>(() => (params.get('scope') === 'mine' ? 'mine' : 'all'));
+  const [sharedOk, setSharedOk] = useState(true); // 공유 함수 설치 여부
 
   const [maker, setMaker] = useState(mergeMaker(params.get('maker')) || '');
   const [model, setModel] = useState(params.get('model') || '');
@@ -82,7 +86,6 @@ function ErrorSearchInner() {
       const { data: me } = await supabase.from('users').select('company_id').eq('id', session.user.id).single();
       if (!me?.company_id) { router.push('/'); return; }
       setCompanyId(me.company_id);
-      fetchCodedFaults(me.company_id).then(setRecords);
     })();
     (async () => {
       const { data, error } = await supabase.from('error_code_book_catalog').select('maker, model, cnt');
@@ -98,9 +101,23 @@ function ErrorSearchInner() {
     })();
     const s = loadLS();
     setRecent(s.recent || []);
+    if (!params.get('scope') && s.scope) setScope(s.scope);
     if (!params.get('maker') && s.maker) { setMaker(s.maker); setModel(s.model || ''); }
     else if (!params.get('maker')) setMaker('티케이');
   }, []);
+
+  // 현장 기록 (범위 바뀌면 다시)
+  useEffect(() => {
+    if (!companyId) return;
+    let alive = true; setRecords(null);
+    fetchCodedFaults(companyId, scope).then((r) => {
+      if (!alive) return;
+      setRecords(r);
+      if (scope === 'all') setSharedOk(r.some((x) => x.mine === false) || r.every((x) => x.company_key !== 'mine'));
+    });
+    saveLS({ scope });
+    return () => { alive = false; };
+  }, [companyId, scope]);
 
   // 현장 모델명(TAC50K 등)이 넘어오면 에러집 모델로 맞춤
   useEffect(() => {
@@ -126,9 +143,10 @@ function ErrorSearchInner() {
     if (maker) q.set('maker', maker);
     if (model) q.set('model', model);
     if (codes.length) q.set('code', codes.join(','));
+    if (scope === 'mine') q.set('scope', 'mine');
     window.history.replaceState(null, '', `/error-search${q.toString() ? `?${q}` : ''}`);
     if (maker) saveLS({ maker, model });
-  }, [maker, model, codes.join(',')]);
+  }, [maker, model, codes.join(','), scope]);
 
   // 최근 검색 저장
   useEffect(() => {
@@ -198,17 +216,17 @@ function ErrorSearchInner() {
     let pool = both(recs.filter((r) => r.maker === maker && (!model || r.model === model)));
     if (pool.length < 2 && model) { pool = both(recs.filter((r) => r.maker === maker)); level = 2; }
     if (pool.length < 2) { pool = both(recs); level = 3; }
-    return { pool, level, causes: topTexts(pool, 'fault_cause', 3), actions: topTexts(pool, 'fault_action', 3) };
+    return { pool, level, causes: topTexts(pool, 'fault_cause', 3), actions: topTexts(pool, 'fault_action', 3), mix: sourceMix(pool) };
   }, [recs, codes.join('|'), maker, model]);
 
   // ── 먼저 확인할 곳 (우리 기록 기준) ──
   const first = useMemo(() => {
     if (combo && combo.pool.length >= 2 && combo.causes[0])
-      return { text: combo.causes[0].text, action: combo.actions[0]?.text, n: combo.causes[0].count, d: combo.pool.length, why: '함께 뜬 기록' };
-    let best: { text: string; action?: string; n: number; d: number; why: string } | null = null;
+      return { text: combo.causes[0].text, action: combo.actions[0]?.text, n: combo.causes[0].count, d: combo.pool.length, why: '함께 뜬 기록', src: sourceText(combo.pool) };
+    let best: { text: string; action?: string; n: number; d: number; why: string; src: string } | null = null;
     perCode.forEach(({ code, a }) => {
       const c = a?.causes[0]; if (!a || !c || a.pool.length < 2) return;
-      if (!best || c.count / a.pool.length > best.n / best.d) best = { text: c.text, action: a.actions[0]?.text, n: c.count, d: a.pool.length, why: code };
+      if (!best || c.count / a.pool.length > best.n / best.d) best = { text: c.text, action: a.actions[0]?.text, n: c.count, d: a.pool.length, why: code, src: sourceText(a.pool) };
     });
     return best;
   }, [combo, perCode]);
@@ -216,9 +234,9 @@ function ErrorSearchInner() {
   // ── 코드 없을 때: 자주 나는 에러 ──
   const topCodes = useMemo(() => {
     if (!recs || codes.length) return [];
-    const scope = recs.filter((r) => (!maker || r.maker === maker) && (!model || r.model === model));
+    const inScope = recs.filter((r) => (!maker || r.maker === maker) && (!model || r.model === model));
     const cnt: Record<string, { code: string; count: number; cause: Record<string, number> }> = {};
-    scope.forEach((r) => (r.error_codes || []).forEach((c) => {
+    inScope.forEach((r) => (r.error_codes || []).forEach((c) => {
       const k = normCode(c); if (!k) return;
       cnt[k] ||= { code: k, count: 0, cause: {} }; cnt[k].count++;
       const cs = (r.fault_cause || '').trim(); if (cs) cnt[k].cause[cs] = (cnt[k].cause[cs] || 0) + 1;
@@ -226,6 +244,8 @@ function ErrorSearchInner() {
     return Object.values(cnt).sort((a, b) => b.count - a.count).slice(0, 12)
       .map((x) => ({ ...x, topCause: Object.entries(x.cause).sort((a, b) => b[1] - a[1])[0]?.[0] || '' }));
   }, [recs, maker, model, codes.length]);
+  const recMix = useMemo(() => recs ? sourceMix(recs) : null, [recs]);
+  const scopeWord = scope === 'all' ? '현장기록' : '우리기록';
 
   const hasBook = (m: string) => !!cat?.[m];
   const makerOrder = useMemo(() => [...PICK_MAKERS].sort((a, b) => Number(hasBook(b)) - Number(hasBook(a))), [cat]);
@@ -238,11 +258,26 @@ function ErrorSearchInner() {
       <div className="max-w-3xl mx-auto px-4 pt-6 space-y-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">에러검색</h1>
-          <p className="text-sm text-gray-500">매뉴얼과 우리 회사 고장처리 기록을 함께 보고 판단해요.</p>
+          <p className="text-sm text-gray-500">매뉴얼과 {scope === 'all' ? '앱을 쓰는 모든 회사' : '우리 회사'} 고장처리 기록을 함께 보고 판단해요.</p>
         </div>
 
         {/* 검색 조건 */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm py-4">
+          {/* 기록 범위 */}
+          <div className="px-4 mb-3.5">
+            <div className="grid grid-cols-2 bg-gray-100 rounded-xl p-[3px]">
+              {([['all', '전체 회사 기록'], ['mine', '우리 회사만']] as const).map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setScope(k)}
+                  className={`h-9 rounded-[9px] text-[13px] font-semibold transition ${scope === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>{l}</button>
+              ))}
+            </div>
+            <p className="text-[11.5px] text-gray-400 mt-1.5 px-0.5">
+              {!recs ? '기록을 불러오는 중...'
+              : scope === 'all' && !sharedOk ? <span className="text-amber-600">전체 회사 기록을 못 불러와 우리 회사 기록만 보여줘요 (관리자: fault_records_shared.sql 실행)</span>
+              : scope === 'all' && recMix ? <>에러코드 기록 {recs.length.toLocaleString()}건 · 우리 {recMix.mine.toLocaleString()} + 다른 회사 {recMix.companies}곳 {recMix.others.toLocaleString()} · 다른 회사 현장명·담당자는 가려져요</>
+              : <>우리 회사 에러코드 기록 {recs.length.toLocaleString()}건</>}
+            </p>
+          </div>
           <div className="flex items-center justify-between px-4 mb-2">
             <label className="text-sm font-semibold text-gray-700">제조사</label>
             {cat && <span className="text-[11.5px] text-gray-400">에러집 {Object.keys(cat).length}개사</span>}
@@ -341,7 +376,7 @@ function ErrorSearchInner() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100">
               <p className="font-bold text-gray-800 text-sm">{maker}{model ? ` ${model}` : ''} 자주 나는 에러</p>
-              <p className="text-xs text-gray-400">우리 회사 고장처리 기록 기준 · 누르면 추가돼요</p>
+              <p className="text-xs text-gray-400">{scope === 'all' ? '전체 회사' : '우리 회사'} 고장처리 기록 기준 · 누르면 추가돼요</p>
             </div>
             {!recs ? <p className="py-8 text-center text-sm text-gray-400">기록을 불러오는 중...</p>
             : topCodes.length === 0 ? <p className="py-8 text-center text-sm text-gray-400">에러코드가 입력된 기록이 아직 없어요.</p>
@@ -367,7 +402,7 @@ function ErrorSearchInner() {
 
             {first && (
               <div className="mx-4 mt-3.5 rounded-xl bg-gray-900 text-white px-4 py-3.5">
-                <p className="text-[11.5px] font-semibold text-white/50">먼저 확인 · 우리 기록 {first.why === '함께 뜬 기록' ? '함께 뜬 기록' : first.why} 기준</p>
+                <p className="text-[11.5px] font-semibold text-white/50">먼저 확인 · {first.why === '함께 뜬 기록' ? '함께 뜬 기록' : first.why} 기준 · {first.src}</p>
                 <p className="text-[16px] font-bold mt-1 leading-snug">{first.text}</p>
                 <p className="text-xs text-white/60 mt-1">{first.d}건 중 {first.n}건 ({pct(first.n, first.d)}%){first.action && <> · 주로 <b className="text-white/90 font-semibold">{cleanAction(first.action)}</b></>}</p>
               </div>
@@ -386,7 +421,7 @@ function ErrorSearchInner() {
                         <Sev r={m} />
                       </span>
                       <span className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-gray-400 w-12 shrink-0">우리기록</span>
+                        <span className="text-[11px] text-gray-400 w-12 shrink-0">{scopeWord}</span>
                         <span className="text-sm text-gray-700 truncate">{!a ? '...' : c0 ? c0.text : '처리 기록 없음'}</span>
                         {a && c0 && <span className="shrink-0 text-xs font-bold text-blue-700">{pct(c0.count, a.pool.length)}%</span>}
                       </span>
@@ -400,7 +435,7 @@ function ErrorSearchInner() {
               <div className="border-t border-gray-100 px-4 py-3.5 bg-gray-50/60">
                 <p className="text-xs font-semibold text-gray-500 mb-1.5">
                   함께 뜬 기록 {combo.pool.length}건
-                  {combo.pool.length > 0 && <span className="font-normal text-gray-400"> · {levelText(combo.level)} 기준</span>}
+                  {combo.pool.length > 0 && <span className="font-normal text-gray-400"> · {levelText(combo.level)} 기준 · {sourceText(combo.pool)}</span>}
                 </p>
                 {combo.pool.length === 0 ? <p className="text-sm text-gray-400">이 코드들이 한 번에 뜬 기록은 아직 없어요.</p> : (
                   <ul className="space-y-1">
@@ -418,15 +453,15 @@ function ErrorSearchInner() {
         )}
 
         {/* ── 코드별 상세 ── */}
-        {perCode.map((p) => <CodeCard key={p.code} {...p} model={model} bookLoading={book === null} hasBookMaker={!!cat?.[maker]} levelText={levelText} />)}
+        {perCode.map((p) => <CodeCard key={p.code} {...p} scope={scope} model={model} bookLoading={book === null} hasBookMaker={!!cat?.[maker]} levelText={levelText} />)}
       </div>
       <TabBar active="errorsearch" />
     </div>
   );
 }
 
-function CodeCard({ code, manual, fallback, a, model, bookLoading, hasBookMaker, levelText }: {
-  code: string; manual: BookRow[]; fallback: boolean; a: ReturnType<typeof analyze> | null;
+function CodeCard({ code, manual, fallback, a, scope, model, bookLoading, hasBookMaker, levelText }: {
+  code: string; scope: FaultScope; manual: BookRow[]; fallback: boolean; a: ReturnType<typeof analyze> | null;
   model: string; bookLoading: boolean; hasBookMaker: boolean; levelText: (lv: number) => string;
 }) {
   const [pick, setPick] = useState(0);
@@ -437,7 +472,9 @@ function CodeCard({ code, manual, fallback, a, model, bookLoading, hasBookMaker,
   const [ko, en] = splitTitle(m?.title);
   const cause = paras(m?.cause), action = paras(m?.action);
   const long = cause.join('').length + action.join('').length > 160;
-  const cases = a ? (allCases ? a.pool : a.pool.slice(0, 3)) : [];
+  // 우리 회사 사례를 먼저 (담당자에게 물어볼 수 있음), 그 다음 다른 회사 — 각각 최신순
+  const sorted = useMemo(() => a ? [...a.pool].sort((x, y) => Number(y.mine !== false) - Number(x.mine !== false) || (y.created_at > x.created_at ? 1 : -1)) : [], [a]);
+  const cases = allCases ? sorted : sorted.slice(0, 3);
 
   return (
     <div id={`code-${code}`} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden scroll-mt-4">
@@ -485,8 +522,8 @@ function CodeCard({ code, manual, fallback, a, model, bookLoading, hasBookMaker,
       {/* 우리 기록 */}
       <div className="border-t border-gray-100 px-4 py-4">
         <div className="flex items-baseline justify-between mb-2">
-          <p className="text-xs font-semibold text-gray-400">우리 회사 처리기록</p>
-          {a && a.pool.length > 0 && <p className="text-[11.5px] text-gray-400">{levelText(a.level)} · {a.pool.length}건
+          <p className="text-xs font-semibold text-gray-400">{scope === 'all' ? '현장 처리기록 · 전체 회사' : '우리 회사 처리기록'}</p>
+          {a && a.pool.length > 0 && <p className="text-[11.5px] text-gray-400 text-right">{levelText(a.level)} · {sourceText(a.pool)}
             {a.level === 3 && <span> (같은 제조사 기록이 부족해 넓혔어요)</span>}</p>}
         </div>
         {!a ? <p className="text-sm text-gray-400">기록을 불러오는 중...</p>
@@ -529,7 +566,7 @@ function CodeCard({ code, manual, fallback, a, model, bookLoading, hasBookMaker,
                 <p className="text-xs font-bold text-amber-800 mb-1">재발 호기</p>
                 <div className="flex flex-wrap gap-1.5">
                   {a.repeatUnits.slice(0, 8).map((u) => (
-                    <span key={u.site + u.hogi} className="text-xs bg-white border border-amber-200 text-amber-800 rounded-full px-2 py-0.5">{u.site} {u.hogi} · {u.count}회</span>
+                    <span key={u.site + u.hogi + u.last} className={`text-xs border rounded-full px-2 py-0.5 ${u.mine ? 'bg-white border-amber-200 text-amber-800' : 'bg-amber-50 border-dashed border-amber-200 text-amber-700/80'}`}>{u.site} {u.hogi} · {u.count}회</span>
                   ))}
                 </div>
               </div>
@@ -544,12 +581,14 @@ function CodeCard({ code, manual, fallback, a, model, bookLoading, hasBookMaker,
                     className="w-full text-left px-4 py-2.5 border-t border-gray-50 hover:bg-gray-50">
                     <div className="flex items-center gap-2 text-xs text-gray-400">
                       <span>{shortDate(r.created_at)}</span><span>·</span>
-                      <span className="text-gray-600 font-semibold truncate">{r.site_name} {r.hogi_no}</span>
+                      {r.mine === false
+                        ? <span className="shrink-0 text-[10.5px] px-1.5 py-0.5 rounded font-semibold bg-gray-100 text-gray-500">다른 회사</span>
+                        : <span className="text-gray-600 font-semibold truncate">{unitLabel(r)}</span>}
                       <span className="ml-auto shrink-0">{r.model || ''}</span>
                     </div>
                     <p className={`text-sm text-gray-800 mt-0.5 ${open ? '' : 'truncate'}`}><b className="text-gray-500 font-semibold mr-1">원인</b>{r.fault_cause}</p>
                     <p className={`text-sm text-gray-600 ${open ? '' : 'truncate'}`}><b className="text-gray-500 font-semibold mr-1">처리</b>{cleanAction(r.fault_action)}</p>
-                    {open && <p className="text-xs text-gray-400 mt-1">에러 {(r.error_codes || []).join(', ')}{r.assigned_name && ` · 담당 ${r.assigned_name}`}{r.team && ` · ${r.team}`}</p>}
+                    {open && <p className="text-xs text-gray-400 mt-1">에러 {(r.error_codes || []).join(', ')}{r.mine !== false && r.assigned_name && ` · 담당 ${r.assigned_name}`}{r.team && ` · ${r.team}`}</p>}
                   </button>
                 );
               })}

@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { analyze, fetchCodedFaults, shortDate, errorSearchUrl, type FaultRow } from './faultAnalysis';
+import { analyze, fetchCodedFaults, shortDate, errorSearchUrl, sourceText, type FaultRow } from './faultAnalysis';
 import { normalizeModel } from './MakerModelPicker';
 
 // 같은 화면에서 모달을 여러 번 열어도 한 번만 불러오기
@@ -27,7 +27,7 @@ export default function FaultInsight({
     const c = cache[companyId];
     if (c && Date.now() - c.at < 5 * 60e3) { setRows(c.rows); return; }
     let alive = true;
-    fetchCodedFaults(companyId).then((r) => { cache[companyId] = { at: Date.now(), rows: r }; if (alive) setRows(r); });
+    fetchCodedFaults(companyId, 'all').then((r) => { cache[companyId] = { at: Date.now(), rows: r }; if (alive) setRows(r); });
     return () => { alive = false; };
   }, [companyId, hasCode]);
 
@@ -37,7 +37,7 @@ export default function FaultInsight({
   if (!hasCode) {
     return (
       <div className="rounded-xl border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-400">
-        🔎 에러코드를 입력하면 예전 고장처리 기록을 분석해 보여드려요.
+        🔎 에러코드를 입력하면 전체 회사 고장처리 기록을 분석해 보여드려요.
       </div>
     );
   }
@@ -58,7 +58,7 @@ export default function FaultInsight({
         <p className="px-3 py-3 text-xs text-gray-500">이 에러코드로 처리한 기록이 아직 없어요. 이번 기록이 다음 분석에 쓰여요.</p>
       ) : (
         <div className="px-3 py-3 space-y-3 text-sm">
-          <p className="text-xs text-gray-500">기준: <b className="text-gray-700">{levelText}</b> · {a.pool.length}건 분석</p>
+          <p className="text-xs text-gray-500">기준: <b className="text-gray-700">{levelText}</b> · {a.pool.length}건 분석 <span className="text-gray-400">({sourceText(a.pool)})</span></p>
 
           {a.sameUnit.length > 0 && (
             <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs text-amber-800">
