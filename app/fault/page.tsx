@@ -111,6 +111,8 @@ const printHtml = (html: string) => {
 };
 
 const ALL_TEAMS = '전체';
+// 팀 이름 표시: 이미 '팀'으로 끝나면 그대로 ('파주 1팀'), 아니면 '팀'을 붙임
+const teamLabel = (t?: string) => (!t ? '' : /팀$/.test(t.trim()) ? t.trim() : `${t.trim()}팀`);
 
 export default function FaultPage() {
   const router = useRouter();
@@ -823,7 +825,7 @@ const groupedElevators = useMemo(() => {
             <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>고장신고 관리</div>
             {teamFilter !== ALL_TEAMS && (
               <div style={{ fontSize: 11, color: C.inkDim, fontWeight: 600 }}>
-                {teamFilter}팀 인원 {users.filter(u => u.team === teamFilter).length}명
+                {teamLabel(teamFilter)} 인원 {users.filter(u => u.team === teamFilter).length}명
               </div>
             )}
           </div>
@@ -989,7 +991,7 @@ const groupedElevators = useMemo(() => {
             }}
           >
             {teams.map((t) => (
-              <option key={t} value={t}>{t === ALL_TEAMS ? '전체 팀' : `${t}팀`}</option>
+              <option key={t} value={t}>{t === ALL_TEAMS ? '전체 팀' : teamLabel(t)}</option>
             ))}
           </select>
         </div>
@@ -1032,7 +1034,7 @@ const groupedElevators = useMemo(() => {
                         {urgent ? '긴급' : STATUS_LABEL[f.status] || f.status}
                       </span>
                       {isCarry(f) && <span style={{ padding: '2px 6px', borderRadius: 6, background: `${C.red}12`, color: C.red, fontSize: 10.5, fontWeight: 800 }}>이월</span>}
-                      {f.team && <span style={{ fontSize: 10.5, color: C.inkFaint, fontWeight: 700 }}>{f.team}팀</span>}
+                      {f.team && <span style={{ fontSize: 10.5, color: C.inkFaint, fontWeight: 700 }}>{teamLabel(f.team)}</span>}
                       {f.equip_type && <span style={{ fontSize: 10.5, color: C.inkFaint }}>· {f.equip_type}</span>}
                     </div>
                     <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink, marginBottom: 2 }}>
@@ -1340,7 +1342,7 @@ const composedHogi = hogiDisplay.trim();
                           <span>
                             {u.name}
                             <span className="text-xs text-gray-400 ml-1">
-                              {u.team ? `· ${u.team}팀` : ''}
+                              {u.team ? `· ${teamLabel(u.team)}` : ''}
                             </span>
                           </span>
                           <input
