@@ -402,6 +402,7 @@ export default function TeamSitesPage() {
       .from('users')
       .select('team')
       .eq('company_id', cid)
+      .or('super_admin.is.null,super_admin.eq.false')
       .not('team', 'is', null);
 
     const teamSet = new Set<string>();

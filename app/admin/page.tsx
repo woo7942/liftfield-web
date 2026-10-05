@@ -155,7 +155,7 @@ export default function AdminPage() {
   // ── Company 목록 ──
   const companies = Object.values(
     users
-      .filter(u => u.company_id && u.subscription_plan === 'company')
+      .filter(u => u.company_id && u.subscription_plan === 'company' && !u.super_admin)
       .reduce<Record<string, { company_id: string; company_name: string; members: UserDoc[]; admin?: UserDoc }>>((acc, u) => {
         const cid = u.company_id!;
         if (!acc[cid]) acc[cid] = { company_id: cid, company_name: u.company_display_name || cid, members: [] };
@@ -425,7 +425,7 @@ export default function AdminPage() {
 
   // ── 회사로 보기: 내 계정의 company_id를 잠시 바꿔서 그 회사 관리자 화면을 열기 ──
   const viewAsCompany = async (companyId: string, companyName: string) => {
-    if (!confirm(`"${companyName}" 회사 화면으로 들어갈까요?\n\n• 이 회사의 실제 데이터가 보이고, 수정하면 그대로 반영돼요.\n• 화면 위쪽 보라색 띠의 [내 회사로 돌아가기]로 복귀해요.`)) return;
+    if (!confirm(`"${companyName}" 회사 화면으로 들어갈까요?\n\n• 스텔스 모드: 이 회사 직원 목록·팀·알림 대상에 개발자는 나타나지 않아요.\n• 이 회사의 실제 데이터가 보이고, 수정하면 그대로 반영돼요.\n• 화면 위쪽 보라색 띠의 [내 회사로 돌아가기]로 복귀해요.`)) return;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     const { data: me, error: meErr } = await supabase.from('users')
@@ -449,7 +449,7 @@ export default function AdminPage() {
   };
 
   // 모든 회사 목록 (플랜 상관없이 company_id 기준)
-  const allCompanies = Object.values(users.reduce<Record<string, { id: string; name: string; count: number; admin?: string }>>((acc, u) => {
+  const allCompanies = Object.values(users.filter(u => !u.super_admin).reduce<Record<string, { id: string; name: string; count: number; admin?: string }>>((acc, u) => {
     if (!u.company_id) return acc;
     const c = acc[u.company_id] || (acc[u.company_id] = { id: u.company_id, name: u.company_display_name || u.company_id, count: 0 });
     c.count++;

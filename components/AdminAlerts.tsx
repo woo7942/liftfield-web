@@ -141,7 +141,7 @@ export default function AdminAlerts() {
       const { data: me } = await supabase.from('users').select('company_id').eq('id', session.user.id).single();
       if (!me?.company_id || !alive) return;
       companyId.current = me.company_id;
-      const { data: mem } = await supabase.from('users').select('id').eq('company_id', me.company_id);
+      const { data: mem } = await supabase.from('users').select('id').eq('company_id', me.company_id).or('super_admin.is.null,super_admin.eq.false');
       memberIds.current = new Set((mem || []).map((m: any) => m.id));
 
       if ('Notification' in window && Notification.permission === 'default') {

@@ -56,7 +56,8 @@ export default function MembersPage() {
       const { data: memberData } = await supabase
         .from('users')
         .select('*')
-        .eq('company_id', companyId);
+        .eq('company_id', companyId)
+        .or('super_admin.is.null,super_admin.eq.false'); // 개발자(스텔스 방문) 숨김
 
       const list: Member[] = (memberData || []).map(d => ({
         id: d.id,

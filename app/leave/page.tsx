@@ -120,7 +120,7 @@ export default function LeavePage() {
   const loadData = async (companyId: string) => {
     try {
       const [mRes, tRes, lRes] = await Promise.all([
-        supabase.from('users').select('id, name, team, annual_leave').eq('company_id', companyId),
+        supabase.from('users').select('id, name, team, annual_leave').eq('company_id', companyId).or('super_admin.is.null,super_admin.eq.false'),
         supabase.from('teams').select('name').eq('company_id', companyId).order('name'),
         supabase.from('leave_requests').select('*').eq('company_id', companyId).order('created_at', { ascending: false }),
       ]);

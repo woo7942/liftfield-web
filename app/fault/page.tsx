@@ -304,7 +304,7 @@ export default function FaultPage() {
         setElevators([]);
       }
 
-      const { data: userData } = await supabase.from('users').select('*').eq('company_id', cid);
+      const { data: userData } = await supabase.from('users').select('*').eq('company_id', cid).or('super_admin.is.null,super_admin.eq.false');
       const userList = userData || [];
       setUsers(userList);
 

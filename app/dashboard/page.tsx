@@ -107,7 +107,7 @@ export default function OpsHomePage() {
         fetchAll(() => supabase.from('site_inspection_units')
           .select('elevator_id, year, month, completed, completed_by')
           .eq('company_id', cid).gte('year', fromY).eq('completed', true).order('elevator_id')),
-        fetchAll(() => supabase.from('users').select('name, team, role').eq('company_id', cid).order('id')),
+        fetchAll(() => supabase.from('users').select('name, team, role').eq('company_id', cid).or('super_admin.is.null,super_admin.eq.false').order('id')),
       ]);
 
       setTeams((tRes.data || []).map((t: any) => t.name).filter(Boolean));

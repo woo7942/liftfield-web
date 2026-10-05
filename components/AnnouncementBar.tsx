@@ -98,7 +98,7 @@ export default function AnnouncementBar() {
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 90 }}>
       {viewing && (
         <div style={{ height: 40, background: '#6d28d9', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', fontSize: 13, fontWeight: 700 }}>
-          <span>👀 <b>{viewing.name}</b> 회사 화면으로 보는 중</span>
+          <span>👀 <b>{viewing.name}</b> 회사 화면 · 스텔스 방문 중</span>
           <span style={{ opacity: 0.75, fontWeight: 500, display: 'none' }} className="sm:inline">· 이 회사의 데이터가 실제로 보이고 수정도 반영돼요</span>
           <button onClick={backHome} disabled={busy} style={{ marginLeft: 'auto', background: '#fff', color: '#6d28d9', border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
             {busy ? '돌아가는 중...' : '내 회사로 돌아가기'}
