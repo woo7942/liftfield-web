@@ -213,18 +213,60 @@ export default function AdminPage() {
 
   // ── 강제 탈퇴 ──
   const handleDeleteUser = async (u: UserDoc) => {
-    if (!confirm(`정말 "${u.name}" 계정을 삭제할까요?\n이 작업은 되돌릴 수 없어요.`)) return;
+    if (!confirm(`정말 "${u.name}" 계정을 삭제할까요?\n로그인 계정까지 완전히 지워지며 되돌릴 수 없어요.`)) return;
     setManageLoading(true);
     try {
-      const { error } = await supabase.from('users').delete().eq('id', u.id);
-      if (error) throw error;
+      // 브라우저에서 users.delete() 는 RLS 때문에 0건 삭제(에러 없음)로 끝나고,
+      // 로그인 계정(auth.users)은 아예 못 지움 → 서버 함수로 처리
+      const { error } = await supabase.rpc('admin_delete_user', { p_uid: u.id });
+      if (error) throw new Error(error.message);
+      setUsers(prev => prev.filter(x => x.id !== u.id));
       await loadData();
       setManageUser(null);
-    } catch (e) {
-      alert('삭제 실패: ' + e);
+      alert(`"${u.name}" 계정을 탈퇴 처리했어요.`);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      alert(msg.includes('admin_delete_user')
+        ? '삭제 실패: 서버 함수가 아직 없어요.\nSupabase SQL Editor에서 supabase/admin_account_cleanup.sql 을 먼저 실행해주세요.'
+        : '삭제 실패: ' + msg);
     } finally {
       setManageLoading(false);
     }
+  };
+
+  // ── 목록에 안 나오는 가입 계정 (auth.users 에만 남은 계정) ──
+  const [orphans, setOrphans] = useState<{ id: string; email: string; created_at: string; last_sign_in_at: string | null; provider: string }[] | null>(null);
+  const [orphanErr, setOrphanErr] = useState('');
+  const [orphanLoading, setOrphanLoading] = useState(false);
+
+  const loadOrphans = async () => {
+    setOrphanLoading(true);
+    const { data, error } = await supabase.rpc('admin_list_orphan_auth_users');
+    if (error) {
+      setOrphanErr(error.message.includes('admin_list_orphan_auth_users')
+        ? 'Supabase SQL Editor에서 supabase/admin_account_cleanup.sql 을 먼저 실행해주세요.'
+        : error.message);
+      setOrphans([]);
+    } else { setOrphanErr(''); setOrphans(data || []); }
+    setOrphanLoading(false);
+  };
+
+  const deleteOrphan = async (o: { id: string; email: string }) => {
+    if (!confirm(`"${o.email || o.id}" 가입 계정을 삭제할까요?`)) return;
+    const { error } = await supabase.rpc('admin_delete_user', { p_uid: o.id });
+    if (error) return alert('삭제 실패: ' + error.message);
+    setOrphans(prev => (prev || []).filter(x => x.id !== o.id));
+  };
+
+  const purgeOrphans = async () => {
+    if (!orphans?.length) return;
+    if (!confirm(`목록에 없는 가입 계정 ${orphans.length}개를 모두 삭제할까요?\n계정 관리 목록에 보이는 계정은 그대로 유지돼요.\n되돌릴 수 없어요.`)) return;
+    setOrphanLoading(true);
+    const { data, error } = await supabase.rpc('admin_purge_orphan_auth_users');
+    setOrphanLoading(false);
+    if (error) return alert('정리 실패: ' + error.message);
+    alert(`${data ?? 0}개 계정을 정리했어요.`);
+    await loadOrphans();
   };
 
   // ── SuperAdmin 토글 ──
@@ -345,6 +387,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (activeTab === 'health' && !health && users.length) loadHealth();
     if (activeTab === 'activity' && !activity && users.length) loadActivity();
+    if (activeTab === 'accounts' && !orphans && !orphanLoading) loadOrphans();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, users.length]);
 
@@ -831,6 +874,59 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* 목록에 안 나오는 가입 계정 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 flex-wrap">
+                <div>
+                  <p className="font-bold text-gray-800 text-sm">
+                    목록에 없는 가입 계정 {orphans && <span className="text-red-500">{orphans.length}</span>}
+                  </p>
+                  <p className="text-xs text-gray-400">로그인 계정은 있는데 회원 정보가 없어 위 목록에 안 나오는 계정이에요. (가입 중단·이전 탈퇴 잔여)</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={loadOrphans} disabled={orphanLoading}
+                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg transition disabled:opacity-50">
+                    {orphanLoading ? '불러오는 중...' : '새로고침'}
+                  </button>
+                  <button onClick={purgeOrphans} disabled={orphanLoading || !orphans?.length}
+                    className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg font-semibold transition disabled:opacity-40">
+                    전부 정리
+                  </button>
+                </div>
+              </div>
+              {orphanErr ? (
+                <p className="px-4 py-6 text-sm text-red-500">{orphanErr}</p>
+              ) : !orphans?.length ? (
+                <p className="px-4 py-6 text-sm text-gray-400 text-center">{orphanLoading ? '불러오는 중...' : '정리할 계정이 없어요.'}</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        {['이메일', '가입 방식', '가입일', '마지막 로그인', ''].map(h => (
+                          <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orphans.map(o => (
+                        <tr key={o.id} className="border-b border-gray-50">
+                          <td className="px-4 py-3 text-gray-700 text-xs">{o.email || o.id}</td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">{o.provider}</td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(o.created_at)}</td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">{formatDateTime(o.last_sign_in_at)}</td>
+                          <td className="px-4 py-3">
+                            <button onClick={() => deleteOrphan(o)}
+                              className="text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1.5 rounded-lg transition">삭제</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
