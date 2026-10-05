@@ -157,14 +157,16 @@ function AdminSidebar({ active }: { active: string }) {
   const router = useRouter();
   const [mini, setMini] = useState(false);
   const [userName, setUserName] = useState("");
+  const [isSuper, setIsSuper] = useState(false);
 
   useEffect(() => {
     setMini(localStorage.getItem("lf_side_mini") === "1");
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const { data } = await supabase.from("users").select("name").eq("id", session.user.id).single();
+      const { data } = await supabase.from("users").select("name, super_admin").eq("id", session.user.id).single();
       if (data?.name) setUserName(data.name);
+      setIsSuper(data?.super_admin === true);
     })();
   }, []);
 
@@ -286,6 +288,30 @@ function AdminSidebar({ active }: { active: string }) {
             })}
           </div>
         ))}
+        {/* 개발자(슈퍼어드민) 전용 */}
+        {isSuper && (
+          <div style={{ marginTop: 8 }}>
+            {!mini && (
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", padding: "10px 10px 6px" }}>개발자</div>
+            )}
+            <div
+              title="개발자 관리"
+              onClick={() => router.push("/admin")}
+              style={{
+                display: "flex", alignItems: "center", gap: 11, height: 42,
+                padding: mini ? 0 : "0 12px", justifyContent: mini ? "center" : "flex-start",
+                borderRadius: 10, cursor: "pointer",
+                background: active === "admin" ? "#fee2e2" : "transparent",
+                color: active === "admin" ? "#dc2626" : C.inkDim, fontWeight: 700, fontSize: 14,
+              }}
+            >
+              <svg width={19} height={19} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3l8 4v5c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V7l8-4z" /><path d="M9 12l2 2 4-4" />
+              </svg>
+              {!mini && <span style={{ whiteSpace: "nowrap" }}>개발자 관리</span>}
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* 사용자 */}

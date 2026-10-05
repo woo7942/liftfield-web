@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import TabBar from '@/components/TabBar';
 
 // ───────────────────────────────────────────
 // 타입
@@ -76,7 +77,7 @@ export default function AdminPage() {
   const [authReady, setAuthReady] = useState(false);
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [qnaList, setQnaList] = useState<QnaDoc[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'subscription' | 'companies' | 'stats' | 'accounts' | 'qna'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'subscription' | 'companies' | 'stats' | 'accounts' | 'qna' | 'health' | 'activity'>('users');
   const [searchText, setSearchText] = useState('');
   const [planFilter, setPlanFilter] = useState('전체');
 
@@ -87,6 +88,12 @@ export default function AdminPage() {
   const [editEndDate, setEditEndDate] = useState('');
   const [editMaxMembers, setEditMaxMembers] = useState(5);
   const [editLoading, setEditLoading] = useState(false);
+
+  // 시스템 점검 / 최근 활동
+  const [health, setHealth] = useState<{ label: string; value: number | string; level: 'ok' | 'warn' | 'bad'; hint: string; sql?: string }[] | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [activity, setActivity] = useState<{ at: string; kind: string; company: string; text: string }[] | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   // 계정 관리 모달
   const [manageUser, setManageUser] = useState<UserDoc | null>(null);
@@ -242,6 +249,99 @@ export default function AdminPage() {
     if (!error) setQnaList(prev => prev.filter(q => q.id !== id));
   };
 
+  // ── 시스템 점검 (데이터 상태) ──
+  const countOf = async (table: string, build?: (q: any) => any) => {
+    let q: any = supabase.from(table).select('id', { count: 'exact', head: true });
+    if (build) q = build(q);
+    const { count, error } = await q;
+    return error ? -1 : (count || 0);
+  };
+  const fetchAllIds = async (table: string, cols: string) => {
+    let all: any[] = [];
+    for (let f = 0; ; f += 1000) {
+      const { data, error } = await supabase.from(table).select(cols).order('id').range(f, f + 999);
+      if (error || !data) break;
+      all = all.concat(data);
+      if (data.length < 1000) break;
+    }
+    return all;
+  };
+  const loadHealth = async () => {
+    setHealthLoading(true);
+    try {
+      const [sites, elevs] = await Promise.all([
+        fetchAllIds('sites', 'id, company_id, team'),
+        fetchAllIds('elevators', 'id, site_id, dong, hogi_no'),
+      ]);
+      const siteIds = new Set(sites.map((s) => s.id));
+      const orphan = elevs.filter((e) => !e.site_id || !siteIds.has(e.site_id)).length;
+      const dongdong = elevs.filter((e) => /동동$/.test(e.dong || '')).length;
+      const dupMap: Record<string, number> = {};
+      elevs.forEach((e) => { const k = `${e.site_id}|${e.dong}|${e.hogi_no}`; dupMap[k] = (dupMap[k] || 0) + 1; });
+      const dup = Object.values(dupMap).filter((n) => n > 1).reduce((a, n) => a + n - 1, 0);
+      const withElev = new Set(elevs.map((e) => e.site_id));
+      const emptySites = sites.filter((s) => !withElev.has(s.id)).length;
+      const noTeamSites = sites.filter((s) => !s.team).length;
+      const noTeamUsers = users.filter((u) => u.company_id && !u.team && u.role !== 'admin').length;
+      const noCompany = users.filter((u) => !u.company_id).length;
+      const [pushCnt, faultOpen] = await Promise.all([
+        countOf('push_subscriptions'),
+        countOf('fault_reports', (q) => q.neq('status', '완료')),
+      ]);
+      const now = Date.now();
+      const expSoon = users.filter((u) => u.subscription_end_date && new Date(u.subscription_end_date).getTime() - now < 14 * 864e5 && new Date(u.subscription_end_date).getTime() > now).length;
+      const expired = users.filter((u) => u.subscription_end_date && new Date(u.subscription_end_date).getTime() < now && u.subscription_plan !== 'expired').length;
+
+      setHealth([
+        { label: '전체 현장 / 승강기', value: `${sites.length.toLocaleString()} / ${elevs.length.toLocaleString()}`, level: 'ok', hint: '모든 회사 합계' },
+        { label: '현장 없는 승강기', value: orphan, level: orphan ? 'bad' : 'ok', hint: '현장이 삭제됐는데 남아 있는 호기 — 숫자가 틀어지는 원인',
+          sql: "delete from elevators e where e.site_id is null or not exists (select 1 from sites s where s.id = e.site_id);" },
+        { label: "동 이름 '동동'", value: dongdong, level: dongdong ? 'warn' : 'ok', hint: '예: 102동동',
+          sql: "update elevators set dong = regexp_replace(dong, '(동){2,}$', '동') where dong ~ '동동$';" },
+        { label: '중복 호기 (같은 현장·동·호기)', value: dup, level: dup ? 'bad' : 'ok', hint: '점검 완료율이 안 맞는 원인' },
+        { label: '호기 없는 현장', value: emptySites, level: emptySites ? 'warn' : 'ok', hint: '팀별현장에서 수정 → 승강기 조회로 호기 등록 필요' },
+        { label: '팀 미배정 현장', value: noTeamSites, level: noTeamSites ? 'warn' : 'ok', hint: '고장 알림이 아무에게도 가지 않음' },
+        { label: '팀 미배정 팀원', value: noTeamUsers, level: noTeamUsers ? 'warn' : 'ok', hint: '팀원 관리에서 팀 배정 필요' },
+        { label: '회사 없는 가입자', value: noCompany, level: noCompany ? 'warn' : 'ok', hint: '가입 후 회사 설정을 안 한 계정' },
+        { label: '알림 등록 기기', value: pushCnt < 0 ? '조회 불가' : pushCnt, level: 'ok', hint: 'push_subscriptions' },
+        { label: '미처리 고장 (전체)', value: faultOpen < 0 ? '조회 불가' : faultOpen, level: faultOpen > 0 ? 'warn' : 'ok', hint: '완료되지 않은 고장' },
+        { label: '구독 14일 내 만료', value: expSoon, level: expSoon ? 'warn' : 'ok', hint: '구독 관리 탭에서 연장' },
+        { label: '만료일 지났는데 활성', value: expired, level: expired ? 'bad' : 'ok', hint: "플랜을 'expired'로 바꾸거나 기간 연장" },
+      ]);
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  // ── 최근 활동 (전체 회사) ──
+  const loadActivity = async () => {
+    setActivityLoading(true);
+    try {
+      const companyName = (cid?: string) => users.find((u) => u.company_id === cid)?.company_display_name || cid || '-';
+      const [f, q, l, u] = await Promise.all([
+        supabase.from('fault_reports').select('created_at, company_id, site_name, hogi_no, status').order('created_at', { ascending: false }).limit(20),
+        supabase.from('quotes').select('created_at, team_id, title, status, amount').order('created_at', { ascending: false }).limit(15),
+        supabase.from('leave_requests').select('created_at, company_id, user_name, type, status').order('created_at', { ascending: false }).limit(15),
+        supabase.from('users').select('created_at, name, company_display_name').order('created_at', { ascending: false }).limit(15),
+      ]);
+      const list = [
+        ...(f.data || []).map((x: any) => ({ at: x.created_at, kind: '고장', company: companyName(x.company_id), text: `${x.site_name || ''} ${x.hogi_no || ''} · ${x.status}` })),
+        ...(q.data || []).map((x: any) => ({ at: x.created_at, kind: '견적', company: x.team_id || '-', text: `${x.title || ''} · ${x.status} · ${(x.amount || 0).toLocaleString()}원` })),
+        ...(l.data || []).map((x: any) => ({ at: x.created_at, kind: '휴가', company: companyName(x.company_id), text: `${x.user_name || ''} · ${x.type} · ${x.status}` })),
+        ...(u.data || []).map((x: any) => ({ at: x.created_at, kind: '가입', company: x.company_display_name || '-', text: x.name || '' })),
+      ].filter((x) => x.at).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60);
+      setActivity(list);
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'health' && !health && users.length) loadHealth();
+    if (activeTab === 'activity' && !activity && users.length) loadActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, users.length]);
+
   if (!authReady) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
@@ -258,10 +358,12 @@ export default function AdminPage() {
     { key: 'stats',        icon: '📊', label: '통계'         },
     { key: 'accounts',     icon: '🔧', label: '계정 관리'   },
     { key: 'qna',          icon: '💬', label: 'Q&A 관리'    },
+    { key: 'health',       icon: '🩺', label: '시스템 점검' },
+    { key: 'activity',     icon: '🕒', label: '최근 활동' },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pb-28">
 
       {/* 헤더 */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
@@ -270,7 +372,7 @@ export default function AdminPage() {
             <button onClick={() => router.push('/dashboard')}
               className="text-gray-400 hover:text-gray-600 transition text-sm">← 홈</button>
             <span className="text-gray-300">|</span>
-            <h1 className="text-lg font-black text-gray-800">👑 슈퍼어드민</h1>
+            <h1 className="text-lg font-black text-gray-800">👑 개발자 관리</h1>
             <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full font-bold">ADMIN ONLY</span>
           </div>
           <button onClick={() => router.push('/admin/companies')}
@@ -685,6 +787,63 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* ── 탭 7: 시스템 점검 ── */}
+        {activeTab === 'health' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-gray-500 flex-1">데이터 상태를 한 번에 점검해요. 빨간색은 숫자가 틀어지는 원인이니 정리하는 게 좋아요.</p>
+              <button onClick={loadHealth} disabled={healthLoading} className="text-sm bg-gray-900 text-white px-4 py-2 rounded-xl font-semibold disabled:opacity-50">
+                {healthLoading ? '점검 중...' : '다시 점검'}
+              </button>
+            </div>
+            {!health ? (
+              <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400 text-sm">{healthLoading ? '점검 중...' : '다시 점검을 눌러주세요'}</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {health.map((h) => (
+                  <div key={h.label} className={`bg-white rounded-2xl border p-4 ${h.level === 'bad' ? 'border-red-200' : h.level === 'warn' ? 'border-amber-200' : 'border-gray-100'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${h.level === 'bad' ? 'bg-red-500' : h.level === 'warn' ? 'bg-amber-500' : 'bg-green-500'}`} />
+                      <span className="text-sm font-semibold text-gray-700">{h.label}</span>
+                    </div>
+                    <div className={`text-2xl font-black mt-1 ${h.level === 'bad' ? 'text-red-600' : h.level === 'warn' ? 'text-amber-600' : 'text-gray-900'}`}>{typeof h.value === 'number' ? h.value.toLocaleString() : h.value}</div>
+                    <div className="text-xs text-gray-400 mt-1">{h.hint}</div>
+                    {h.sql && typeof h.value === 'number' && h.value > 0 && (
+                      <button onClick={() => { navigator.clipboard?.writeText(h.sql!); alert('정리 SQL을 복사했어요. Supabase SQL Editor에 붙여넣어 실행하세요.'); }}
+                        className="mt-2 text-xs font-semibold text-blue-600">정리 SQL 복사</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── 탭 8: 최근 활동 ── */}
+        {activeTab === 'activity' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-gray-500 flex-1">전체 회사의 최근 고장·견적·휴가·가입 활동이에요.</p>
+              <button onClick={loadActivity} disabled={activityLoading} className="text-sm bg-gray-900 text-white px-4 py-2 rounded-xl font-semibold disabled:opacity-50">
+                {activityLoading ? '불러오는 중...' : '새로고침'}
+              </button>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+              {!activity || activity.length === 0 ? (
+                <div className="p-12 text-center text-gray-400 text-sm">{activityLoading ? '불러오는 중...' : '활동이 없어요'}</div>
+              ) : activity.map((a, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0 text-sm">
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                    a.kind === '고장' ? 'bg-red-50 text-red-600' : a.kind === '견적' ? 'bg-blue-50 text-blue-600' : a.kind === '휴가' ? 'bg-green-50 text-green-600' : 'bg-purple-50 text-purple-600'}`}>{a.kind}</span>
+                  <span className="text-gray-400 text-xs shrink-0 w-28 truncate">{a.company}</span>
+                  <span className="flex-1 min-w-0 truncate text-gray-700">{a.text}</span>
+                  <span className="text-xs text-gray-400 shrink-0">{formatDateTime(a.at)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       </main>
 
       {/* ── 구독 수정 모달 ── */}
@@ -802,6 +961,9 @@ export default function AdminPage() {
         </div>
       )}
 
+      <TabBar active="admin" />
     </div>
   );
 }
+
+
