@@ -20,6 +20,7 @@ const svg = (d: React.ReactNode): IconFn => (s: number) => (
 const AIcon = {
   calendar: svg(<><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>),
   users: svg(<><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" /><circle cx="17" cy="9" r="2.5" /><path d="M17 14.5c2.3 0 4 1.5 4.5 4" /></>),
+  search: svg(<><circle cx="10.5" cy="10.5" r="6.5" /><path d="M20 20l-4.6-4.6" /></>),
   userPlus: svg(<><circle cx="10" cy="8" r="3.5" /><path d="M3.5 20c.8-3.5 3.4-5.5 6.5-5.5 1.6 0 3 .5 4.1 1.4" /><path d="M19 14v6M16 17h6" /></>),
 };
 
@@ -32,6 +33,7 @@ const TABS: Tab[] = [
   { key: "inspection", path: "/inspection", icon: Icon.tool,      label: "점검" },
   { key: "inspect",    path: "/inspect",    icon: Icon.clipboard, label: "검사" },
   { key: "material",   path: "/material",   icon: Icon.box,       label: "자재" },
+  { key: "errorsearch", path: "/error-search", icon: AIcon.search, label: "에러검색" },
   { key: "manual",     path: "/manual",     icon: Icon.zap,       label: "매뉴얼" },
   { key: "quote",      path: "/quote",      icon: Icon.fileText,  label: "견적서" },
   { key: "myleave",    path: "/my-leave",   icon: AIcon.calendar, label: "휴가신청" },
@@ -52,7 +54,7 @@ const ADMIN_PATH_OVERRIDE: Record<string, string> = {
 
 // 관리자 사이드바 그룹 구성 (key만 나열 — 순서/묶음 자유롭게 수정)
 const SIDE_GROUPS: { title: string; keys: string[] }[] = [
-  { title: "운영",      keys: ["home", "inspection", "inspect", "fault"] },
+  { title: "운영",      keys: ["home", "inspection", "inspect", "fault", "errorsearch"] },
   { title: "현장 관리", keys: ["sites", "quote", "material"] },
   { title: "팀 관리",   keys: ["members", "leave", "team"] },
   { title: "자료",      keys: ["manual"] },
@@ -362,7 +364,7 @@ function AdminSidebar({ active }: { active: string }) {
 const BAR_LEFT  = ["home", "sites"];
 const BAR_RIGHT = ["inspection"];
 const BAR_CENTER = "fault";
-const MORE_KEYS = ["inspect", "material", "manual", "quote", "myleave", "leave"];
+const MORE_KEYS = ["inspect", "errorsearch", "material", "manual", "quote", "myleave", "leave"];
 const FAULT_RED = "#ef4444";
 
 // ★ 하단바 스타일 선택: "indicator" (B · 옆으로 밀어서 전체 메뉴) | "center" (C · 가운데 고장접수)

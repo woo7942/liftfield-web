@@ -15,6 +15,8 @@ import {
 import ChipAccordion from '@/components/fault/ChipAccordion';
 import ErrorCodeList from '@/components/fault/ErrorCodeList';
 import { FAULT_SPEECH, playVoice, VOICE_FILES, unlockVoices, unlockSpeech } from '@/components/FaultAlerts';
+import MakerModelPicker, { normalizeMaker } from '@/components/fault/MakerModelPicker';
+import FaultInsight from '@/components/fault/FaultInsight';
 import FaultResultForm, { emptyResult, composeResult, isWaitingParts, type FaultResultValue } from '@/components/fault/FaultResultForm';
 
 
@@ -42,6 +44,8 @@ interface FaultReport {
   fault_action: string;
   fault_note: string;
   error_codes: string[];
+  maker?: string | null;
+  model?: string | null;
 }
 
 const toDateStr = (v: string | null): string => {
@@ -167,6 +171,8 @@ export default function FaultPage() {
   const [arrivedAtInput, setArrivedAtInput] = useState('');
   const [completedAtInput, setCompletedAtInput] = useState('');
   const [errorCodesInput, setErrorCodesInput] = useState<string[]>([]);
+  const [makerModel, setMakerModel] = useState({ maker: '', model: '' });
+  const [makerAuto, setMakerAuto] = useState(false);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -485,6 +491,8 @@ export default function FaultPage() {
       const { error } = await supabase.from('fault_reports').update({
         fault_cause: composed.fault_cause, fault_action: composed.fault_action, fault_note: composed.fault_note,
         error_codes: (errorCodesInput || []).map(c => c.trim()).filter(Boolean),
+        maker: makerModel.maker || null,
+        model: makerModel.model.trim() || null,
 
         arrived_at: arrivedDate, completed_at: completedDate,
         status: isWaitingParts(resultForm) ? '처리중' : '완료',
@@ -520,6 +528,15 @@ export default function FaultPage() {
     setArrivedAtInput(fault.arrived_at ? toDatetimeLocal(fault.arrived_at) : '');
     setCompletedAtInput(fault.completed_at ? toDatetimeLocal(fault.completed_at) : '');
     setErrorCodesInput(fault.error_codes || []);
+    // 제조사·모델: 이미 저장된 값 → 없으면 승강기 대장(elevators)에서 자동으로
+    {
+      const ev = elevators.find((e: any) => e.site_id === fault.site_id && (
+        (fault.elevator_no && e.elevator_no === fault.elevator_no) || e.hogi_no === fault.hogi_no));
+      if (fault.maker) { setMakerModel({ maker: fault.maker, model: fault.model || '' }); setMakerAuto(false); }
+      else if (ev && (ev.manufacturer_name || ev.elvtr_model)) {
+        setMakerModel({ maker: normalizeMaker(ev.manufacturer_name), model: (ev.elvtr_model || '').trim() }); setMakerAuto(true);
+      } else { setMakerModel({ maker: '', model: '' }); setMakerAuto(false); }
+    }
     setResultForm({ ...emptyResult(), cause: fault.fault_cause || '', action: (fault.fault_action || '').replace(/\s*\(부품 대기\)$/, ''), note: fault.fault_note || '' });
     setDetailModal(true);
   };
@@ -533,6 +550,7 @@ export default function FaultPage() {
     const resetDetailFields = () => {
     setFaultCause(''); setFaultAction(''); setFaultNote(''); setResultForm(emptyResult());
     setArrivedAtInput(''); setCompletedAtInput(''); setErrorCodesInput([]);
+    setMakerModel({ maker: '', model: '' }); setMakerAuto(false);
   };
 
 
@@ -582,7 +600,8 @@ export default function FaultPage() {
     <tr><th>주소</th><td colspan="3">${site?.address||'-'}</td></tr>
     <tr><th>담당자</th><td>${fault.assigned_name||'-'}</td><th>처리상태</th><td><span class="badge">${STATUS_LABEL[fault.status]||fault.status}</span></td></tr>
     ${fault.reporter_phone?`<tr><th>신고자 연락처</th><td colspan="3">${fault.reporter_phone}</td></tr>`:''}
-    ${fault.error_codes && fault.error_codes.length > 0 ? `<tr><th>에러코드</th><td colspan="3">${fault.error_codes.join(', ')}</td></tr>` : ''}
+    ${fault.maker ? `<tr><th>제조사·모델</th><td colspan="3">${fault.maker} ${fault.model || ''}</td></tr>` : ''}
+     ${fault.error_codes && fault.error_codes.length > 0 ? `<tr><th>에러코드</th><td colspan="3">${fault.error_codes.join(', ')}</td></tr>` : ''}
   </table>
   <div class="section-title">📋 시간 내역</div>
   <table class="time-table">
@@ -1476,6 +1495,12 @@ const composedHogi = hogiDisplay.trim();
                       <div className="font-medium">{toDateStr(selectedFault.completed_at)}</div>
                     </div>
                   </div>
+                  {selectedFault.maker && (
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700 mb-1 block">제조회사 · 모델</label>
+                      <p className="text-sm text-gray-800">{selectedFault.maker} {selectedFault.model || ''}</p>
+                    </div>
+                  )}
                   {selectedFault.error_codes && selectedFault.error_codes.length > 0 && (
                     <div>
                       <label className="text-sm font-semibold text-gray-700 mb-1 block">에러코드</label>
@@ -1537,6 +1562,14 @@ const composedHogi = hogiDisplay.trim();
                     </div>
                   </div>
 
+                  <MakerModelPicker
+                    maker={makerModel.maker}
+                    model={makerModel.model}
+                    onChange={(v) => { setMakerModel(v); setMakerAuto(false); }}
+                    companyId={userInfo?.company_id}
+                    autoFilled={makerAuto}
+                  />
+
                   <div>
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">에러코드</label>
                     <ErrorCodeList
@@ -1545,6 +1578,16 @@ const composedHogi = hogiDisplay.trim();
                       reportedCodes={selectedFault.error_codes || []}
                     />
                   </div>
+
+                  <FaultInsight
+                    companyId={userInfo?.company_id}
+                    maker={makerModel.maker}
+                    model={makerModel.model}
+                    codes={errorCodesInput}
+                    currentId={selectedFault.id}
+                    siteId={selectedFault.site_id}
+                    hogiNo={selectedFault.hogi_no}
+                  />
 
                   <FaultResultForm
                     escalator={isEscalatorType(selectedFault.equip_type)}
