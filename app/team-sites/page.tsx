@@ -1382,11 +1382,11 @@ export default function TeamSitesPage() {
                 <div key={field}>
                   <label className="text-sm text-gray-600 mb-0.5 block">{label}</label>
                   <input
-                    type={type}
-                    value={(addForm as Record<string, unknown>)[field] as string || ''}
+                    type={type === 'number' ? 'text' : type} inputMode={type === 'number' ? 'numeric' : undefined}
+                    value={field === 'maintenanceFee' ? (addForm.maintenanceFee ? Number(addForm.maintenanceFee).toLocaleString() : '') : (addForm as Record<string, unknown>)[field] as string || ''}
                     onChange={e => setAddForm(prev => ({
                       ...prev,
-                      [field]: type === 'number' ? Number(e.target.value) : e.target.value,
+                      [field]: type === 'number' ? Number(e.target.value.replace(/[^0-9]/g, '')) : e.target.value,
                     }))}
                     className="w-full border rounded-xl px-3 py-2 text-sm"
                   />
@@ -1695,11 +1695,11 @@ export default function TeamSitesPage() {
                     <div key={field}>
                       <label className="text-sm text-gray-600 mb-0.5 block">{label}</label>
                       <input
-                        type={type}
-                        value={(editForm as Record<string, unknown>)[field] as string || ''}
+                        type={type === 'number' ? 'text' : type} inputMode={type === 'number' ? 'numeric' : undefined}
+                        value={field === 'maintenanceFee' ? (editForm.maintenanceFee ? Number(editForm.maintenanceFee).toLocaleString() : '') : (editForm as Record<string, unknown>)[field] as string || ''}
                         onChange={e => setEditForm(prev => ({
                           ...prev,
-                          [field]: type === 'number' ? Number(e.target.value) : e.target.value,
+                          [field]: type === 'number' ? Number(e.target.value.replace(/[^0-9]/g, '')) : e.target.value,
                         }))}
                         className="w-full border rounded-xl px-3 py-2 text-sm"
                       />
