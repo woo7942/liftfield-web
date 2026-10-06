@@ -55,12 +55,20 @@ export default function OpsHomePage() {
   const [faults, setFaults] = useState<Fault[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState('전체');
+  const [cView, setCView] = useState<null | 'expired' | 'soon' | 'noEnd'>(null); // 계약 모아보기
 
   useEffect(() => {
     const t = localStorage.getItem('lf_ops_team');
     if (t) setTeam(t);
   }, []);
   const chooseTeam = (t: string) => { setTeam(t); localStorage.setItem('lf_ops_team', t); };
+
+  useEffect(() => {
+    if (!cView) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCView(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cView]);
 
   // ── 인증 + 관리자 체크 ──
   useEffect(() => {
@@ -207,9 +215,13 @@ export default function OpsHomePage() {
     const withEnd = ss.map(s => ({ ...s, d: s.contractEnd ? daysLeft(s.contractEnd) : null }));
     const expired = withEnd.filter(s => s.d !== null && s.d < 0);
     const soon = withEnd.filter(s => s.d !== null && s.d >= 0 && s.d <= 90);
-    const noEnd = withEnd.filter(s => s.d === null).length;
-    const list = [...expired, ...soon].sort((a, b) => (a.d as number) - (b.d as number));
-    return { typeRows, fee: ss.reduce((a, s) => a + s.fee, 0), expired: expired.length, soon: soon.length, noEnd, list, total: ss.length };
+    const noEndList = withEnd.filter(s => s.d === null).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    const noEnd = noEndList.length;
+    const byD = (a: typeof withEnd[number], b: typeof withEnd[number]) => (a.d as number) - (b.d as number);
+    expired.sort(byD); soon.sort(byD);
+    const list = [...expired, ...soon].sort(byD);
+    return { typeRows, fee: ss.reduce((a, s) => a + s.fee, 0), expired: expired.length, soon: soon.length, noEnd, list, total: ss.length,
+      lists: { expired, soon, noEnd: noEndList } };
   }, [sites, siteStats, team, today0]);
   const typeColor = (k: string) => k.includes('SMART') ? '#7048e8' : k.includes('분담종합') ? '#5c7cfa' : k.includes('종합') ? C.primary : k.includes('분담일반') ? '#adb5bd' : k === '미분류' ? '#e9ecef' : '#ced4da';
   const won = (n: number) => n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()}만` : n.toLocaleString();
@@ -360,11 +372,20 @@ export default function OpsHomePage() {
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: 8, padding: '10px 18px', borderTop: `1px solid ${C.bg}`, fontSize: 12.5 }}>
-              <span style={{ fontWeight: 700, color: contract.expired ? RED : C.inkDim }}>만료 {contract.expired}곳</span>
-              <span style={{ color: C.line }}>|</span>
-              <span style={{ fontWeight: 700, color: contract.soon ? '#f08c00' : C.inkDim }}>90일 내 만료 {contract.soon}곳</span>
-              {contract.noEnd > 0 && <span style={{ ...sub, marginLeft: 'auto' }}>기간 미입력 {contract.noEnd}곳</span>}
+            <div style={{ display: 'flex', gap: 6, padding: '10px 18px', borderTop: `1px solid ${C.bg}`, flexWrap: 'wrap' }}>
+              {([
+                ['expired', '만료 현장', contract.expired, RED, '#fff5f5'],
+                ['soon', '90일 내 만료', contract.soon, '#e8590c', '#fff4e6'],
+                ['noEnd', '기간 미입력', contract.noEnd, C.inkDim, C.bg],
+              ] as const).map(([k, label, n, fg, bg]) => (
+                <button key={k} onClick={() => setCView(k)} disabled={!n} style={{
+                  height: 32, padding: '0 11px', borderRadius: 8, cursor: n ? 'pointer' : 'default', fontSize: 12.5, fontWeight: 700,
+                  border: `1px solid ${n ? fg + '33' : C.line}`, background: n ? bg : '#fff', color: n ? fg : C.inkFaint,
+                  display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                }}>
+                  {label} <b style={{ fontWeight: 800 }}>{n}</b>곳{n ? <span style={{ opacity: .6 }}>›</span> : null}
+                </button>
+              ))}
             </div>
             {contract.list.length === 0
               ? <div style={{ padding: '18px', textAlign: 'center', color: C.inkFaint, fontSize: 13, borderTop: `1px solid ${C.bg}` }}>90일 안에 만료되는 계약이 없어요</div>
@@ -383,7 +404,11 @@ export default function OpsHomePage() {
                   </div>
                 );
               })}
-            {contract.list.length > 6 && <div style={{ padding: '8px 18px 12px', ...sub }}>외 {contract.list.length - 6}곳</div>}
+            {contract.list.length > 6 && (
+              <button onClick={() => setCView(contract.expired ? 'expired' : 'soon')} style={{ width: '100%', height: 40, border: 'none', borderTop: `1px solid ${C.bg}`, background: 'none', color: C.primary, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+                외 {contract.list.length - 6}곳 모아보기 →
+              </button>
+            )}
           </div>
 
           <div style={card}>
@@ -438,6 +463,62 @@ export default function OpsHomePage() {
           </div>
         </div>
       </main>
+
+      {/* ── 계약 모아보기 ── */}
+      {cView && (() => {
+        const tabs = [['expired', '만료 현장', contract.expired, RED], ['soon', '90일 내 만료', contract.soon, '#e8590c'], ['noEnd', '기간 미입력', contract.noEnd, C.inkDim]] as const;
+        const rows = contract.lists[cView];
+        const fee = rows.reduce((a, s) => a + s.fee, 0);
+        const unitsN = rows.reduce((a, s) => a + (siteStats[s.id]?.total || 0), 0);
+        return (
+          <div onClick={() => setCView(null)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 720, maxHeight: '86vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 50px rgba(15,23,42,.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 20px 12px' }}>
+                <h3 style={{ ...h3, fontSize: 17 }}>계약 모아보기</h3>
+                <span style={sub}>{team === '전체' ? '전체 팀' : team}</span>
+                <button onClick={() => setCView(null)} aria-label="닫기" style={{ marginLeft: 'auto', width: 34, height: 34, borderRadius: 8, border: 'none', background: C.bg, cursor: 'pointer', fontSize: 16, color: C.inkDim }}>✕</button>
+              </div>
+              <div style={{ display: 'flex', gap: 4, padding: '0 20px 12px', borderBottom: `1px solid ${C.line}` }}>
+                {tabs.map(([k, label, n, fg]) => (
+                  <button key={k} onClick={() => setCView(k)} style={{
+                    height: 34, padding: '0 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
+                    background: cView === k ? C.ink : 'transparent', color: cView === k ? '#fff' : C.inkDim, fontWeight: cView === k ? 800 : 600,
+                  }}>{label} <span style={{ color: cView === k ? '#ffffffaa' : fg, fontWeight: 800 }}>{n}</span></button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 14, padding: '10px 20px', background: '#fafbfc', borderBottom: `1px solid ${C.line}`, fontSize: 12.5, color: C.inkDim }}>
+                <span>현장 <b style={{ color: C.ink }}>{rows.length}곳</b></span>
+                <span>승강기 <b style={{ color: C.ink }}>{unitsN}대</b></span>
+                {fee > 0 && <span>월 보수료 <b style={{ color: C.ink }}>{won(fee)}원</b></span>}
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {rows.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: C.inkFaint }}>해당 현장이 없어요</div>}
+                {rows.map(s => {
+                  const d = s.d;
+                  return (
+                    <div key={s.id} onClick={() => router.push('/team-sites')} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12, alignItems: 'center', padding: '11px 20px', borderBottom: `1px solid ${C.bg}`, cursor: 'pointer' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                        <div style={{ ...sub, marginTop: 2 }}>
+                          {s.team || '팀 미지정'} · {s.contractType || '미분류'} · {siteStats[s.id]?.total || 0}대
+                          {s.fee > 0 && ` · ${won(s.fee)}원`}
+                          {(s.contractStart || s.contractEnd) && ` · ${s.contractStart || '?'} ~ ${s.contractEnd || '?'}`}
+                        </div>
+                      </div>
+                      {d === null
+                        ? <span style={{ fontSize: 12, color: C.inkFaint, whiteSpace: 'nowrap' }}>기간 입력 →</span>
+                        : <span style={{ fontSize: 12, fontWeight: 800, padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap',
+                            background: d < 0 ? '#fff5f5' : d <= 30 ? '#fff4e6' : C.bg, color: d < 0 ? RED : d <= 30 ? '#e8590c' : C.inkDim }}>
+                            {d < 0 ? `${-d}일 지남` : d === 0 ? '오늘 만료' : `D-${d}`}
+                          </span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <TabBar active="home" />
     </div>
