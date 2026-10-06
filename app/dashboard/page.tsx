@@ -18,7 +18,7 @@ import TabBar from '@/components/TabBar';
 
 // ── 타입 ─────────────────────────────────────
 interface Me { uid: string; name: string; companyId: string; companyName: string; }
-interface Site { id: string; name: string; address: string; team: string; contractType: string; }
+interface Site { id: string; name: string; address: string; team: string; contractType: string; contractStart: string; contractEnd: string; fee: number; }
 interface Elev { id: string; siteId: string; }
 interface Unit { elevatorId: string; year: number; month: number; completed: boolean; completedBy: string; }
 interface Member { name: string; team: string; role: string; }
@@ -102,7 +102,7 @@ export default function OpsHomePage() {
 
       const [tRes, sRes, eRes, uRes, mRes] = await Promise.all([
         supabase.from('teams').select('name').eq('company_id', cid).order('name'),
-        fetchAll(() => supabase.from('sites').select('id, site_name, name, address, team, contract_type').eq('company_id', cid).order('id')),
+        fetchAll(() => supabase.from('sites').select('id, site_name, name, address, team, contract_type, contract_start, contract_end, maintenance_fee').eq('company_id', cid).order('id')),
         fetchAll(() => supabase.from('elevators').select('id, site_id').eq('company_id', cid).order('id')),
         fetchAll(() => supabase.from('site_inspection_units')
           .select('elevator_id, year, month, completed, completed_by')
@@ -114,6 +114,7 @@ export default function OpsHomePage() {
       setSites((sRes.data || []).map((s: any) => ({
         id: s.id, name: s.name || s.site_name || '', address: s.address || '',
         team: s.team || '', contractType: s.contract_type || '',
+        contractStart: s.contract_start || '', contractEnd: s.contract_end || '', fee: Number(s.maintenance_fee) || 0,
       })));
       setElevs((eRes.data || []).map((e: any) => ({ id: e.id, siteId: e.site_id })));
       setUnits((uRes.data || []).filter((r: any) => r.elevator_id).map((r: any) => ({
@@ -190,11 +191,28 @@ export default function OpsHomePage() {
   };
   const st = statOf(team);
 
-  const lowSites = useMemo(() => sites
-    .filter(s => inTeam(s.team) && siteStats[s.id]?.total && siteStats[s.id].done < siteStats[s.id].total)
-    .map(s => ({ ...s, ...siteStats[s.id], p: pct(siteStats[s.id].done, siteStats[s.id].total) }))
-    .sort((a, b) => a.p - b.p || b.total - a.total)
-    .slice(0, 7), [sites, siteStats, team]);
+  // ── 계약 ──
+  const DAY = 86400000;
+  const today0 = new Date(Y, M - 1, now.getDate()).getTime();
+  const daysLeft = (d: string) => { const t = new Date(d).getTime(); return isNaN(t) ? null : Math.round((t - today0) / DAY); };
+  const contract = useMemo(() => {
+    const ss = sites.filter(s => inTeam(s.team));
+    const types: Record<string, { n: number; fee: number; units: number }> = {};
+    ss.forEach(s => {
+      const k = s.contractType || '미분류';
+      types[k] ||= { n: 0, fee: 0, units: 0 };
+      types[k].n++; types[k].fee += s.fee; types[k].units += siteStats[s.id]?.total || 0;
+    });
+    const typeRows = Object.entries(types).sort((a, b) => b[1].n - a[1].n);
+    const withEnd = ss.map(s => ({ ...s, d: s.contractEnd ? daysLeft(s.contractEnd) : null }));
+    const expired = withEnd.filter(s => s.d !== null && s.d < 0);
+    const soon = withEnd.filter(s => s.d !== null && s.d >= 0 && s.d <= 90);
+    const noEnd = withEnd.filter(s => s.d === null).length;
+    const list = [...expired, ...soon].sort((a, b) => (a.d as number) - (b.d as number));
+    return { typeRows, fee: ss.reduce((a, s) => a + s.fee, 0), expired: expired.length, soon: soon.length, noEnd, list, total: ss.length };
+  }, [sites, siteStats, team, today0]);
+  const typeColor = (k: string) => k.includes('SMART') ? '#7048e8' : k.includes('분담종합') ? '#5c7cfa' : k.includes('종합') ? C.primary : k.includes('분담일반') ? '#adb5bd' : k === '미분류' ? '#e9ecef' : '#ced4da';
+  const won = (n: number) => n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()}만` : n.toLocaleString();
 
   const recentFaults = (faults || []).filter(f => inTeam(f.team || siteById[f.siteId]?.team || '')).slice(0, 6);
 
@@ -320,21 +338,52 @@ export default function OpsHomePage() {
           </div>
         )}
 
-        {/* 점검 미완료 / 최근 고장 */}
+        {/* 계약 / 최근 고장 */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 14, marginBottom: 14 }}>
           <div style={card}>
-            <div style={cardH}><h3 style={h3}>점검 미완료 현장</h3><span style={sub}>진행률 낮은 순</span>{more('/inspection', '점검 화면 →')}</div>
-            {lowSites.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: C.inkFaint }}>모든 현장 점검 완료</div>}
-            {lowSites.map(s => (
-              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 18px', borderBottom: `1px solid ${C.bg}` }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
-                  <div style={sub}>{s.team || '팀 미지정'} · {s.total}대 · {s.done}대 완료</div>
-                </div>
-                {bar(s.p, teamColor(s.team), 90, 6)}
-                <b style={{ width: 42, textAlign: 'right', color: s.p === 0 ? RED : C.ink }}>{s.p}%</b>
+            <div style={cardH}>
+              <h3 style={h3}>계약 현황</h3>
+              <span style={sub}>{contract.total}곳{contract.fee > 0 && ` · 월 보수료 ${won(contract.fee)}원`}</span>
+              {more('/team-sites', '팀별현장 →')}
+            </div>
+            <div style={{ padding: '16px 18px 6px' }}>
+              <div style={{ display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', gap: 2, marginBottom: 12, background: C.bg }}>
+                {contract.typeRows.map(([k, v]) => <div key={k} title={k} style={{ flex: v.n, background: typeColor(k) }} />)}
               </div>
-            ))}
+              {contract.typeRows.map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: 13 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: typeColor(k), flexShrink: 0 }} />
+                  <span style={{ color: k === '미분류' ? C.inkFaint : C.ink }}>{k}</span>
+                  <span style={{ ...sub, marginLeft: 6 }}>{v.units}대{v.fee > 0 && ` · ${won(v.fee)}원`}</span>
+                  <b style={{ marginLeft: 'auto' }}>{v.n}곳</b>
+                  <span style={{ ...sub, width: 40, textAlign: 'right' }}>{pct(v.n, contract.total)}%</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '10px 18px', borderTop: `1px solid ${C.bg}`, fontSize: 12.5 }}>
+              <span style={{ fontWeight: 700, color: contract.expired ? RED : C.inkDim }}>만료 {contract.expired}곳</span>
+              <span style={{ color: C.line }}>|</span>
+              <span style={{ fontWeight: 700, color: contract.soon ? '#f08c00' : C.inkDim }}>90일 내 만료 {contract.soon}곳</span>
+              {contract.noEnd > 0 && <span style={{ ...sub, marginLeft: 'auto' }}>기간 미입력 {contract.noEnd}곳</span>}
+            </div>
+            {contract.list.length === 0
+              ? <div style={{ padding: '18px', textAlign: 'center', color: C.inkFaint, fontSize: 13, borderTop: `1px solid ${C.bg}` }}>90일 안에 만료되는 계약이 없어요</div>
+              : contract.list.slice(0, 6).map(s => {
+                const d = s.d as number;
+                return (
+                  <div key={s.id} onClick={() => router.push('/team-sites')} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 18px', borderTop: `1px solid ${C.bg}`, cursor: 'pointer' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                      <div style={sub}>{s.team || '팀 미지정'} · {s.contractType || '미분류'} · ~{s.contractEnd}</div>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 800, padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap',
+                      background: d < 0 ? '#fff5f5' : d <= 30 ? '#fff4e6' : C.bg, color: d < 0 ? RED : d <= 30 ? '#e8590c' : C.inkDim }}>
+                      {d < 0 ? `${-d}일 지남` : d === 0 ? '오늘 만료' : `D-${d}`}
+                    </span>
+                  </div>
+                );
+              })}
+            {contract.list.length > 6 && <div style={{ padding: '8px 18px 12px', ...sub }}>외 {contract.list.length - 6}곳</div>}
           </div>
 
           <div style={card}>
@@ -356,7 +405,7 @@ export default function OpsHomePage() {
           </div>
         </div>
 
-        {/* 월별 / 계약 / 팀원 */}
+        {/* 월별 / 팀원 */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
           <div style={card}>
             <div style={cardH}><h3 style={h3}>월별 점검 완료율</h3><span style={sub}>최근 6개월</span></div>
@@ -366,23 +415,6 @@ export default function OpsHomePage() {
                   <b style={{ fontSize: 11.5, color: C.inkSoft }}>{m.p}%</b>
                   <div style={{ width: '100%', maxWidth: 34, height: Math.max(4, m.p * 1.1), borderRadius: '5px 5px 2px 2px', background: i === monthly.length - 1 ? C.primary : C.line }} />
                   <span style={{ fontSize: 11, color: C.inkFaint }}>{m.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={card}>
-            <div style={cardH}><h3 style={h3}>계약 현황</h3>{more('/team-sites', '팀별현장 →')}</div>
-            <div style={{ padding: '18px' }}>
-              <div style={{ display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', gap: 2, marginBottom: 14, background: C.bg }}>
-                <div style={{ flex: st.full || 0.0001, background: C.primary }} />
-                <div style={{ flex: gen || 0.0001, background: C.line }} />
-              </div>
-              {[['종합계약', st.full, C.primary], ['일반계약', gen, C.line]].map(([k, v, c]) => (
-                <div key={k as string} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: 13 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: c as string }} />{k}
-                  <b style={{ marginLeft: 'auto' }}>{v as number}곳</b>
-                  <span style={{ ...sub, width: 44, textAlign: 'right' }}>{pct(v as number, st.sites)}%</span>
                 </div>
               ))}
             </div>
