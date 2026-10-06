@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +57,7 @@ export default function InspectPage() {
   const [needsMigration, setNeedsMigration] = useState(false);
   const [printMode, setPrintMode] = useState<'site' | 'elev'>('site');
   const [condFilter, setCondFilter] = useState<'all' | 'open' | 'done'>('open');
+  const keepOpenRef = useRef<Set<string>>(new Set());
   const [showAllUnits, setShowAllUnits] = useState(false);
   // 동별 호기 번호 (현장 전체 일련번호 hogi_no → 동 안에서 1,2,3…)
   const [dongNo, setDongNo] = useState<Record<string, number>>({});
@@ -867,8 +868,11 @@ export default function InspectPage() {
     .filter((r) => r.fails.length > 0);
   const totalItems = condRows.reduce((a, r) => a + r.fails.length, 0);
   const doneItems = condRows.reduce((a, r) => a + r.done, 0);
+  // 미처리 탭: 한 번 보인 호기는 다 체크해도 사라지지 않고 유지 (탭을 다시 누르면 정리)
+  if (condFilter === 'open') condRows.forEach((r) => { if (r.done < r.fails.length) keepOpenRef.current.add(String(r.elev.id)); });
   const shownCond = condRows.filter((r) =>
-    condFilter === 'all' ? true : condFilter === 'done' ? r.done === r.fails.length : r.done < r.fails.length);
+    condFilter === 'all' ? true : condFilter === 'done' ? r.done === r.fails.length
+    : r.done < r.fails.length || keepOpenRef.current.has(String(r.elev.id)));
   const dirtyCount = Object.keys(dirty).length;
   const saveAllDirty = async () => {
     for (const r of condRows) if (r.src?.id && dirty[r.src.id]) await saveRowChecks(r.src.id, r.fails.length);
@@ -1219,7 +1223,7 @@ export default function InspectPage() {
                   {/* 필터 */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
                     {([['open', '미처리', condRows.filter((r) => r.done < r.fails.length).length], ['done', '처리완료', condRows.filter((r) => r.done === r.fails.length).length], ['all', '전체', condRows.length]] as const).map(([k, label, n]) => (
-                      <button key={k} onClick={() => setCondFilter(k)} style={{
+                      <button key={k} onClick={() => { keepOpenRef.current = new Set(); setCondFilter(k); }} style={{
                         height: 32, padding: '0 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
                         background: condFilter === k ? C.line : 'transparent', color: condFilter === k ? C.ink : C.inkDim, fontWeight: condFilter === k ? 800 : 600,
                       }}>{label} <span style={{ color: C.inkFaint, fontWeight: 500 }}>{n}</span></button>
