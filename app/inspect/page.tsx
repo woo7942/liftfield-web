@@ -150,18 +150,28 @@ export default function InspectPage() {
         };
         setUserInfo(info);
 
-        const { data: allSites, error: sitesError } = await supabase
-          .from('sites')
-          .select('id, site_name, name, source, team')
-          .eq('company_id', userData.company_id)
-          .eq('source', 'team');
+        // ⚠ 기존: .eq('source','team') 로 팀별현장에서 등록한 현장만 가져와서
+        //   관리자/다른 경로로 등록된 같은 주소 현장(예: 에코빌 101·103동)이 검색에서 빠졌음.
+        //   + Supabase 기본 1,000행 제한 → 끝까지 나눠서 조회
+        const allSites: any[] = [];
+        for (let fromRow = 0; ; fromRow += 1000) {
+          const { data: page, error: sitesError } = await supabase
+            .from('sites')
+            .select('id, site_name, name, address, source, team')
+            .eq('company_id', userData.company_id)
+            .order('id')
+            .range(fromRow, fromRow + 999);
+          if (sitesError) throw sitesError;
+          allSites.push(...(page || []));
+          if (!page || page.length < 1000) break;
+        }
 
-        if (sitesError) throw sitesError;
-
-        const mapped = (allSites || []).map((s: any) => ({
+        const mapped = allSites.map((s: any) => ({
           id: s.id,
           siteName: s.name || s.site_name,
           name: s.name,
+          altName: s.site_name,
+          address: s.address || '',
           source: s.source,
           teamName: s.team,
         }));
@@ -805,11 +815,17 @@ export default function InspectPage() {
     setTimeout(() => window.print(), 250);
   };
 
+  // 공백 무시 + 현장명(name/site_name)·주소 모두에서 검색 ('에코빌103동' = '에코빌 103동')
+  const norm = (v: any) => String(v || '').toLowerCase().replace(/\s+/g, '');
   const filteredSites =
     siteSearch.trim().length >= 1
       ? sites
-          .filter((s: any) => (s.siteName || s.name || '').toLowerCase().includes(siteSearch.toLowerCase()))
-          .slice(0, 20)
+          .filter((s: any) => {
+            const q = norm(siteSearch);
+            return [s.siteName, s.name, s.altName, s.address].some((v) => norm(v).includes(q));
+          })
+          .sort((a: any, b: any) => String(a.siteName || '').localeCompare(String(b.siteName || ''), 'ko', { numeric: true }))
+          .slice(0, 30)
       : sites.slice(0, 20);
 
   const sortedElevators = [...elevators].sort(
@@ -1152,8 +1168,12 @@ export default function InspectPage() {
                       width: '100%', textAlign: 'left', padding: '13px 16px', background: 'none', border: 'none', borderTop: i ? `1px solid ${C.bg}` : 'none',
                       fontSize: 14, fontWeight: 600, color: C.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
                     }}>
-                      <span style={{ color: C.inkFaint }}>{Icon.building(15)}</span>{s.siteName || s.name}
-                      {s.teamName && <span style={{ ...sub, marginLeft: 'auto' }}>{s.teamName}</span>}
+                      <span style={{ color: C.inkFaint }}>{Icon.building(15)}</span>
+                      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <span>{s.siteName || s.name}</span>
+                        {s.address && <span style={{ ...sub, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.address}</span>}
+                      </span>
+                      {s.teamName && <span style={{ ...sub, marginLeft: 'auto', flexShrink: 0 }}>{s.teamName}</span>}
                     </button>
                   ))}
                 </div>
