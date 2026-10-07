@@ -17,6 +17,7 @@ import ErrorCodeList from '@/components/fault/ErrorCodeList';
 import { FAULT_SPEECH, playVoice, VOICE_FILES, unlockVoices, unlockSpeech } from '@/components/FaultAlerts';
 import MakerModelPicker, { normalizeMaker } from '@/components/fault/MakerModelPicker';
 import FaultInsight from '@/components/fault/FaultInsight';
+import { parseCodes } from '@/components/fault/faultAnalysis';
 import FaultResultForm, { emptyResult, composeResult, isWaitingParts, type FaultResultValue } from '@/components/fault/FaultResultForm';
 
 
@@ -490,7 +491,8 @@ export default function FaultPage() {
     try {
       const { error } = await supabase.from('fault_reports').update({
         fault_cause: composed.fault_cause, fault_action: composed.fault_action, fault_note: composed.fault_note,
-        error_codes: (errorCodesInput || []).map(c => c.trim()).filter(Boolean),
+        // 한 칸에 '71,72' / '71 72' / '에러 71.72' 처럼 써도 코드별로 나눠 저장
+        error_codes: parseCodes(errorCodesInput || []),
         maker: makerModel.maker || null,
         model: makerModel.model.trim() || null,
 

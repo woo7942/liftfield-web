@@ -19,6 +19,31 @@ export interface FaultRow {
 export type FaultScope = 'all' | 'mine';
 
 export const normCode = (c: string) => (c || '').trim().toUpperCase().replace(/\s+/g, '');
+
+/**
+ * 자유 입력 에러코드 → 코드 배열
+ *  현장 입력이 제각각이라 한 칸에 여러 코드를 써도 다 뽑아냄
+ *   "71,72" / "71 72" / "71.72" / "71/72" / "71-72" / "71~72" → [71, 72]
+ *   "에러 1653.1657" / "에러코드71 72발생" → 한글은 구분자로 취급
+ *   "E35", "F3H", "BA" 같은 영문 코드는 그대로 유지, "ERR"/"ERROR"/"CODE" 접두어는 제거
+ */
+const CODE_STOP = new Set(['ERR', 'ERROR', 'CODE', 'NO', 'E', 'H', 'OK', 'ON', 'OFF']);
+export function parseCodes(raw: string | string[] | null | undefined): string[] {
+  const src = Array.isArray(raw) ? raw.join(' ') : (raw || '');
+  const out: string[] = [];
+  src
+    .toUpperCase()
+    .replace(/[\uAC00-\uD7A3\u3131-\u318E]+/g, ' ')        // 한글 → 구분자
+    .replace(/\b(ERROR|ERR|CODE|NO)[\s.:#-]*(?=[0-9A-Z])/g, ' ') // 접두어 제거 (ERR71 → 71)
+    .replace(/\bE-(?=\d)/g, 'E')                             // E-35 → E35
+    .split(/[^0-9A-Z]+/)                                     // 쉼표·공백·점·슬래시·하이픈 등 전부 구분자
+    .forEach((t) => {
+      if (!t || CODE_STOP.has(t)) return;
+      // 숫자가 들어있거나, 16진 2자리(+H) 코드(BA, DB, F3H…)만 코드로 인정 → 영어 단어 오인 방지
+      if (/\d/.test(t) || /^[0-9A-F]{2}H?$/.test(t)) out.push(t);
+    });
+  return Array.from(new Set(out));
+}
 const textKey = (t: string) => t.replace(/\(부품 대기\)/g, '').replace(/[\s.,·~!\-]/g, '').toLowerCase();
 export const cleanAction = (t?: string | null) => (t || '').replace(/\s*\(부품 대기\)$/, '').trim();
 
@@ -42,8 +67,10 @@ export function topTexts(rows: FaultRow[], field: 'fault_cause' | 'fault_action'
  */
 export async function fetchCodedFaults(companyId: string, scope: FaultScope = 'all'): Promise<FaultRow[]> {
   if (scope === 'all') {
-    const { data, error } = await supabase.rpc('fault_records_shared', { p_codes: null, p_limit: 6000 });
-    if (!error && data) return (data as FaultRow[]).filter((r) => (r.error_codes || []).length > 0);
+    const { data, error } = await (supabase as any).rpc('fault_records_shared', { p_codes: null, p_limit: 6000 });
+    if (!error && data) return (data as unknown as FaultRow[])
+      .map((r) => ({ ...r, error_codes: parseCodes(r.error_codes) }))
+      .filter((r) => r.error_codes.length > 0);
     console.warn('[에러분석] 전체 회사 기록 실패 → 우리 회사 기록으로 대체:', error?.message);
   }
   const { data } = await supabase.from('fault_reports')
@@ -52,9 +79,10 @@ export async function fetchCodedFaults(companyId: string, scope: FaultScope = 'a
     .not('fault_cause', 'is', null)
     .order('created_at', { ascending: false })
     .limit(3000);
-  return ((data || []) as FaultRow[])
-    .filter((r) => (r.error_codes || []).length > 0)
-    .map((r) => ({ ...r, mine: true, company_key: 'mine' }));
+  return ((data || []) as unknown as FaultRow[])
+    .map((r) => ({ ...r, error_codes: parseCodes(r.error_codes) }))
+    .filter((r) => r.error_codes.length > 0)
+    .map((r): FaultRow => ({ ...r, mine: true, company_key: 'mine' }));
 }
 
 /** 기록 묶음의 출처 — 우리 n건 · 다른 회사 m곳 k건 */
@@ -74,8 +102,8 @@ export const unitLabel = (r: { mine?: boolean; site_name?: string | null; hogi_n
   r.mine === false ? '다른 회사 현장' : `${r.site_name || ''} ${r.hogi_no || ''}`.trim();
 
 export function analyze(rows: FaultRow[], opt: { codes: string[]; maker?: string; model?: string; excludeId?: string; siteId?: string; hogiNo?: string; strict?: boolean }) {
-  const wanted = Array.from(new Set(opt.codes.map(normCode).filter(Boolean)));
-  const hit = rows.filter((r) => r.id !== opt.excludeId && (wanted.length === 0 || (r.error_codes || []).some((c) => wanted.includes(normCode(c)))));
+  const wanted = parseCodes(opt.codes);
+  const hit = rows.filter((r) => r.id !== opt.excludeId && (wanted.length === 0 || parseCodes(r.error_codes).some((c) => wanted.includes(c))));
   const mk = opt.maker || '';
   const md = normalizeModel(opt.model);
   const sameMaker = (r: FaultRow) => !!mk && normalizeMaker(r.maker) === mk;

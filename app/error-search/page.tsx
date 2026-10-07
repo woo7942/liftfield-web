@@ -18,7 +18,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import TabBar from '@/components/TabBar';
 import { MAKERS, normalizeMaker, normalizeModel } from '@/components/fault/MakerModelPicker';
-import { analyze, fetchCodedFaults, normCode, shortDate, cleanAction, topTexts, sourceMix, sourceText, unitLabel, type FaultRow, type FaultScope } from '@/components/fault/faultAnalysis';
+import { analyze, fetchCodedFaults, normCode, parseCodes, shortDate, cleanAction, topTexts, sourceMix, sourceText, type FaultRow, type FaultScope } from '@/components/fault/faultAnalysis';
 
 interface BookRow {
   id: string; maker: string; model: string | null; code: string; code_norm: string;
@@ -35,8 +35,14 @@ const mergeMaker = (m?: string | null) => { const n = normalizeMaker(m); return 
 const LS_KEY = 'lf.errsearch.v2';
 const modelKey = (m?: string | null) => (m || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const sameModel = (a?: string | null, b?: string | null) => { const x = modelKey(a), y = modelKey(b); return !!x && !!y && (x.includes(y) || y.includes(x)); };
-const isCodeLike = (s: string) => /^[A-Za-z0-9\-_.,\s]+$/.test(s) && /[A-Za-z0-9]/.test(s);
-const splitCodes = (s: string) => s.split(/[,\s]+/).map(normCode).filter(Boolean);
+// 코드 입력으로 볼지: '에러/코드/번/발생' 같은 말을 빼고 남은 게 숫자·영문·구분자뿐이면 코드
+//   '71,72' '71 72' '71.72' '에러 1653.1657' '에러코드 71번 72번' → 코드 / '문닫힘 불량' → 증상 검색
+const CODE_WORDS = /(에러코드|에러|에럼|오류|코드|번|발생|뜨고|뜨며|뜸|및|와|과|랑|하고)/g;
+const isCodeLike = (s: string) => {
+  const rest = s.replace(CODE_WORDS, ' ');
+  return !/[\uAC00-\uD7A3]/.test(rest) && parseCodes(s).length > 0;
+};
+const splitCodes = (s: string) => parseCodes(s);
 // 표기 차이 흡수: F3 ↔ F3H, 035 ↔ 35, E35 ↔ 35
 const variants = (c: string) => Array.from(new Set([c, c + 'H', c.replace(/^0+(?=.)/, ''), c.replace(/^E-?/, '')])).filter(Boolean);
 // 매뉴얼의 설명용 줄(예: "4n · 40번대 에러는...")은 검색 결과에서 제외
