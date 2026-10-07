@@ -14,6 +14,36 @@ const getItems = (xml: string) =>
 const fmtYmd = (d: string) =>
   d ? (d.includes('-') ? d : `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`) : '';
 
+// 'YYYYMMDD' / 'YYYY-MM-DD' / ISO 모두 Date로 (new Date('20250301')은 Invalid Date라 직접 파싱)
+const parseYmd = (v: any): Date | null => {
+  if (!v) return null;
+  const s = String(v).trim();
+  const m = s.replace(/[^0-9]/g, '').match(/^(\d{4})(\d{2})(\d{2})/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+};
+const ymdKey = (v: any) => String(v || '').replace(/[^0-9]/g, '').slice(0, 8);
+
+// 다음 검사기한 계산: 국가 캐시(exam_date)는 갱신이 늦으므로
+// 우리가 저장한 최신 검사이력(safety_inspections)과 비교해 더 최근 것을 기준으로 함.
+// 최신 이력에 유효기간 종료일(applc_en_dt)이 있으면 그 날짜가 실제 기한.
+const calcDueDate = (cacheExam: any, installDate: any, latest?: { de: string; en: string } | null): Date | null => {
+  const cacheBase = parseYmd(cacheExam);
+  const histBase = latest ? parseYmd(latest.de) : null;
+  if (histBase && (!cacheBase || histBase.getTime() >= cacheBase.getTime())) {
+    const en = parseYmd(latest!.en);
+    if (en && en.getTime() > histBase.getTime()) return en;
+    const n = new Date(histBase); n.setFullYear(n.getFullYear() + 1); return n;
+  }
+  const base = cacheBase || parseYmd(installDate);
+  if (!base) return null;
+  const n = new Date(base); n.setFullYear(n.getFullYear() + 1); return n;
+};
+
 type ItemCheck = { done: boolean; note: string; at?: string };
 
 export default function InspectPage() {
@@ -49,6 +79,9 @@ export default function InspectPage() {
 
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewList, setOverviewList] = useState<any[]>([]);
+  const [overviewVerifying, setOverviewVerifying] = useState('');
+  // 기한초과로 뜬 호기는 세션당 한 번 공단 API로 최신 이력을 다시 확인
+  const verifiedRef = useRef<Set<string>>(new Set());
 
   // ── 지적항목 체크/비고 ──
   const [checks, setChecks] = useState<Record<string, Record<string, ItemCheck>>>({});
@@ -78,7 +111,7 @@ export default function InspectPage() {
 
   // ── D-day 정보: 급한 정도에 따라 색상을 구분 (팔레트 C 기준) ──
   function getDdayInfo(elev: any) {
-    const { examDate, installDate, ncStatus } = elev;
+    const { examDate, installDate, ncStatus, dueDate } = elev;
     if (ncStatus && !ncStatus.includes('운행중')) {
       return {
         label: ncStatus,
@@ -86,13 +119,10 @@ export default function InspectPage() {
         urgent: false,
       };
     }
-    const baseStr = examDate || installDate;
-    if (!baseStr) return null;
-    const base = new Date(baseStr);
-    if (isNaN(base.getTime())) return null;
-    const next = new Date(base);
-    next.setFullYear(next.getFullYear() + 1);
+    const next: Date | null = dueDate ? new Date(dueDate) : calcDueDate(examDate, installDate, null);
+    if (!next || isNaN(next.getTime())) return null;
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const diffDays = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
     if (diffDays < 0)
@@ -210,10 +240,32 @@ export default function InspectPage() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // 현장 화면에서 돌아올 때마다 다시 계산 (방금 조회/새로고침한 검사이력 반영)
   useEffect(() => {
-    if (!userInfo || sites.length === 0) return;
+    if (!userInfo || sites.length === 0 || selectedSite) return;
     loadOverview();
-  }, [userInfo, sites]);
+  }, [userInfo, sites, selectedSite]);
+
+  // 호기별 최신 검사이력 (safety_inspections) — URL 길이/1000행 제한 때문에 나눠서 조회
+  const fetchLatestInspections = async (elevIds: string[]) => {
+    const map: Record<string, { de: string; en: string }> = {};
+    for (let i = 0; i < elevIds.length; i += 150) {
+      const { data: insRows } = await supabase
+        .from('safety_inspections')
+        .select('elevator_id, inspct_de, applc_en_dt')
+        .eq('company_id', userInfo!.companyId)
+        .in('elevator_id', elevIds.slice(i, i + 150))
+        .order('inspct_de', { ascending: false })
+        .limit(1000);
+      (insRows || []).forEach((r: any) => {
+        const de = ymdKey(r.inspct_de);
+        if (!de) return;
+        const cur = map[r.elevator_id];
+        if (!cur || de > cur.de) map[r.elevator_id] = { de, en: ymdKey(r.applc_en_dt) };
+      });
+    }
+    return map;
+  };
 
   const loadOverview = async () => {
     if (!userInfo) return;
@@ -247,31 +299,58 @@ export default function InspectPage() {
       });
 
       applyDongNo(allElevs || []);
-      const rows = (allElevs || [])
-        .map((e: any) => {
-          const c = e.elevator_no ? cacheMap[e.elevator_no] : null;
-          const elev = {
-            id: e.id,
-            hogiNo: e.hogi_no,
-            elevatorNo: e.elevator_no,
-            dong: e.dong,
-            installationPlace: e.installation_place,
-            examDate: c?.exam_date || null,
-            installDate: c?.install_date || null,
-            ncStatus: c?.status || null,
-          };
-          const dday = getDdayInfo(elev);
-          const site = siteMap[e.site_id];
-          return dday && dday.urgent && site ? { elev, site, dday } : null;
-        })
-        .filter(Boolean) as any[];
 
-      rows.sort((a, b) => (a.dday.diffDays ?? 9999) - (b.dday.diffDays ?? 9999));
+      const build = (latestMap: Record<string, { de: string; en: string }>) => {
+        const rows = (allElevs || [])
+          .map((e: any) => {
+            const c = e.elevator_no ? cacheMap[e.elevator_no] : null;
+            const latest = latestMap[e.id] || null;
+            const due = calcDueDate(c?.exam_date, c?.install_date, latest);
+            const elev = {
+              id: e.id,
+              hogiNo: e.hogi_no,
+              elevatorNo: e.elevator_no,
+              dong: e.dong,
+              installationPlace: e.installation_place,
+              examDate: latest?.de || c?.exam_date || null,
+              installDate: c?.install_date || null,
+              ncStatus: c?.status || null,
+              dueDate: due ? due.toISOString() : null,
+            };
+            const dday = getDdayInfo(elev);
+            const site = siteMap[e.site_id];
+            return dday && dday.urgent && site ? { elev, site, dday } : null;
+          })
+          .filter(Boolean) as any[];
+        rows.sort((a, b) => (a.dday.diffDays ?? 9999) - (b.dday.diffDays ?? 9999));
+        return rows;
+      };
+
+      const elevIds = (allElevs || []).map((e: any) => e.id);
+      let latestMap = await fetchLatestInspections(elevIds);
+      let rows = build(latestMap);
       setOverviewList(rows);
+      setOverviewLoading(false);
+
+      // ── 아직 '기한초과'로 남은 호기만 공단 API로 최신 이력 재확인 → 저장 → 다시 계산 ──
+      const toVerify = rows
+        .filter((r: any) => (r.dday.diffDays ?? 0) < 0 && r.elev.elevatorNo && !verifiedRef.current.has(String(r.elev.id)))
+        .slice(0, 40);
+      if (toVerify.length > 0) {
+        for (let i = 0; i < toVerify.length; i++) {
+          setOverviewVerifying(`최신 검사이력 확인 중 ${i + 1}/${toVerify.length}`);
+          verifiedRef.current.add(String(toVerify[i].elev.id));
+          await fetchAndSaveForReport(toVerify[i].elev, toVerify[i].site);
+        }
+        latestMap = await fetchLatestInspections(elevIds);
+        rows = build(latestMap);
+        setOverviewList(rows);
+      }
     } catch (e) {
       console.error('임박 검사 알림 로드 실패', e);
     } finally {
       setOverviewLoading(false);
+      setOverviewVerifying('');
     }
   };
 
@@ -1183,6 +1262,7 @@ export default function InspectPage() {
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
                   <b style={{ fontSize: 15 }}>검사 예정</b>
                   <span style={sub}>90일 이내 · {overviewList.length}대</span>
+                  {overviewVerifying && <span style={{ ...sub, marginLeft: 'auto' }}>{overviewVerifying}</span>}
                 </div>
                 <div style={{ ...card, overflow: 'hidden' }}>
                   {overviewLoading && <div style={{ padding: 28, textAlign: 'center', color: C.inkFaint, fontSize: 13 }}>불러오는 중...</div>}
