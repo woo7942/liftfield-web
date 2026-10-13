@@ -167,24 +167,26 @@ export default function InspectionPage() {
   }, [userInfo, isAdmin]);
 
   // ── 승강기(호기) 목록 로드: elevators 테이블에서 실제 동/호기 정보 ──
-  useEffect(() => {
-    if (!userInfo) return;
-    const loadElevators = async () => {
-      const { data, error } = await supabase
-        .from('elevators')
-        .select('id, site_id, dong, hogi_no, installation_place')
-        .eq('company_id', userInfo.companyId);
-      if (error) { console.error(error); return; }
-      setElevators((data || []).map((e: any) => ({
-        id: e.id,
-        siteId: e.site_id,
-        dong: e.dong || '동 미지정',
-        hogiNo: e.hogi_no || '',
-        installationPlace: e.installation_place || '',
-      })));
-    };
-    loadElevators();
-  }, [userInfo]);
+useEffect(() => {
+  if (!userInfo || sites.length === 0) return;   // ✅ sites가 로드된 뒤에 실행
+  const loadElevators = async () => {
+    const siteIds = sites.map(s => s.id);
+    const { data, error } = await supabase
+      .from('elevators')
+      .select('id, site_id, dong, hogi_no, installation_place')
+      .in('site_id', siteIds);   // ✅ company_id 대신 site_id 기준으로 조회 (누락 방지)
+    if (error) { console.error(error); return; }
+    setElevators((data || []).map((e: any) => ({
+      id: e.id,
+      siteId: e.site_id,
+      dong: e.dong || '동 미지정',
+      hogiNo: e.hogi_no || '',
+      installationPlace: e.installation_place || '',
+    })));
+  };
+  loadElevators();
+}, [userInfo, sites]);   // ✅ sites가 바뀔 때도 다시 불러오도록 의존성 추가
+
 
   const filteredSites = isAdmin && filterTeam !== '전체'
     ? sites.filter(s => s.team === filterTeam)
