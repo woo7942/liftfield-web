@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { C, Icon } from '@/lib/theme';
 import TabBar from '@/components/TabBar';
+import InspectionSubtabs from '@/components/inspection-calendar/InspectionSubtabs';
 
 interface UserInfo {
   uid: string;
@@ -718,6 +719,7 @@ useEffect(() => {
       </div>
 
       <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px' }} className="space-y-4">
+        <InspectionSubtabs active="inspection" year={year} month={month} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
             <div
